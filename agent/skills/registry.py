@@ -20,6 +20,7 @@ class SkillDefinition:
     description: str
     parameters: dict                    # JSON Schema for tool input
     requires_integration: Optional[str] # e.g., "jira", "github"
+    supports_raw: bool = False          # Whether --raw debug output is supported
     triggers: list[str] = field(default_factory=list)
     worker_module: str = ""             # Python module path for the worker
 
@@ -61,6 +62,7 @@ class SkillRegistry:
                 description=config["description"],
                 parameters=config.get("parameters", {}),
                 requires_integration=config.get("requires_integration"),
+                supports_raw=config.get("supports_raw", False),
                 triggers=config.get("triggers", []),
                 worker_module=config.get(
                     "worker_module",

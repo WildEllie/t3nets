@@ -15,6 +15,7 @@ triggers:
   - "sprint health"
 
 requires_integration: jira
+supports_raw: true
 
 parameters:
   type: object

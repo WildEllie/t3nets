@@ -40,6 +40,25 @@
             font-weight: 600;
         }
 
+        .header-right {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .clear-btn {
+            background: none;
+            border: 1px solid #333;
+            color: #888;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .clear-btn:hover { border-color: #555; color: #ccc; }
+
         #chat-container {
             flex: 1;
             overflow-y: auto;
@@ -75,6 +94,12 @@
 
         .message.assistant strong { color: #fff; }
 
+        .message.assistant.raw-message {
+            max-width: 95%;
+            background: #0d1117;
+            border-color: #f59e0b33;
+        }
+
         .message.error {
             align-self: center;
             background: #7f1d1d;
@@ -83,11 +108,41 @@
             font-size: 13px;
         }
 
-        .message .tokens {
+        .message .meta {
             margin-top: 8px;
             font-size: 11px;
-            color: #666;
+            color: #555;
+            display: flex;
+            gap: 8px;
+            align-items: center;
         }
+
+        .route-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .route-badge.rule { background: #065f46; color: #6ee7b7; }
+        .route-badge.ai { background: #1e3a5f; color: #7dd3fc; }
+        .route-badge.conversational { background: #3f3f46; color: #a1a1aa; }
+        .route-badge.raw { background: #78350f; color: #fbbf24; }
+
+        /* JSON syntax highlighting for raw output */
+        .json-display {
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .json-display .json-key { color: #7dd3fc; }
+        .json-display .json-string { color: #6ee7b7; }
+        .json-display .json-number { color: #fbbf24; }
+        .json-display .json-bool { color: #f472b6; }
+        .json-display .json-null { color: #a1a1aa; }
+        .json-display .json-bracket { color: #888; }
 
         .thinking {
             align-self: flex-start;
@@ -192,22 +247,26 @@
     <header>
         <h1>T3nets</h1>
         <span class="badge">LOCAL</span>
+        <div class="header-right">
+            <button class="clear-btn" onclick="clearChat()">Clear Chat</button>
+        </div>
     </header>
 
     <div id="chat-container">
         <div class="welcome">
             <h2>👋 Hey! I'm your T3nets agent.</h2>
             <p>Ask me about your sprint, blockers, or anything your connected tools can tell me.</p>
+            <p style="color:#555; font-size:12px; margin-top:8px;">Tip: append <code style="background:#1e1e1e;padding:2px 6px;border-radius:3px;color:#fbbf24;">--raw</code> to see raw skill output</p>
             <div class="suggestions">
                 <div class="suggestion" onclick="sendSuggestion(this)">What's the sprint status?</div>
                 <div class="suggestion" onclick="sendSuggestion(this)">What's blocked?</div>
-                <div class="suggestion" onclick="sendSuggestion(this)">Are we on track?</div>
+                <div class="suggestion" onclick="sendSuggestion(this)">Sprint status --raw</div>
             </div>
         </div>
     </div>
 
     <div id="input-container">
-        <textarea id="message-input" placeholder="Ask me anything..." rows="1"></textarea>
+        <textarea id="message-input" placeholder="Ask me anything... (append --raw for debug output)" rows="1"></textarea>
         <button id="send-btn" onclick="sendMessage()">Send</button>
     </div>
 
@@ -217,13 +276,11 @@
         const sendBtn = document.getElementById('send-btn');
         let conversationId = 'dashboard-' + Date.now();
 
-        // Auto-resize textarea
         input.addEventListener('input', function() {
             this.style.height = 'auto';
             this.style.height = Math.min(this.scrollHeight, 120) + 'px';
         });
 
-        // Enter to send, Shift+Enter for newline
         input.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -236,27 +293,55 @@
             sendMessage();
         }
 
+        async function clearChat() {
+            try {
+                await fetch('/api/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ conversation_id: conversationId }),
+                });
+            } catch (e) {}
+            conversationId = 'dashboard-' + Date.now();
+            chatContainer.innerHTML = `
+                <div class="welcome">
+                    <h2>👋 Chat cleared. Fresh start!</h2>
+                    <div class="suggestions">
+                        <div class="suggestion" onclick="sendSuggestion(this)">What's the sprint status?</div>
+                        <div class="suggestion" onclick="sendSuggestion(this)">What's blocked?</div>
+                        <div class="suggestion" onclick="sendSuggestion(this)">Sprint status --raw</div>
+                    </div>
+                </div>`;
+        }
+
+        function syntaxHighlightJson(json) {
+            // Highlight JSON for display
+            return json
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"([^"]+)"(?=\s*:)/g, '<span class="json-key">"$1"</span>')
+                .replace(/:\s*"([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+                .replace(/:\s*(\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
+                .replace(/:\s*(true|false)/g, ': <span class="json-bool">$1</span>')
+                .replace(/:\s*(null)/g, ': <span class="json-null">$1</span>')
+                .replace(/([{}\[\]])/g, '<span class="json-bracket">$1</span>');
+        }
+
         async function sendMessage() {
             const text = input.value.trim();
             if (!text) return;
 
-            // Clear welcome message
             const welcome = chatContainer.querySelector('.welcome');
             if (welcome) welcome.remove();
 
-            // Show user message
             addMessage(text, 'user');
             input.value = '';
             input.style.height = 'auto';
 
-            // Show thinking indicator
             const thinking = document.createElement('div');
             thinking.className = 'thinking';
             thinking.innerHTML = 'Thinking<span class="dots"></span>';
             chatContainer.appendChild(thinking);
             chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            // Disable input
             sendBtn.disabled = true;
             input.disabled = true;
 
@@ -276,7 +361,7 @@
                 if (data.error) {
                     addMessage('Error: ' + data.error, 'error');
                 } else {
-                    addMessage(data.text, 'assistant', data.tokens);
+                    addMessage(data.text, 'assistant', data.tokens, data.route);
                 }
             } catch (err) {
                 thinking.remove();
@@ -288,15 +373,48 @@
             input.focus();
         }
 
-        function addMessage(text, type, tokens) {
+        function addMessage(text, type, tokens, route) {
             const div = document.createElement('div');
             div.className = 'message ' + type;
-            div.textContent = text;
 
-            if (tokens && type === 'assistant') {
+            // Raw JSON — use syntax highlighting
+            if (route === 'raw') {
+                div.classList.add('raw-message');
+                const jsonDiv = document.createElement('div');
+                jsonDiv.className = 'json-display';
+                jsonDiv.innerHTML = syntaxHighlightJson(text);
+                div.appendChild(jsonDiv);
+            } else {
+                div.textContent = text;
+            }
+
+            if (type === 'assistant' && (tokens !== undefined || route)) {
                 const meta = document.createElement('div');
-                meta.className = 'tokens';
-                meta.textContent = `${tokens.toLocaleString()} tokens`;
+                meta.className = 'meta';
+
+                if (route) {
+                    const badge = document.createElement('span');
+                    badge.className = 'route-badge ' + route;
+                    const labels = {
+                        rule: 'rule-based',
+                        ai: 'ai-routed',
+                        conversational: 'chat',
+                        raw: 'raw debug',
+                    };
+                    badge.textContent = labels[route] || route;
+                    meta.appendChild(badge);
+                }
+
+                if (tokens) {
+                    const tok = document.createElement('span');
+                    tok.textContent = tokens.toLocaleString() + ' tokens';
+                    meta.appendChild(tok);
+                } else if (route === 'raw') {
+                    const tok = document.createElement('span');
+                    tok.textContent = '0 tokens (no AI)';
+                    meta.appendChild(tok);
+                }
+
                 div.appendChild(meta);
             }
 
