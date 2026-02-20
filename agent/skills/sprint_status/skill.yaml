@@ -1,0 +1,38 @@
+name: sprint_status
+description: >
+  Get current sprint status, progress, blockers, and risk assessment
+  from Jira. Use when the user asks about sprint health, release
+  readiness, what's blocked, ticket status, or whether the team is
+  on track to finish the sprint.
+
+triggers:
+  - "sprint status"
+  - "are we on track"
+  - "what's blocked"
+  - "release status"
+  - "what's left in the sprint"
+  - "show me the sprint"
+  - "sprint health"
+
+requires_integration: jira
+
+parameters:
+  type: object
+  properties:
+    action:
+      type: string
+      enum:
+        - status
+        - blockers
+        - mine
+      description: >
+        status = full sprint overview with progress and risk assessment,
+        blockers = only blocked/flagged items,
+        mine = tickets assigned to a specific person
+    assignee_email:
+      type: string
+      description: >
+        Email address of the person whose tickets to retrieve.
+        Required only when action is 'mine'.
+  required:
+    - action

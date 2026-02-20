@@ -1,0 +1,51 @@
+[project]
+name = "t3nets"
+version = "0.2.0"
+description = "Open-source, multi-tenant AI agent platform. Connect your tools, talk through your channels."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [
+    {name = "Outlocks", email = "dev@outlocks.com"},
+]
+
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+aws = [
+    "boto3>=1.35",
+    "anthropic[bedrock]>=0.40",
+]
+local = [
+    "anthropic>=0.40",
+]
+dashboard = [
+    # Dashboard is a separate React app — no Python deps
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
