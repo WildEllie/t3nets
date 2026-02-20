@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.backup
+infra/**/*.tfplan
+
+# Local data
+data/
+*.sqlite
+*.db
+
+# Node (dashboard)
+dashboard/node_modules/
+dashboard/dist/
+dashboard/build/
+
+# Logs
+*.log
