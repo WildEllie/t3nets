@@ -44,9 +44,9 @@ aws ecr get-login-password --region "${REGION}" | \
     docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 echo ""
 
-# --- Build ---
-echo "→ Building container..."
-docker build -t "${ECR_REPO}:${TAG}" -f Dockerfile .
+# --- Build (always target linux/amd64 for Fargate) ---
+echo "→ Building container (linux/amd64)..."
+docker build --platform linux/amd64 -t "${ECR_REPO}:${TAG}" -f Dockerfile .
 echo ""
 
 # --- Tag & Push ---

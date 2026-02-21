@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/ellieportugali/projects/t3nets log --oneline -20)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets branch -a)"
+    ]
+  }
+}
