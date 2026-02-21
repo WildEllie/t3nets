@@ -298,12 +298,16 @@ When you have data to present, format it clearly with structure."""
         pass
 
 
+# Single region for all AWS calls (data residency / IAM scope)
+AWS_REGION = "us-east-1"
+
+
 def init():
     global ai, memory, tenants, secrets, skills, bus, rule_router, started_at
 
     started_at = time.time()
 
-    region = os.getenv("AWS_REGION", "us-east-1")
+    region = AWS_REGION
     conversations_table = os.getenv("DYNAMODB_CONVERSATIONS_TABLE")
     tenants_table = os.getenv("DYNAMODB_TENANTS_TABLE")
     secrets_prefix = os.getenv("SECRETS_PREFIX")

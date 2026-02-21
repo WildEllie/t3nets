@@ -176,7 +176,7 @@ GSI `channel-mapping` on `gsi1pk = CHANNEL#{type}#{id}` enables tenant resolutio
 
 **Implementation:**
 - Bedrock IAM Resource: `arn:aws:bedrock:us-east-1::foundation-model/*` and `arn:aws:bedrock:us-east-1:{account}:inference-profile/*`
-- Model ID format: `{region}.{provider}.{model-id}:{version}` (e.g. `us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0`)
+- Model ID: single-region inference profile format `us-east-1.{provider}.{model-id}:{version}` (e.g. `us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0`). Required because Claude 3.5 Sonnet v2 no longer supports direct foundation model invocation (on-demand throughput deprecated).
 
 ---
 
