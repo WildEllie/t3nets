@@ -12,7 +12,7 @@ from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolDefinition,
 class BedrockProvider(AIProvider):
     """Calls Claude via Amazon Bedrock using the Converse API."""
 
-    def __init__(self, region: str = "us-east-1", model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"):
+    def __init__(self, region: str = "us-east-1", model_id: str = "us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0"):
         self.client = boto3.client("bedrock-runtime", region_name=region)
         self.model_id = model_id
 

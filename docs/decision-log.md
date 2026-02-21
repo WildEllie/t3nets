@@ -166,6 +166,20 @@ GSI `channel-mapping` on `gsi1pk = CHANNEL#{type}#{id}` enables tenant resolutio
 
 ---
 
+## ADR-015: Single-Region Bedrock Inference
+
+**Decision:** Use single-region inference profiles (e.g. `us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0`) instead of cross-region (`us.` prefix). Restrict Bedrock IAM policy to `us-east-1` only.
+
+**Rationale:** GDPR/HIPAA data residency compliance — data stays in a single region. Cross-region inference routes through AWS-managed endpoints; single-region keeps inference and data colocated. Also reduces blast radius of IAM permissions.
+
+**Model choice:** Claude 3.5 Sonnet v2 selected for cost efficiency vs Claude 4.5 Sonnet v1 while maintaining strong tool-use quality.
+
+**Implementation:**
+- Bedrock IAM Resource: `arn:aws:bedrock:us-east-1::foundation-model/*` and `arn:aws:bedrock:us-east-1:{account}:inference-profile/*`
+- Model ID format: `{region}.{provider}.{model-id}:{version}` (e.g. `us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0`)
+
+---
+
 ## Pending Decisions
 
 | Topic | Status | Notes |

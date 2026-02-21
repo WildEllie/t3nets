@@ -54,7 +54,7 @@ rule_router: RuleBasedRouter
 started_at: float = 0.0
 
 DEFAULT_TENANT = "default"
-DEFAULT_MODEL = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+DEFAULT_MODEL = os.getenv("BEDROCK_MODEL_ID", "us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0")
 
 stats = {
     "rule_routed": 0,
