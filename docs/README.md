@@ -1,5 +1,7 @@
 # T3nets Documentation
 
+**Last Updated:** February 21, 2026
+
 Welcome to the T3nets project documentation. These docs capture accumulated architecture knowledge, deployment guides, and decision rationale.
 
 ## Quick Links
@@ -68,12 +70,14 @@ Welcome to the T3nets project documentation. These docs capture accumulated arch
 ```
 t3nets/
 ├── agent/              # Portable business logic (no cloud imports)
-│   ├── router/         # Hybrid routing engine
+│   ├── router/         # Hybrid routing (rule_router.py) + Router
 │   ├── skills/         # Skill definitions + workers
+│   ├── channels/       # Channel adapters (dashboard, future: Teams/Slack)
+│   ├── memory/         # Conversation history management
 │   ├── interfaces/     # Abstract base classes
 │   └── models/         # Shared dataclasses
 ├── adapters/
-│   ├── local/          # Local dev (Anthropic, SQLite, .env)
+│   ├── local/          # Local dev (Anthropic, SQLite, .env, chat/health UI)
 │   └── aws/            # AWS (Bedrock, DynamoDB, Secrets Manager)
 ├── infra/aws/          # Terraform modules
 ├── scripts/            # Deploy, seed scripts

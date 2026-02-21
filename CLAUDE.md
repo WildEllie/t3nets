@@ -46,7 +46,7 @@ All business logic lives in `agent/` with **zero cloud imports**. Cloud-specific
   - Tier 1: Regex pattern matching for conversational messages ($0, <1ms)
   - Tier 2: Rule-matched skill triggers without full AI call (~$0.01)
   - Tier 3: Full Claude with tools for complex queries (~$0.02-0.05)
-- **`agent/skills/`** — Each skill is a directory with `skill.yaml` (metadata, triggers, parameters) + `worker.py` (async execute function). `registry.py` loads skills and provides tool definitions for Claude.
+- **`agent/skills/`** — Each skill is a directory with `skill.yaml` (metadata, triggers, parameters) + `worker.py` (execute function). `registry.py` loads skills and provides tool definitions for Claude.
 - **`agent/interfaces/`** — Abstract contracts: `AIProvider`, `ConversationStore`, `TenantStore`, `EventBus`, `SecretsProvider`, `BlobStore`, `ChannelAdapter`
 - **`agent/models/`** — Shared dataclasses: `Tenant`, `TenantUser`, `TenantSettings`, `InboundMessage`, `OutboundMessage`, `RequestContext`
 - **`agent/memory/`** — Conversation history management
@@ -93,3 +93,16 @@ Inbound message → ChannelAdapter.parse_inbound()
 - **Bedrock Converse API** (not invoke_model) for structured tool use
 - **Debug mode**: append `--raw` to any chat message to skip Claude formatting and see raw skill output
 - Full decision log in `docs/decision-log.md` (13 ADRs)
+
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| `docs/README.md` | Docs index, architecture overview, project status |
+| `docs/local-development.md` | Quick start, dev server, local adapters |
+| `docs/aws-infrastructure.md` | Terraform, deployment, DynamoDB, Bedrock |
+| `docs/hybrid-routing.md` | Three-tier routing, rule engine, cost comparison |
+| `docs/ai-models-pricing.md` | Model options, tiered strategy |
+| `docs/dynamodb-schema.md` | Table schemas, key patterns |
+| `docs/decision-log.md` | Architecture Decision Records |
+| `docs/ROADMAP.md` | Phases, backlog, TODO |

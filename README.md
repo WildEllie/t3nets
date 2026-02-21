@@ -27,9 +27,9 @@ you ask a question and get an answer.
 - **Pluggable channels** — Teams, Slack, WhatsApp, SMS, Voice, Dashboard, API
 - **Pluggable skills** — add new capabilities without touching the router
 - **Multi-tenant** — shared compute, isolated data
-- **Serverless** — AWS reference implementation (ECS Fargate + Lambda + EventBridge)
+- **Serverless** — AWS reference implementation (ECS Fargate, DynamoDB, Bedrock)
 
-See [docs/architecture.md](docs/architecture.md) for the full design.
+See [docs/README.md](docs/README.md) for the full design and architecture overview.
 
 ## Quick Start (Local Development)
 
@@ -62,7 +62,7 @@ terraform plan -var-file=environments/dev.tfvars
 terraform apply -var-file=environments/dev.tfvars
 ```
 
-See [docs/deployment.md](docs/deployment.md) for details.
+See [docs/aws-infrastructure.md](docs/aws-infrastructure.md) for deployment details.
 
 ## Extend
 
@@ -89,23 +89,23 @@ def execute(params: dict, secrets: dict) -> dict:
     return {"result": "..."}
 ```
 
-See [docs/adding-a-skill.md](docs/adding-a-skill.md).
+See [agent/skills/sprint_status/](agent/skills/sprint_status/) for an example and [docs/hybrid-routing.md](docs/hybrid-routing.md) for trigger setup.
 
 ### Add a Channel
 
-Implement `ChannelAdapter` (5 methods). See [docs/adding-a-channel.md](docs/adding-a-channel.md).
+Implement `ChannelAdapter` (5 methods). See [agent/channels/](agent/channels/) and [agent/interfaces/](agent/interfaces/).
 
 ### Add a Cloud Provider
 
 Implement 5 interfaces (AIProvider, ConversationStore, EventBus, SecretsProvider, BlobStore).
-See [docs/adding-a-cloud.md](docs/adding-a-cloud.md).
+See [adapters/](adapters/) for local and AWS implementations.
 
 ## Project Structure
 
 ```
 t3nets/
 ├── agent/                    # Portable application layer
-│   ├── router/               # The brain
+│   ├── router/               # Hybrid routing engine
 │   ├── skills/               # Skill definitions + workers
 │   ├── channels/             # Channel adapters
 │   ├── memory/               # Conversation management
@@ -113,15 +113,15 @@ t3nets/
 │   └── models/               # Shared data models
 ├── adapters/                 # Cloud-specific implementations
 │   ├── aws/                  # AWS (reference implementation)
-│   └── local/                # Local development
-├── dashboard/                # Admin UI (React)
-├── infra/                    # Terraform
+│   └── local/                # Local dev (chat + health UI)
+├── infra/aws/                # Terraform
+├── scripts/                  # Deploy, seed scripts
 └── docs/                     # Documentation
 ```
 
 ## Contributing
 
-Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions welcome. Open an issue or PR.
 
 ## License
 

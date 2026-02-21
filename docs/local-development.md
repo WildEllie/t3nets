@@ -170,7 +170,8 @@ Shared nav bar across all pages. Links to Chat, Health, and (future) Settings.
 t3nets/
 ├── agent/                     # Portable application code (no cloud imports)
 │   ├── router/
-│   │   └── router.py          # Hybrid routing logic
+│   │   ├── rule_router.py     # Hybrid routing (Tier 1–3, RuleBasedRouter)
+│   │   └── router.py          # Full Router (Claude-only path)
 │   ├── skills/
 │   │   ├── registry.py        # Skill loader + tool builder
 │   │   └── sprint_status/
