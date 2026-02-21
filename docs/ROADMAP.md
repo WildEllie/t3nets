@@ -36,7 +36,8 @@
 ## Up Next 🔜
 
 ### Phase 1b: Deploy & Settings (Current)
-- [ ] `terraform apply` — deploy infrastructure to AWS
+- [x] `terraform apply` — deploy infrastructure to AWS
+- [ ] Simplify AI model references into a single location if possible
 - [ ] Settings page in dashboard (model selection per routing tier)
 - [ ] Server restart from dashboard (dev_server hot reload)
 - [ ] Per-tier model configuration (conversational / formatting / routing models)
