@@ -20,6 +20,8 @@ import json
 import logging
 import os
 import sys
+import time
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -53,13 +55,21 @@ secrets: EnvSecretsProvider
 skills: SkillRegistry
 bus: DirectBus
 rule_router: RuleBasedRouter
+started_at: float = 0.0
 
 DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
 DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
 # Stats for the session
-stats = {"rule_routed": 0, "ai_routed": 0, "conversational": 0, "raw": 0}
+stats = {
+    "rule_routed": 0,
+    "ai_routed": 0,
+    "conversational": 0,
+    "raw": 0,
+    "errors": 0,
+    "total_tokens": 0,
+}
 
 
 def _run_async(coro):
@@ -72,6 +82,23 @@ def _format_raw_json(data: dict) -> str:
     return json.dumps(data, indent=2, default=str)
 
 
+def _uptime_human(seconds: float) -> str:
+    """Convert seconds to human-readable uptime."""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    elif s < 3600:
+        return f"{s // 60}m {s % 60}s"
+    elif s < 86400:
+        h = s // 3600
+        m = (s % 3600) // 60
+        return f"{h}h {m}m"
+    else:
+        d = s // 86400
+        h = (s % 86400) // 3600
+        return f"{d}d {h}h"
+
+
 class DevHandler(BaseHTTPRequestHandler):
     """HTTP request handler for local development."""
 
@@ -79,9 +106,11 @@ class DevHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         if path == "/" or path == "/chat":
-            self._serve_chat_page()
+            self._serve_file("chat.html")
         elif path == "/health":
-            self._json_response({"status": "ok", "env": "local", "routing_stats": stats})
+            self._serve_file("health.html")
+        elif path == "/api/health":
+            self._handle_health_api()
         else:
             self.send_error(404)
 
@@ -94,6 +123,79 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_clear()
         else:
             self.send_error(404)
+
+    def _handle_health_api(self):
+        """Rich health/status JSON endpoint."""
+        try:
+            uptime_secs = time.time() - started_at
+            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            connected_integrations = _run_async(secrets.list_integrations(DEFAULT_TENANT))
+
+            # Build integration status
+            all_integrations = {
+                "jira": {"connected": "jira" in connected_integrations},
+                "github": {"connected": "github" in connected_integrations},
+                "teams": {"connected": "teams" in connected_integrations},
+                "twilio": {"connected": "twilio" in connected_integrations},
+            }
+
+            # Build skills info
+            skills_info = []
+            for skill in skills.list_skills():
+                skills_info.append({
+                    "name": skill.name,
+                    "description": skill.description.strip()[:120],
+                    "requires_integration": skill.requires_integration,
+                    "supports_raw": skill.supports_raw,
+                    "triggers": skill.triggers[:8],
+                })
+
+            # API key preview (show first 8 + last 4 chars)
+            api_key = os.getenv("ANTHROPIC_API_KEY", "")
+            if len(api_key) > 12:
+                key_preview = api_key[:8] + "..." + api_key[-4:]
+            else:
+                key_preview = "not set" if not api_key else "***"
+
+            health = {
+                "status": "ok",
+                "environment": os.getenv("T3NETS_ENV", "local"),
+                "started_at": datetime.fromtimestamp(started_at, tz=timezone.utc).isoformat(),
+                "uptime_seconds": round(uptime_secs, 1),
+                "uptime_human": _uptime_human(uptime_secs),
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                "tenant": {
+                    "tenant_id": tenant.tenant_id,
+                    "name": tenant.name,
+                    "status": tenant.status,
+                    "enabled_skills": tenant.settings.enabled_skills,
+                    "ai_model": tenant.settings.ai_model,
+                },
+                "ai": {
+                    "provider": "anthropic (direct)",
+                    "model": DEFAULT_MODEL,
+                    "api_key_preview": key_preview,
+                    "total_tokens": stats["total_tokens"],
+                },
+                "routing": {
+                    "rule_routed": stats["rule_routed"],
+                    "ai_routed": stats["ai_routed"],
+                    "conversational": stats["conversational"],
+                    "raw": stats["raw"],
+                    "errors": stats["errors"],
+                },
+                "integrations": all_integrations,
+                "skills": skills_info,
+            }
+
+            self._json_response(health)
+
+        except Exception as e:
+            logger.exception("Health check error")
+            self._json_response({
+                "status": "error",
+                "error": str(e),
+            }, 500)
 
     def _handle_chat(self):
         """Handle a chat message with hybrid routing."""
@@ -111,6 +213,8 @@ class DevHandler(BaseHTTPRequestHandler):
             clean_text, is_raw = strip_raw_flag(text)
 
             logger.info(f"Chat: {text[:100]}" + (" [RAW]" if is_raw else ""))
+
+            is_raw_response = False
 
             # Load conversation history
             history = _run_async(
@@ -168,16 +272,18 @@ When you have data to present, format it clearly with structure."""
                     if not skill_result:
                         skill_result = {"error": "Skill returned no result"}
 
-                    # === RAW MODE: return skill data directly ===
+                    # === RAW MODE ===
                     if is_raw and rule_router.supports_raw(match.skill_name):
                         logger.info(f"Returning raw output for {match.skill_name}")
                         stats["raw"] += 1
+                        stats["rule_routed"] += 1
 
                         assistant_text = _format_raw_json(skill_result)
                         total_tokens = 0
-                        route_type = "raw"
+                        route_type = "rule"
+                        is_raw_response = True
 
-                    # === NORMAL: Claude formats the result ===
+                    # === NORMAL: Claude formats ===
                     else:
                         if is_raw and not rule_router.supports_raw(match.skill_name):
                             logger.info(
@@ -212,7 +318,6 @@ Include risk assessment and actionable suggestions where relevant."""
 
                 # === TIER 2: Full Claude routing ===
                 else:
-                    # --raw with no rule match: warn the user
                     if is_raw:
                         logger.info("--raw flag ignored: no rule match, using AI routing")
 
@@ -250,14 +355,15 @@ Include risk assessment and actionable suggestions where relevant."""
                         if not skill_result:
                             skill_result = {"error": "Skill returned no result"}
 
-                        # --raw via AI route: still honor it if skill supports it
+                        # --raw via AI route
                         if is_raw and rule_router.supports_raw(tool_call.tool_name):
                             logger.info(f"Returning raw output for {tool_call.tool_name} (AI-routed)")
                             stats["raw"] += 1
 
                             assistant_text = _format_raw_json(skill_result)
                             total_tokens = response.input_tokens + response.output_tokens
-                            route_type = "raw"
+                            route_type = "ai"
+                            is_raw_response = True
                         else:
                             messages_with_tool = messages + [
                                 {
@@ -293,8 +399,11 @@ Include risk assessment and actionable suggestions where relevant."""
                         total_tokens = response.input_tokens + response.output_tokens
                         route_type = "ai"
 
-            # Save conversation (don't save raw output to history — it's debug noise)
-            if route_type != "raw":
+            # Track tokens
+            stats["total_tokens"] += total_tokens
+
+            # Save conversation (don't save raw output to history)
+            if not is_raw_response:
                 _run_async(memory.save_turn(
                     DEFAULT_TENANT, conversation_id, clean_text, assistant_text,
                 ))
@@ -304,10 +413,12 @@ Include risk assessment and actionable suggestions where relevant."""
                 "conversation_id": conversation_id,
                 "tokens": total_tokens,
                 "route": route_type,
+                "raw": is_raw_response,
             })
 
         except Exception as e:
             logger.exception("Chat error")
+            stats["errors"] += 1
             self._json_response({"error": str(e)}, 500)
 
     def _handle_clear(self):
@@ -320,19 +431,16 @@ Include risk assessment and actionable suggestions where relevant."""
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
-    def _serve_chat_page(self):
-        """Serve the built-in chat HTML page."""
-        html_path = Path(__file__).parent / "chat.html"
+    def _serve_file(self, filename: str):
+        """Serve an HTML file from the adapters/local directory."""
+        html_path = Path(__file__).parent / filename
         if html_path.exists():
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(html_path.read_bytes())
         else:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(b"<h1>T3nets</h1><p>chat.html not found</p>")
+            self.send_error(404, f"{filename} not found")
 
     def _json_response(self, data: dict, status: int = 200):
         self.send_response(status)
@@ -354,7 +462,9 @@ Include risk assessment and actionable suggestions where relevant."""
 
 def init():
     """Initialize all components."""
-    global ai, memory, tenants, secrets, skills, bus, rule_router
+    global ai, memory, tenants, secrets, skills, bus, rule_router, started_at
+
+    started_at = time.time()
 
     # Load .env
     secrets = EnvSecretsProvider(".env")
@@ -377,7 +487,7 @@ def init():
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
     # Rule-based router
-    rule_router = RuleBasedRouter(skills, confidence_threshold=0.6)
+    rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
 
     # Direct bus
     bus = DirectBus(skills, secrets)
@@ -407,7 +517,9 @@ def main():
     logger.info(f"")
     logger.info(f"  ╔══════════════════════════════════════╗")
     logger.info(f"  ║  T3nets Dev Server                   ║")
-    logger.info(f"  ║  http://localhost:{port}               ║")
+    logger.info(f"  ║                                      ║")
+    logger.info(f"  ║  Chat:   http://localhost:{port}       ║")
+    logger.info(f"  ║  Health: http://localhost:{port}/health ║")
     logger.info(f"  ║                                      ║")
     logger.info(f"  ║  Routing: Rules → Claude (hybrid)    ║")
     logger.info(f"  ║  Debug:   append --raw to messages   ║")

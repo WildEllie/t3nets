@@ -16,38 +16,65 @@
             flex-direction: column;
         }
 
-        header {
+        nav {
             background: #1a1a1a;
             border-bottom: 1px solid #2a2a2a;
-            padding: 16px 24px;
+            padding: 0 24px;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 0;
+            height: 48px;
         }
 
-        header h1 {
-            font-size: 18px;
-            font-weight: 600;
+        .nav-brand {
+            font-size: 16px;
+            font-weight: 700;
             color: #fff;
+            margin-right: 24px;
+            text-decoration: none;
         }
 
-        header .badge {
-            font-size: 11px;
+        .nav-badge {
+            font-size: 10px;
             background: #22c55e;
             color: #000;
-            padding: 2px 8px;
-            border-radius: 10px;
+            padding: 1px 6px;
+            border-radius: 8px;
             font-weight: 600;
+            margin-left: 6px;
+            vertical-align: middle;
         }
 
-        .header-right {
+        .nav-links {
+            display: flex;
+            gap: 0;
+            height: 100%;
+        }
+
+        .nav-links a {
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            color: #888;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            height: 100%;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+
+        .nav-links a:hover { color: #ccc; background: #ffffff08; }
+        .nav-links a.active { color: #fff; border-bottom-color: #3b82f6; }
+
+        .nav-right {
             margin-left: auto;
             display: flex;
             gap: 8px;
             align-items: center;
         }
 
-        .clear-btn {
+        .nav-btn {
             background: none;
             border: 1px solid #333;
             color: #888;
@@ -57,7 +84,7 @@
             cursor: pointer;
         }
 
-        .clear-btn:hover { border-color: #555; color: #ccc; }
+        .nav-btn:hover { border-color: #555; color: #ccc; }
 
         #chat-container {
             flex: 1;
@@ -244,13 +271,16 @@
     </style>
 </head>
 <body>
-    <header>
-        <h1>T3nets</h1>
-        <span class="badge">LOCAL</span>
-        <div class="header-right">
-            <button class="clear-btn" onclick="clearChat()">Clear Chat</button>
+    <nav>
+        <a href="/" class="nav-brand">T3nets <span class="nav-badge">LOCAL</span></a>
+        <div class="nav-links">
+            <a href="/chat" class="active">Chat</a>
+            <a href="/health">Health</a>
         </div>
-    </header>
+        <div class="nav-right">
+            <button class="nav-btn" onclick="clearChat()">Clear Chat</button>
+        </div>
+    </nav>
 
     <div id="chat-container">
         <div class="welcome">
@@ -361,7 +391,7 @@
                 if (data.error) {
                     addMessage('Error: ' + data.error, 'error');
                 } else {
-                    addMessage(data.text, 'assistant', data.tokens, data.route);
+                    addMessage(data.text, 'assistant', data.tokens, data.route, data.raw);
                 }
             } catch (err) {
                 thinking.remove();
@@ -373,12 +403,12 @@
             input.focus();
         }
 
-        function addMessage(text, type, tokens, route) {
+        function addMessage(text, type, tokens, route, isRaw) {
             const div = document.createElement('div');
             div.className = 'message ' + type;
 
             // Raw JSON — use syntax highlighting
-            if (route === 'raw') {
+            if (isRaw) {
                 div.classList.add('raw-message');
                 const jsonDiv = document.createElement('div');
                 jsonDiv.className = 'json-display';
@@ -399,17 +429,23 @@
                         rule: 'rule-based',
                         ai: 'ai-routed',
                         conversational: 'chat',
-                        raw: 'raw debug',
                     };
                     badge.textContent = labels[route] || route;
                     meta.appendChild(badge);
+                }
+
+                if (isRaw) {
+                    const rawBadge = document.createElement('span');
+                    rawBadge.className = 'route-badge raw';
+                    rawBadge.textContent = 'raw debug';
+                    meta.appendChild(rawBadge);
                 }
 
                 if (tokens) {
                     const tok = document.createElement('span');
                     tok.textContent = tokens.toLocaleString() + ' tokens';
                     meta.appendChild(tok);
-                } else if (route === 'raw') {
+                } else if (isRaw) {
                     const tok = document.createElement('span');
                     tok.textContent = '0 tokens (no AI)';
                     meta.appendChild(tok);

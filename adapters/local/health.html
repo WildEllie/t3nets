@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T3nets — Health</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+
+        .page-content {
+            padding: 24px 24px;
+        }
+
+        nav {
+            background: #1a1a1a;
+            border-bottom: 1px solid #2a2a2a;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            gap: 0;
+            height: 48px;
+        }
+
+        .nav-brand {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            margin-right: 24px;
+            text-decoration: none;
+        }
+
+        .nav-badge {
+            font-size: 10px;
+            background: #22c55e;
+            color: #000;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0;
+            height: 100%;
+        }
+
+        .nav-links a {
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            color: #888;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            height: 100%;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+
+        .nav-links a:hover { color: #ccc; background: #ffffff08; }
+        .nav-links a.active { color: #fff; border-bottom-color: #3b82f6; }
+
+        .nav-right {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .status-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        .status-badge.healthy { background: #22c55e; color: #000; }
+        .status-badge.degraded { background: #f59e0b; color: #000; }
+        .status-badge.down { background: #ef4444; color: #fff; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .card h2 {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            margin-bottom: 16px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #1f1f1f;
+        }
+
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #aaa; font-size: 14px; }
+        .stat-value { color: #fff; font-size: 14px; font-weight: 500; }
+        .stat-value.mono {
+            font-family: "SF Mono", "Fira Code", Menlo, monospace;
+            font-size: 13px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-dot.ok { background: #22c55e; }
+        .status-dot.warn { background: #f59e0b; }
+        .status-dot.err { background: #ef4444; }
+        .status-dot.off { background: #555; }
+
+        .bar-container {
+            width: 120px;
+            height: 6px;
+            background: #2a2a2a;
+            border-radius: 3px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .bar-fill.green { background: #22c55e; }
+        .bar-fill.yellow { background: #f59e0b; }
+        .bar-fill.blue { background: #3b82f6; }
+
+        .skill-item {
+            padding: 10px 0;
+            border-bottom: 1px solid #1f1f1f;
+        }
+        .skill-item:last-child { border-bottom: none; }
+        .skill-name { color: #fff; font-weight: 500; font-size: 14px; }
+        .skill-meta { color: #666; font-size: 12px; margin-top: 2px; }
+        .skill-triggers { color: #555; font-size: 11px; margin-top: 4px; font-style: italic; }
+
+        .tag {
+            display: inline-block;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-left: 6px;
+        }
+        .tag.raw { background: #78350f; color: #fbbf24; }
+        .tag.connected { background: #065f46; color: #6ee7b7; }
+        .tag.missing { background: #7f1d1d; color: #fca5a5; }
+
+        .refresh-bar {
+            text-align: center;
+            color: #555;
+            font-size: 12px;
+            padding: 16px;
+        }
+        .refresh-bar a {
+            color: #3b82f6;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        #loading {
+            text-align: center;
+            padding: 60px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="nav-brand">T3nets <span class="nav-badge">LOCAL</span></a>
+        <div class="nav-links">
+            <a href="/chat">Chat</a>
+            <a href="/health" class="active">Health</a>
+        </div>
+        <div class="nav-right">
+            <span class="status-badge" id="status-badge">...</span>
+        </div>
+    </nav>
+
+    <div id="loading" class="page-content">Loading health data...</div>
+    <div id="content" class="page-content" style="display:none;">
+        <div class="grid">
+            <!-- System -->
+            <div class="card">
+                <h2>System</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Uptime</span>
+                    <span class="stat-value" id="uptime">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Started</span>
+                    <span class="stat-value mono" id="started">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Python</span>
+                    <span class="stat-value mono" id="python-version">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Tenant</span>
+                    <span class="stat-value" id="tenant">—</span>
+                </div>
+            </div>
+
+            <!-- Routing Stats -->
+            <div class="card">
+                <h2>Routing</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Total messages</span>
+                    <span class="stat-value" id="total-messages">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">
+                        <span class="status-dot ok"></span>Rule-based
+                    </span>
+                    <span class="stat-value" id="rule-routed">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">
+                        <span class="status-dot" style="background:#3b82f6;"></span>AI-routed
+                    </span>
+                    <span class="stat-value" id="ai-routed">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">
+                        <span class="status-dot" style="background:#a1a1aa;"></span>Conversational
+                    </span>
+                    <span class="stat-value" id="conversational">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">
+                        <span class="status-dot" style="background:#f59e0b;"></span>Raw debug
+                    </span>
+                    <span class="stat-value" id="raw">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Rule-based ratio</span>
+                    <span class="stat-value" id="rule-ratio">
+                        <span class="bar-container"><span class="bar-fill green" id="rule-bar" style="width:0%"></span></span>
+                        <span id="rule-pct">—</span>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Integrations -->
+            <div class="card">
+                <h2>Integrations</h2>
+                <div id="integrations-list"></div>
+            </div>
+
+            <!-- AI Provider -->
+            <div class="card">
+                <h2>AI Provider</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Provider</span>
+                    <span class="stat-value" id="ai-provider">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Model</span>
+                    <span class="stat-value mono" id="ai-model">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">API Key</span>
+                    <span class="stat-value mono" id="ai-key">—</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Total tokens</span>
+                    <span class="stat-value" id="total-tokens">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Skills -->
+        <div class="card" style="margin-bottom: 24px;">
+            <h2>Skills</h2>
+            <div id="skills-list"></div>
+        </div>
+
+        <div class="refresh-bar">
+            Auto-refreshes every 10s · <a onclick="loadHealth()">Refresh now</a>
+        </div>
+    </div>
+
+    <script>
+        async function loadHealth() {
+            try {
+                const res = await fetch('/api/health');
+                const data = await res.json();
+                render(data);
+            } catch (err) {
+                document.getElementById('loading').textContent = 'Failed to load: ' + err.message;
+            }
+        }
+
+        function render(d) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+
+            // Status badge
+            const badge = document.getElementById('status-badge');
+            badge.textContent = d.status === 'ok' ? '● HEALTHY' : '● DEGRADED';
+            badge.className = 'status-badge ' + (d.status === 'ok' ? 'healthy' : 'degraded');
+
+            // System
+            document.getElementById('uptime').textContent = d.uptime_human || '—';
+            document.getElementById('started').textContent = d.started_at ? new Date(d.started_at).toLocaleString() : '—';
+            document.getElementById('python-version').textContent = d.python_version || '—';
+            document.getElementById('tenant').textContent = d.tenant ? d.tenant.name + ' (' + d.tenant.tenant_id + ')' : '—';
+
+            // Routing
+            const r = d.routing || {};
+            const total = (r.rule_routed||0) + (r.ai_routed||0) + (r.conversational||0) + (r.raw||0);
+            document.getElementById('total-messages').textContent = total;
+            document.getElementById('rule-routed').textContent = r.rule_routed || 0;
+            document.getElementById('ai-routed').textContent = r.ai_routed || 0;
+            document.getElementById('conversational').textContent = r.conversational || 0;
+            document.getElementById('raw').textContent = r.raw || 0;
+
+            const rulePct = total > 0 ? Math.round((r.rule_routed||0) / total * 100) : 0;
+            document.getElementById('rule-pct').textContent = rulePct + '%';
+            document.getElementById('rule-bar').style.width = rulePct + '%';
+
+            // Integrations
+            const intList = document.getElementById('integrations-list');
+            intList.innerHTML = '';
+            const allInt = d.integrations || {};
+            for (const [name, info] of Object.entries(allInt)) {
+                const row = document.createElement('div');
+                row.className = 'stat-row';
+                const connected = info.connected;
+                row.innerHTML = `
+                    <span class="stat-label">
+                        <span class="status-dot ${connected ? 'ok' : 'off'}"></span>
+                        ${name}
+                    </span>
+                    <span class="stat-value">
+                        ${connected ? '<span class="tag connected">connected</span>' : '<span class="tag missing">not configured</span>'}
+                    </span>`;
+                intList.appendChild(row);
+            }
+
+            // AI
+            const ai = d.ai || {};
+            document.getElementById('ai-provider').textContent = ai.provider || '—';
+            document.getElementById('ai-model').textContent = ai.model || '—';
+            document.getElementById('ai-key').textContent = ai.api_key_preview || '—';
+            document.getElementById('total-tokens').textContent = (ai.total_tokens || 0).toLocaleString();
+
+            // Skills
+            const skillsList = document.getElementById('skills-list');
+            skillsList.innerHTML = '';
+            for (const skill of (d.skills || [])) {
+                const div = document.createElement('div');
+                div.className = 'skill-item';
+                const tags = [];
+                if (skill.supports_raw) tags.push('<span class="tag raw">--raw</span>');
+                if (skill.requires_integration) {
+                    const intConnected = allInt[skill.requires_integration]?.connected;
+                    tags.push(intConnected
+                        ? `<span class="tag connected">${skill.requires_integration}</span>`
+                        : `<span class="tag missing">${skill.requires_integration} needed</span>`
+                    );
+                }
+                div.innerHTML = `
+                    <div class="skill-name">${skill.name} ${tags.join('')}</div>
+                    <div class="skill-meta">${skill.description}</div>
+                    <div class="skill-triggers">Triggers: ${(skill.triggers || []).join(' · ')}</div>
+                `;
+                skillsList.appendChild(div);
+            }
+        }
+
+        loadHealth();
+        setInterval(loadHealth, 10000);
+    </script>
+</body>
+</html>
