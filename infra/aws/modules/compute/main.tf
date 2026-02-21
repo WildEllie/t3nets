@@ -195,13 +195,20 @@ resource "aws_iam_role_policy" "ecs_task" {
         Resource = var.dynamodb_table_arns
       },
       {
-        Sid    = "SecretsManager"
+        Sid    = "SecretsManagerList"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:ListSecrets",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "SecretsManagerGetPut"
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue",
           "secretsmanager:CreateSecret",
           "secretsmanager:UpdateSecret",
-          "secretsmanager:ListSecrets",
         ]
         Resource = var.secrets_base_arn
       },
