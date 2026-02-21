@@ -37,3 +37,4 @@ dashboard/build/
 
 # Logs
 *.log
+.envrc
