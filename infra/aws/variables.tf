@@ -35,7 +35,8 @@ variable "router_memory" {
 }
 
 variable "bedrock_model_id" {
-  description = "Bedrock model ID for Claude"
+  description = "Base Bedrock model ID — aws_region is prepended automatically for inference profile"
   type        = string
-  default     = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  # No default — must be set in .tfvars per environment
+  # Example: "anthropic.claude-sonnet-4-5-20250929-v1:0" (foundation model, single-region)
 }

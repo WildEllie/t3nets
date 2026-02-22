@@ -168,15 +168,15 @@ GSI `channel-mapping` on `gsi1pk = CHANNEL#{type}#{id}` enables tenant resolutio
 
 ## ADR-015: Single-Region Bedrock Inference
 
-**Decision:** Use single-region inference profiles (e.g. `us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0`) instead of cross-region (`us.` prefix). Restrict Bedrock IAM policy to `us-east-1` only.
+**Decision:** Use foundation model direct invocation (no inference profile) to keep inference in us-east-1. Restrict Bedrock IAM policy to `us-east-1` only.
 
-**Rationale:** GDPR/HIPAA data residency compliance — data stays in a single region. Cross-region inference routes through AWS-managed endpoints; single-region keeps inference and data colocated. Also reduces blast radius of IAM permissions.
+**Rationale:** GDPR/HIPAA data residency compliance — data stays in a single region. Inference profiles (`us.`, `eu.`) route across regions within a geography. Claude 3.5 Sonnet v2 requires inference profiles (Converse API doesn't support on-demand); Claude Sonnet 4.5 supports direct foundation model invocation with Converse, enabling true single-region.
 
-**Model choice:** Claude 3.5 Sonnet v2 selected for cost efficiency vs Claude 4.5 Sonnet v1 while maintaining strong tool-use quality.
+**Model choice:** Claude Sonnet 4.5 (`anthropic.claude-sonnet-4-5-20250929-v1:0`) — foundation model ID, on-demand in us-east-1, no cross-region routing.
 
 **Implementation:**
 - Bedrock IAM Resource: `arn:aws:bedrock:us-east-1::foundation-model/*` and `arn:aws:bedrock:us-east-1:{account}:inference-profile/*`
-- Model ID: single-region inference profile format `us-east-1.{provider}.{model-id}:{version}` (e.g. `us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0`). Required because Claude 3.5 Sonnet v2 no longer supports direct foundation model invocation (on-demand throughput deprecated).
+- Model ID: `anthropic.claude-sonnet-4-5-20250929-v1:0` (foundation model, not inference profile). ECS + Bedrock client run in us-east-1.
 
 ---
 

@@ -36,6 +36,12 @@ from adapters.aws.dynamodb_conversation_store import DynamoDBConversationStore
 from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
 from adapters.aws.secrets_manager import SecretsManagerProvider
 from adapters.local.direct_bus import DirectBus  # Reuse synchronous bus for Phase 1
+from agent.models.ai_models import (
+    DEFAULT_MODEL_ID,
+    get_model,
+    get_model_for_provider,
+    get_models_for_provider,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,7 +60,8 @@ rule_router: RuleBasedRouter
 started_at: float = 0.0
 
 DEFAULT_TENANT = "default"
-DEFAULT_MODEL = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]  # full inference profile ID from Terraform
+PROVIDER = "bedrock"
 
 stats = {
     "rule_routed": 0,
@@ -74,6 +81,46 @@ def _format_raw_json(data: dict) -> str:
     return json.dumps(data, indent=2, default=str)
 
 
+def _bedrock_geo_prefix() -> str:
+    """Map AWS region to Bedrock geographic inference profile prefix.
+
+    Newer models (Sonnet 4.5+, Nova) require geographic prefixes (us., eu., apac.),
+    NOT region-specific ones (us-east-1.).
+    """
+    region = os.environ.get("AWS_REGION", AWS_REGION)
+    if region.startswith("us-") or region.startswith("ca-") or region.startswith("sa-"):
+        return "us"
+    elif region.startswith("eu-"):
+        return "eu"
+    elif region.startswith("ap-"):
+        return "apac"
+    return "us"
+
+
+def _resolve_model(tenant):
+    """Resolve tenant's ai_model to a Bedrock inference profile ID and short name."""
+    model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
+    model = get_model(model_id)
+    if not model:
+        # Unknown model in tenant settings — fall back to registry default
+        logger.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL_ID}")
+        model_id = DEFAULT_MODEL_ID
+        model = get_model(model_id)
+    bedrock_id = get_model_for_provider(model_id, PROVIDER)
+    if bedrock_id:
+        geo = _bedrock_geo_prefix()
+        full_id = f"{geo}.{bedrock_id}"
+        logger.info(f"Resolved model: {model_id} → {full_id}")
+        return full_id, model.short_name
+    # Fallback: use the env var model ID directly
+    return BEDROCK_MODEL_ID, model.short_name
+
+
+def _strip_metadata(messages: list[dict]) -> list[dict]:
+    """Strip metadata from conversation history before sending to the AI provider."""
+    return [{"role": m["role"], "content": m["content"]} for m in messages]
+
+
 def _uptime_human(seconds: float) -> str:
     s = int(seconds)
     if s < 60: return f"{s}s"
@@ -91,8 +138,14 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._serve_file("chat.html", "adapters/local")
         elif path == "/health":
             self._serve_file("health.html", "adapters/local")
+        elif path == "/settings":
+            self._serve_file("settings.html", "adapters/local")
         elif path == "/api/health":
             self._handle_health_api()
+        elif path == "/api/settings":
+            self._handle_settings_get()
+        elif path == "/api/history":
+            self._handle_history()
         else:
             self.send_error(404)
 
@@ -102,6 +155,8 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._handle_chat()
         elif path == "/api/clear":
             self._handle_clear()
+        elif path == "/api/settings":
+            self._handle_settings_post()
         else:
             self.send_error(404)
 
@@ -127,7 +182,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 },
                 "ai": {
                     "provider": "bedrock",
-                    "model": DEFAULT_MODEL,
+                    "model": _resolve_model(tenant)[0],
                     "api_key_preview": "IAM role (no key)",
                     "total_tokens": stats["total_tokens"],
                 },
@@ -152,6 +207,54 @@ class AWSHandler(BaseHTTPRequestHandler):
             logger.exception("Health check error")
             self._json_response({"status": "error", "error": str(e)}, 500)
 
+    def _handle_settings_get(self):
+        """Return current settings and available models."""
+        try:
+            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            self._json_response({
+                "ai_model": tenant.settings.ai_model or DEFAULT_MODEL_ID,
+                "provider": PROVIDER,
+                "models": get_models_for_provider(PROVIDER),
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_history(self):
+        """Return conversation history for the default conversation."""
+        try:
+            history = _run_async(
+                memory.get_conversation(DEFAULT_TENANT, "dashboard-default")
+            )
+            self._json_response({"messages": history})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_settings_post(self):
+        """Update tenant settings."""
+        try:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+
+            if "ai_model" in body:
+                model_id = body["ai_model"]
+                model = get_model(model_id)
+                if not model:
+                    self._json_response({"error": f"Unknown model: {model_id}"}, 400)
+                    return
+                if PROVIDER not in model.providers:
+                    self._json_response(
+                        {"error": f"Model '{model_id}' not available for {PROVIDER}"},
+                        400,
+                    )
+                    return
+                tenant.settings.ai_model = model_id
+                _run_async(tenants.update_tenant(tenant))
+                logger.info(f"Model changed to: {model.display_name} ({model_id})")
+
+            self._json_response({"ok": True})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
     def _handle_chat(self):
         """Handle chat — identical logic to local, different adapters underneath."""
         try:
@@ -167,8 +270,11 @@ class AWSHandler(BaseHTTPRequestHandler):
 
             logger.info(f"Chat: {text[:100]}" + (" [RAW]" if is_raw else ""))
 
-            history = _run_async(memory.get_conversation(DEFAULT_TENANT, conversation_id))
+            history = _strip_metadata(
+                _run_async(memory.get_conversation(DEFAULT_TENANT, conversation_id))
+            )
             tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            active_model, model_short_name = _resolve_model(tenant)
 
             system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
@@ -177,7 +283,7 @@ When you have data to present, format it clearly with structure."""
             if not is_raw and rule_router.is_conversational(clean_text):
                 stats["conversational"] += 1
                 messages = history + [{"role": "user", "content": clean_text}]
-                response = _run_async(ai.chat(DEFAULT_MODEL, system, messages, []))
+                response = _run_async(ai.chat(active_model, system, messages, []))
                 assistant_text = response.text or "Hey! How can I help?"
                 total_tokens = response.input_tokens + response.output_tokens
                 route_type = "conversational"
@@ -203,7 +309,7 @@ When you have data to present, format it clearly with structure."""
                         stats["rule_routed"] += 1
                         prompt = f'{system}\n\nThe user asked: "{clean_text}"\n\nTool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly.'
                         messages = history + [{"role": "user", "content": prompt}]
-                        response = _run_async(ai.chat(DEFAULT_MODEL, system, messages, []))
+                        response = _run_async(ai.chat(active_model, system, messages, []))
                         assistant_text = response.text or "Got data but couldn't format."
                         total_tokens = response.input_tokens + response.output_tokens
                         route_type = "rule"
@@ -211,7 +317,7 @@ When you have data to present, format it clearly with structure."""
                     stats["ai_routed"] += 1
                     tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
                     messages = history + [{"role": "user", "content": clean_text}]
-                    response = _run_async(ai.chat(DEFAULT_MODEL, system, messages, tools))
+                    response = _run_async(ai.chat(active_model, system, messages, tools))
 
                     if response.has_tool_use:
                         tc = response.tool_calls[0]
@@ -230,7 +336,7 @@ When you have data to present, format it clearly with structure."""
                             is_raw_response = True
                         else:
                             messages_with_tool = messages + [{"role": "assistant", "content": [{"type": "tool_use", "id": tc.tool_use_id, "name": tc.tool_name, "input": tc.tool_params}]}]
-                            final = _run_async(ai.chat_with_tool_result(DEFAULT_MODEL, system, messages_with_tool, tools, tc.tool_use_id, skill_result))
+                            final = _run_async(ai.chat_with_tool_result(active_model, system, messages_with_tool, tools, tc.tool_use_id, skill_result))
                             assistant_text = final.text or "Got data but couldn't format."
                             total_tokens = response.input_tokens + response.output_tokens + final.input_tokens + final.output_tokens
                             route_type = "ai"
@@ -241,7 +347,14 @@ When you have data to present, format it clearly with structure."""
 
             stats["total_tokens"] += total_tokens
             if not is_raw_response:
-                _run_async(memory.save_turn(DEFAULT_TENANT, conversation_id, clean_text, assistant_text))
+                _run_async(memory.save_turn(
+                    DEFAULT_TENANT, conversation_id, clean_text, assistant_text,
+                    metadata={
+                        "route": route_type,
+                        "model": model_short_name,
+                        "tokens": total_tokens,
+                    },
+                ))
 
             self._json_response({
                 "text": assistant_text,
@@ -249,6 +362,7 @@ When you have data to present, format it clearly with structure."""
                 "tokens": total_tokens,
                 "route": route_type,
                 "raw": is_raw_response,
+                "model": model_short_name,
             })
         except Exception as e:
             logger.exception("Chat error")
@@ -316,7 +430,7 @@ def init():
         logger.error("Missing required env vars: DYNAMODB_CONVERSATIONS_TABLE, DYNAMODB_TENANTS_TABLE, SECRETS_PREFIX")
         sys.exit(1)
 
-    ai = BedrockProvider(region=region, model_id=DEFAULT_MODEL)
+    ai = BedrockProvider(region=region, model_id=BEDROCK_MODEL_ID)
     memory = DynamoDBConversationStore(conversations_table, region=region)
     tenants = DynamoDBTenantStore(tenants_table, region=region)
     secrets = SecretsManagerProvider(secrets_prefix, region=region)
@@ -363,7 +477,7 @@ def main():
     logger.info("  ╔══════════════════════════════════════╗")
     logger.info("  ║  T3nets AWS Server                   ║")
     logger.info(f"  ║  http://0.0.0.0:{port}               ║")
-    logger.info(f"  ║  Model: {DEFAULT_MODEL[:30]}  ║")
+    logger.info(f"  ║  Model: {BEDROCK_MODEL_ID[:30]}  ║")
     logger.info("  ╚══════════════════════════════════════╝")
     logger.info("")
 

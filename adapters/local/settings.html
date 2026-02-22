@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T3nets — Settings</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        nav {
+            background: #1a1a1a;
+            border-bottom: 1px solid #2a2a2a;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            gap: 0;
+            height: 48px;
+        }
+
+        .nav-brand {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            margin-right: 24px;
+            text-decoration: none;
+        }
+
+        .nav-badge {
+            font-size: 10px;
+            background: #22c55e;
+            color: #000;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0;
+            height: 100%;
+        }
+
+        .nav-links a {
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            color: #888;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            height: 100%;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+
+        .nav-links a:hover { color: #ccc; background: #ffffff08; }
+        .nav-links a.active { color: #fff; border-bottom-color: #3b82f6; }
+
+        .nav-right {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .settings-container {
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 0 24px;
+            width: 100%;
+        }
+
+        .settings-header {
+            margin-bottom: 32px;
+        }
+
+        .settings-header h1 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 6px;
+        }
+
+        .settings-header p {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .model-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .model-option {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 14px 16px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .model-option:hover:not(.disabled) {
+            border-color: #3b82f6;
+            background: #1e1e2e;
+        }
+
+        .model-option.selected {
+            border-color: #3b82f6;
+            background: #1e1e2e;
+            box-shadow: 0 0 0 1px #3b82f6;
+        }
+
+        .model-option.disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .model-radio {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid #444;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .model-option.selected .model-radio {
+            border-color: #3b82f6;
+        }
+
+        .model-option.selected .model-radio::after {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #3b82f6;
+        }
+
+        .model-info {
+            flex: 1;
+        }
+
+        .model-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .model-option.disabled .model-name {
+            color: #888;
+        }
+
+        .model-id {
+            font-size: 11px;
+            color: #555;
+            margin-top: 2px;
+            font-family: "SF Mono", "Fira Code", Menlo, monospace;
+        }
+
+        .model-tag {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .model-tag.bedrock-only {
+            background: #78350f;
+            color: #fbbf24;
+        }
+
+        .model-tag.current {
+            background: #065f46;
+            color: #6ee7b7;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: #065f46;
+            color: #6ee7b7;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="nav-brand">T3nets <span class="nav-badge">LOCAL</span></a>
+        <div class="nav-links">
+            <a href="/chat">Chat</a>
+            <a href="/health">Health</a>
+            <a href="/settings" class="active">Settings</a>
+        </div>
+        <div class="nav-right"></div>
+    </nav>
+
+    <div class="settings-container">
+        <div class="settings-header">
+            <h1>Settings</h1>
+            <p>Configure your T3nets agent</p>
+        </div>
+
+        <div class="section-title">AI Model</div>
+        <div id="model-list" class="model-list">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+
+    <div id="toast" class="toast">Model updated</div>
+
+    <script>
+        let currentModel = '';
+        let provider = 'anthropic';
+
+        async function loadSettings() {
+            try {
+                const resp = await fetch('/api/settings');
+                const data = await resp.json();
+                currentModel = data.ai_model || '';
+                provider = data.provider || 'anthropic';
+                renderModels(data.models || []);
+            } catch (err) {
+                console.error('Failed to load settings:', err);
+            }
+        }
+
+        function renderModels(models) {
+            const list = document.getElementById('model-list');
+            list.innerHTML = '';
+
+            for (const model of models) {
+                const div = document.createElement('div');
+                div.className = 'model-option';
+
+                const isSelected = model.id === currentModel;
+                const isDisabled = !model.available;
+
+                if (isSelected) div.classList.add('selected');
+                if (isDisabled) div.classList.add('disabled');
+
+                let tagHtml = '';
+                if (isSelected) {
+                    tagHtml = '<span class="model-tag current">Current</span>';
+                } else if (isDisabled) {
+                    tagHtml = '<span class="model-tag bedrock-only">Bedrock only</span>';
+                }
+
+                div.innerHTML = `
+                    <div class="model-radio"></div>
+                    <div class="model-info">
+                        <div class="model-name">${model.display_name}</div>
+                        <div class="model-id">${model.id}</div>
+                    </div>
+                    ${tagHtml}
+                `;
+
+                if (!isDisabled) {
+                    div.addEventListener('click', () => selectModel(model.id));
+                }
+
+                list.appendChild(div);
+            }
+        }
+
+        async function selectModel(modelId) {
+            if (modelId === currentModel) return;
+
+            try {
+                const resp = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ai_model: modelId }),
+                });
+
+                if (resp.ok) {
+                    currentModel = modelId;
+                    loadSettings();
+                    showToast('Model updated');
+                }
+            } catch (err) {
+                console.error('Failed to update model:', err);
+                showToast('Failed to update model');
+            }
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
+        loadSettings();
+    </script>
+</body>
+</html>

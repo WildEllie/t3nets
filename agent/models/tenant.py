@@ -12,7 +12,7 @@ class TenantSettings:
 
     # AI
     ai_provider: str = "bedrock"
-    ai_model: str = "claude-sonnet-4-5-20250929"
+    ai_model: str = ""  # set from BEDROCK_MODEL_ID at deploy time
     system_prompt_override: str = ""
     max_tokens_per_message: int = 4096
 

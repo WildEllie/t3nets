@@ -15,7 +15,19 @@ set -euo pipefail
 
 ENVIRONMENT="${ENVIRONMENT:-dev}"
 PROJECT="t3nets"
+
+# --- Load .env ---
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+else
+    echo "ERROR: .env file not found. Copy from .env.example and fill in values."
+    exit 1
+fi
+
 REGION="${AWS_REGION:-us-east-1}"
+MODEL_ID="${BEDROCK_MODEL_ID:-anthropic.claude-sonnet-4-5-20250929-v1:0}"
 
 NAME_PREFIX="${PROJECT}-${ENVIRONMENT}"
 TENANTS_TABLE="${NAME_PREFIX}-tenants"
@@ -27,17 +39,7 @@ echo "║  T3nets Seed                         ║"
 echo "║  Env: $ENVIRONMENT"
 echo "╚══════════════════════════════════════╝"
 echo ""
-
-# --- Load .env ---
-if [ -f .env ]; then
-    echo "→ Loading .env..."
-    set -a
-    source .env
-    set +a
-else
-    echo "ERROR: .env file not found. Copy from .env.example and fill in values."
-    exit 1
-fi
+echo "→ Loaded .env"
 
 # --- Seed tenant ---
 echo "→ Seeding tenant '${TENANT_ID}' into DynamoDB..."
@@ -51,7 +53,7 @@ aws dynamodb put-item \
         "name": {"S": "T3nets Default"},
         "status": {"S": "active"},
         "created_at": {"S": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"},
-        "settings": {"S": "{\"enabled_skills\": [\"sprint_status\"], \"ai_model\": \"anthropic.claude-3-5-sonnet-20241022-v2:0\"}"}
+        "settings": {"S": "{\"enabled_skills\": [\"sprint_status\"], \"ai_model\": \"'"${MODEL_ID}"'\"}"}
     }' \
     --no-cli-pager
 echo "  ✓ Tenant seeded"

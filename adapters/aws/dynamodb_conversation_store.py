@@ -56,7 +56,10 @@ class DynamoDBConversationStore(ConversationStore):
         # Get existing messages
         existing = await self.get_conversation(tenant_id, conversation_id, max_turns=100)
         existing.append({"role": "user", "content": user_message})
-        existing.append({"role": "assistant", "content": assistant_message})
+        assistant_msg: dict = {"role": "assistant", "content": assistant_message}
+        if metadata:
+            assistant_msg["metadata"] = metadata
+        existing.append(assistant_msg)
 
         self.table.put_item(
             Item={

@@ -12,7 +12,11 @@ from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolDefinition,
 class BedrockProvider(AIProvider):
     """Calls Claude via Amazon Bedrock using the Converse API. Region fixed to us-east-1."""
 
-    def __init__(self, region: str = "us-east-1", model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"):
+    def __init__(self, region: str = "us-east-1", model_id: str | None = None):
+        if not model_id:
+            raise ValueError(
+                "model_id is required — set BEDROCK_MODEL_ID env var or pass explicitly"
+            )
         self.client = boto3.client("bedrock-runtime", region_name=region or "us-east-1")
         self.model_id = model_id
 
@@ -24,7 +28,7 @@ class BedrockProvider(AIProvider):
         tools: list[ToolDefinition],
         max_tokens: int = 4096,
     ) -> AIResponse:
-        request = self._build_request(system, messages, tools, max_tokens)
+        request = self._build_request(model, system, messages, tools, max_tokens)
         response = self.client.converse(**request)
         return self._parse_response(response)
 
@@ -53,12 +57,13 @@ class BedrockProvider(AIProvider):
             }
         ]
 
-        request = self._build_request(system, messages, tools, max_tokens)
+        request = self._build_request(model, system, messages, tools, max_tokens)
         response = self.client.converse(**request)
         return self._parse_response(response)
 
     def _build_request(
         self,
+        model: str,
         system: str,
         messages: list[dict],
         tools: list[ToolDefinition],
@@ -66,7 +71,7 @@ class BedrockProvider(AIProvider):
     ) -> dict:
         """Build Bedrock Converse API request."""
         request = {
-            "modelId": self.model_id,
+            "modelId": model or self.model_id,
             "system": [{"text": system}],
             "messages": self._convert_messages(messages),
             "inferenceConfig": {
@@ -104,6 +109,7 @@ class BedrockProvider(AIProvider):
                 bedrock_content = []
                 for block in content:
                     if isinstance(block, dict):
+                        # Anthropic API format → convert to Bedrock format
                         if block.get("type") == "tool_use":
                             bedrock_content.append({
                                 "toolUse": {
@@ -121,6 +127,11 @@ class BedrockProvider(AIProvider):
                                     else [{"json": block["content"]}],
                                 }
                             })
+                        # Already in Bedrock-native format — pass through
+                        elif "toolUse" in block:
+                            bedrock_content.append(block)
+                        elif "toolResult" in block:
+                            bedrock_content.append(block)
                         else:
                             bedrock_content.append({"text": str(block)})
                     else:

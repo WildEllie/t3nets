@@ -75,7 +75,10 @@ class SQLiteConversationStore(ConversationStore):
                 messages = []
 
             messages.append({"role": "user", "content": user_message})
-            messages.append({"role": "assistant", "content": assistant_message})
+            assistant_msg: dict = {"role": "assistant", "content": assistant_message}
+            if metadata:
+                assistant_msg["metadata"] = metadata
+            messages.append(assistant_msg)
 
             conn.execute(
                 """INSERT INTO conversations (tenant_id, conversation_id, messages, updated_at)

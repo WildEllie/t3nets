@@ -40,6 +40,12 @@ from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
 from adapters.local.env_secrets import EnvSecretsProvider
 from adapters.local.direct_bus import DirectBus
+from agent.models.ai_models import (
+    DEFAULT_MODEL_ID,
+    get_model,
+    get_model_for_provider,
+    get_models_for_provider,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +65,7 @@ started_at: float = 0.0
 
 DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
-DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+PROVIDER = "anthropic"
 
 # Stats for the session
 stats = {
@@ -80,6 +86,24 @@ def _run_async(coro):
 def _format_raw_json(data: dict) -> str:
     """Format raw JSON for dashboard display."""
     return json.dumps(data, indent=2, default=str)
+
+
+def _resolve_model(tenant):
+    """Resolve the tenant's ai_model setting to an Anthropic API model ID and short name."""
+    model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
+    model = get_model(model_id)
+    if not model:
+        # Unknown model in tenant settings — fall back to registry default
+        logger.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL_ID}")
+        model_id = DEFAULT_MODEL_ID
+        model = get_model(model_id)
+    api_id = get_model_for_provider(model_id, PROVIDER)
+    return api_id or model.anthropic_id, model.short_name
+
+
+def _strip_metadata(messages: list[dict]) -> list[dict]:
+    """Strip metadata from conversation history before sending to the AI provider."""
+    return [{"role": m["role"], "content": m["content"]} for m in messages]
 
 
 def _uptime_human(seconds: float) -> str:
@@ -109,8 +133,14 @@ class DevHandler(BaseHTTPRequestHandler):
             self._serve_file("chat.html")
         elif path == "/health":
             self._serve_file("health.html")
+        elif path == "/settings":
+            self._serve_file("settings.html")
         elif path == "/api/health":
             self._handle_health_api()
+        elif path == "/api/settings":
+            self._handle_settings_get()
+        elif path == "/api/history":
+            self._handle_history()
         else:
             self.send_error(404)
 
@@ -121,6 +151,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_chat()
         elif path == "/api/clear":
             self._handle_clear()
+        elif path == "/api/settings":
+            self._handle_settings_post()
         else:
             self.send_error(404)
 
@@ -173,7 +205,7 @@ class DevHandler(BaseHTTPRequestHandler):
                 },
                 "ai": {
                     "provider": "anthropic (direct)",
-                    "model": DEFAULT_MODEL,
+                    "model": _resolve_model(tenant)[0],
                     "api_key_preview": key_preview,
                     "total_tokens": stats["total_tokens"],
                 },
@@ -197,6 +229,54 @@ class DevHandler(BaseHTTPRequestHandler):
                 "error": str(e),
             }, 500)
 
+    def _handle_settings_get(self):
+        """Return current settings and available models."""
+        try:
+            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            self._json_response({
+                "ai_model": tenant.settings.ai_model or DEFAULT_MODEL_ID,
+                "provider": PROVIDER,
+                "models": get_models_for_provider(PROVIDER),
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_history(self):
+        """Return conversation history for the default conversation."""
+        try:
+            history = _run_async(
+                memory.get_conversation(DEFAULT_TENANT, DEFAULT_CONVERSATION)
+            )
+            self._json_response({"messages": history})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_settings_post(self):
+        """Update tenant settings."""
+        try:
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+
+            if "ai_model" in body:
+                model_id = body["ai_model"]
+                model = get_model(model_id)
+                if not model:
+                    self._json_response({"error": f"Unknown model: {model_id}"}, 400)
+                    return
+                if PROVIDER not in model.providers:
+                    self._json_response(
+                        {"error": f"Model '{model_id}' not available for {PROVIDER}"},
+                        400,
+                    )
+                    return
+                tenant.settings.ai_model = model_id
+                _run_async(tenants.update_tenant(tenant))
+                logger.info(f"Model changed to: {model.display_name} ({model_id})")
+
+            self._json_response({"ok": True})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
     def _handle_chat(self):
         """Handle a chat message with hybrid routing."""
         try:
@@ -216,13 +296,14 @@ class DevHandler(BaseHTTPRequestHandler):
 
             is_raw_response = False
 
-            # Load conversation history
-            history = _run_async(
+            # Load conversation history (strip metadata before sending to AI)
+            history = _strip_metadata(_run_async(
                 memory.get_conversation(DEFAULT_TENANT, conversation_id)
-            )
+            ))
 
-            # Get tenant
+            # Get tenant and resolve model
             tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            active_model, model_short_name = _resolve_model(tenant)
 
             system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
@@ -235,7 +316,7 @@ When you have data to present, format it clearly with structure."""
 
                 messages = history + [{"role": "user", "content": clean_text}]
                 response = _run_async(ai.chat(
-                    model=DEFAULT_MODEL,
+                    model=active_model,
                     system=system,
                     messages=messages,
                     tools=[],
@@ -306,7 +387,7 @@ Include risk assessment and actionable suggestions where relevant."""
 
                         messages = history + [{"role": "user", "content": format_prompt}]
                         response = _run_async(ai.chat(
-                            model=DEFAULT_MODEL,
+                            model=active_model,
                             system=system,
                             messages=messages,
                             tools=[],
@@ -330,7 +411,7 @@ Include risk assessment and actionable suggestions where relevant."""
 
                     messages = history + [{"role": "user", "content": clean_text}]
                     response = _run_async(ai.chat(
-                        model=DEFAULT_MODEL,
+                        model=active_model,
                         system=system,
                         messages=messages,
                         tools=tools,
@@ -380,7 +461,7 @@ Include risk assessment and actionable suggestions where relevant."""
                             ]
 
                             final_response = _run_async(ai.chat_with_tool_result(
-                                model=DEFAULT_MODEL,
+                                model=active_model,
                                 system=system,
                                 messages=messages_with_tool,
                                 tools=tools,
@@ -406,6 +487,11 @@ Include risk assessment and actionable suggestions where relevant."""
             if not is_raw_response:
                 _run_async(memory.save_turn(
                     DEFAULT_TENANT, conversation_id, clean_text, assistant_text,
+                    metadata={
+                        "route": route_type,
+                        "model": model_short_name,
+                        "tokens": total_tokens,
+                    },
                 ))
 
             self._json_response({
@@ -414,6 +500,7 @@ Include risk assessment and actionable suggestions where relevant."""
                 "tokens": total_tokens,
                 "route": route_type,
                 "raw": is_raw_response,
+                "model": model_short_name,
             })
 
         except Exception as e:
@@ -502,6 +589,10 @@ def init():
         name="Local Development",
         enabled_skills=skills.list_skill_names(),
     )
+    # Set default model if not already set
+    if not tenant.settings.ai_model:
+        tenant.settings.ai_model = DEFAULT_MODEL_ID
+        _run_async(tenants.update_tenant(tenant))
     logger.info(f"Tenant: {tenant.name} (skills: {tenant.settings.enabled_skills})")
 
     connected = _run_async(secrets.list_integrations("local"))

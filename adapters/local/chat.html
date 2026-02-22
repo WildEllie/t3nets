@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>T3nets — Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -101,7 +102,6 @@
             border-radius: 12px;
             line-height: 1.5;
             font-size: 14px;
-            white-space: pre-wrap;
             word-wrap: break-word;
         }
 
@@ -110,6 +110,7 @@
             background: #2563eb;
             color: #fff;
             border-bottom-right-radius: 4px;
+            white-space: pre-wrap;
         }
 
         .message.assistant {
@@ -120,6 +121,41 @@
         }
 
         .message.assistant strong { color: #fff; }
+
+        /* Markdown rendering in assistant messages */
+        .message.assistant p { margin: 0 0 8px 0; }
+        .message.assistant p:last-child { margin-bottom: 0; }
+        .message.assistant ul, .message.assistant ol { margin: 4px 0 8px 20px; }
+        .message.assistant li { margin: 2px 0; }
+        .message.assistant h1, .message.assistant h2, .message.assistant h3 {
+            color: #fff; margin: 12px 0 6px 0; font-size: 15px;
+        }
+        .message.assistant h1 { font-size: 17px; }
+        .message.assistant code {
+            background: #0d1117; padding: 1px 5px; border-radius: 3px;
+            font-family: "SF Mono", Menlo, monospace; font-size: 12px;
+        }
+        .message.assistant pre {
+            background: #0d1117; padding: 10px; border-radius: 6px;
+            overflow-x: auto; margin: 8px 0;
+        }
+        .message.assistant pre code { padding: 0; background: none; }
+
+        /* Tables */
+        .message.assistant table {
+            border-collapse: collapse; width: 100%; margin: 8px 0;
+            font-size: 13px;
+        }
+        .message.assistant th {
+            background: #2a2a2a; color: #e0e0e0; font-weight: 600;
+            text-align: left; padding: 6px 10px;
+            border: 1px solid #3a3a3a;
+        }
+        .message.assistant td {
+            padding: 5px 10px; border: 1px solid #333;
+        }
+        .message.assistant tr:nth-child(even) { background: #1a1a1a; }
+        .message.assistant a { color: #7dd3fc; }
 
         .message.assistant.raw-message {
             max-width: 95%;
@@ -156,6 +192,7 @@
         .route-badge.ai { background: #1e3a5f; color: #7dd3fc; }
         .route-badge.conversational { background: #3f3f46; color: #a1a1aa; }
         .route-badge.raw { background: #78350f; color: #fbbf24; }
+        .route-badge.model { background: #4c1d95; color: #c4b5fd; }
 
         /* JSON syntax highlighting for raw output */
         .json-display {
@@ -276,6 +313,7 @@
         <div class="nav-links">
             <a href="/chat" class="active">Chat</a>
             <a href="/health">Health</a>
+            <a href="/settings">Settings</a>
         </div>
         <div class="nav-right">
             <button class="nav-btn" onclick="clearChat()">Clear Chat</button>
@@ -304,7 +342,7 @@
         const chatContainer = document.getElementById('chat-container');
         const input = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
-        let conversationId = 'dashboard-' + Date.now();
+        let conversationId = 'dashboard-default';
 
         input.addEventListener('input', function() {
             this.style.height = 'auto';
@@ -331,7 +369,6 @@
                     body: JSON.stringify({ conversation_id: conversationId }),
                 });
             } catch (e) {}
-            conversationId = 'dashboard-' + Date.now();
             chatContainer.innerHTML = `
                 <div class="welcome">
                     <h2>👋 Chat cleared. Fresh start!</h2>
@@ -391,7 +428,7 @@
                 if (data.error) {
                     addMessage('Error: ' + data.error, 'error');
                 } else {
-                    addMessage(data.text, 'assistant', data.tokens, data.route, data.raw);
+                    addMessage(data.text, 'assistant', data.tokens, data.route, data.raw, data.model);
                 }
             } catch (err) {
                 thinking.remove();
@@ -403,7 +440,7 @@
             input.focus();
         }
 
-        function addMessage(text, type, tokens, route, isRaw) {
+        function addMessage(text, type, tokens, route, isRaw, modelName) {
             const div = document.createElement('div');
             div.className = 'message ' + type;
 
@@ -414,6 +451,9 @@
                 jsonDiv.className = 'json-display';
                 jsonDiv.innerHTML = syntaxHighlightJson(text);
                 div.appendChild(jsonDiv);
+            } else if (type === 'assistant') {
+                // Render markdown for assistant messages
+                div.innerHTML = marked.parse(text);
             } else {
                 div.textContent = text;
             }
@@ -432,6 +472,13 @@
                     };
                     badge.textContent = labels[route] || route;
                     meta.appendChild(badge);
+                }
+
+                if (modelName) {
+                    const modelBadge = document.createElement('span');
+                    modelBadge.className = 'route-badge model';
+                    modelBadge.textContent = modelName;
+                    meta.appendChild(modelBadge);
                 }
 
                 if (isRaw) {
@@ -458,6 +505,31 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        async function loadHistory() {
+            try {
+                const resp = await fetch('/api/history');
+                const data = await resp.json();
+                if (data.messages && data.messages.length > 0) {
+                    const welcome = chatContainer.querySelector('.welcome');
+                    if (welcome) welcome.remove();
+                    for (const msg of data.messages) {
+                        const meta = msg.metadata || {};
+                        addMessage(
+                            msg.content,
+                            msg.role === 'user' ? 'user' : 'assistant',
+                            meta.tokens,
+                            meta.route,
+                            false,
+                            meta.model,
+                        );
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load history:', e);
+            }
+        }
+
+        loadHistory();
         input.focus();
     </script>
 </body>

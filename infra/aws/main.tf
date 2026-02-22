@@ -29,6 +29,19 @@ terraform {
   }
 }
 
+locals {
+  # Map AWS region to Bedrock geographic inference profile prefix.
+  # Newer models (Sonnet 4.5+, Nova) require geographic prefixes, not region-specific ones.
+  bedrock_geo_prefix = (
+    startswith(var.aws_region, "us-") ? "us" :
+    startswith(var.aws_region, "eu-") ? "eu" :
+    startswith(var.aws_region, "ap-") ? "apac" :
+    startswith(var.aws_region, "ca-") ? "us" :
+    startswith(var.aws_region, "sa-") ? "us" :
+    "us"
+  )
+}
+
 provider "aws" {
   region = var.aws_region
 
@@ -95,7 +108,9 @@ module "compute" {
   router_cpu    = var.router_cpu
   router_memory = var.router_memory
 
-  bedrock_model_id = var.bedrock_model_id
+  # Geographic prefix for Bedrock inference profiles: us., eu., apac.
+  # Single-region prefixes (e.g. us-east-1.) are NOT valid for newer models.
+  bedrock_model_id = "${local.bedrock_geo_prefix}.${var.bedrock_model_id}"
 }
 
 # --- API Gateway ---

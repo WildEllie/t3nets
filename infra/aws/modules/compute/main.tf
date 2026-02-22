@@ -220,8 +220,15 @@ resource "aws_iam_role_policy" "ecs_task" {
           "bedrock:InvokeModelWithResponseStream",
           "bedrock:Converse",
         ]
+        # Geographic cross-region inference (us. prefix) routes to us-east-1,
+        # us-east-2, and us-west-2 — need access in all three regions.
         Resource = [
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/*",
+          "arn:aws:bedrock:us-east-1::foundation-model/*",
+          "arn:aws:bedrock:us-east-2::foundation-model/*",
+          "arn:aws:bedrock:us-west-2::foundation-model/*",
+          "arn:aws:bedrock:us-east-1:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+          "arn:aws:bedrock:us-east-2:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+          "arn:aws:bedrock:us-west-2:${data.aws_caller_identity.current.account_id}:inference-profile/*",
         ]
       },
       {
