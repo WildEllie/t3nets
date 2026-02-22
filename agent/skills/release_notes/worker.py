@@ -1,0 +1,302 @@
+"""
+Release Notes Worker
+
+Follows the T3nets skill contract:
+    def execute(params: dict, secrets: dict) -> dict
+
+Pulls Jira releases and issue breakdowns for release note generation.
+No cloud imports. No Lambda knowledge. Pure business logic.
+Secrets are injected by the infrastructure layer.
+"""
+
+import json
+import urllib.request
+import urllib.parse
+import base64
+from datetime import datetime
+
+# Timeout for Jira API requests (seconds)
+_REQUEST_TIMEOUT = 30
+
+
+def execute(params: dict, secrets: dict) -> dict:
+    """
+    Skill contract entry point.
+
+    Args:
+        params: {"action": "list_releases|summarize", "release_name": "..."}
+        secrets: {"url": "...", "email": "...", "api_token": "...", "board_id": "..."}
+
+    Returns:
+        dict with release data or {"error": "..."}
+    """
+    required = ["url", "email", "api_token"]
+    missing = [k for k in required if not secrets.get(k)]
+    if missing:
+        return {"error": f"Missing Jira credentials: {', '.join(missing)}"}
+
+    action = params.get("action", "list_releases")
+
+    try:
+        if action == "list_releases":
+            return _list_releases(secrets)
+        elif action == "summarize":
+            release_name = params.get("release_name", "")
+            if not release_name:
+                return {"error": "release_name is required for 'summarize' action"}
+            return _summarize_release(secrets, release_name)
+        else:
+            return {"error": f"Unknown action: {action}"}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else ""
+        return {"error": f"Jira API error ({e.code}): {body[:500]}"}
+    except Exception as e:
+        return {"error": f"Jira API error: {str(e)}"}
+
+
+# --- Jira API helpers ---
+
+
+def _make_headers(secrets: dict) -> dict:
+    """Create Basic Auth headers for Jira Cloud."""
+    creds = base64.b64encode(
+        f"{secrets['email']}:{secrets['api_token']}".encode()
+    ).decode()
+    return {
+        "Authorization": f"Basic {creds}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _jira_rest_request(secrets: dict, endpoint: str) -> dict:
+    """Make authenticated request to Jira Cloud REST API v3."""
+    url = f"{secrets['url'].rstrip('/')}/rest/api/3/{endpoint}"
+    req = urllib.request.Request(url, headers=_make_headers(secrets))
+    with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as response:
+        return json.loads(response.read().decode())
+
+
+def _jira_search(secrets: dict, jql: str, fields: list[str],
+                 max_per_page: int = 100) -> list[dict]:
+    """Execute a JQL search with automatic pagination."""
+    all_issues = []
+    start_at = 0
+
+    while True:
+        params = urllib.parse.urlencode({
+            "jql": jql,
+            "startAt": start_at,
+            "maxResults": max_per_page,
+            "fields": ",".join(fields),
+        })
+        data = _jira_rest_request(secrets, f"search?{params}")
+        issues = data.get("issues", [])
+        all_issues.extend(issues)
+        total = data.get("total", 0)
+
+        if len(all_issues) >= total or not issues:
+            break
+        start_at += max_per_page
+
+    return all_issues
+
+
+# --- Actions ---
+
+
+def _list_releases(secrets: dict) -> dict:
+    """List all fix versions (releases) for the project."""
+    # Derive project key from board if available, or list all projects
+    project_key = secrets.get("project_key", "")
+
+    if not project_key:
+        # Try to get from board
+        project_key = _get_project_key_from_board(secrets)
+
+    if not project_key:
+        return {"error": "Could not determine project key. Add 'project_key' to your Jira integration settings."}
+
+    data = _jira_rest_request(secrets, f"project/{project_key}/versions")
+
+    released = []
+    unreleased = []
+
+    for version in data:
+        entry = {
+            "name": version.get("name", ""),
+            "id": version.get("id", ""),
+            "description": version.get("description", ""),
+            "released": version.get("released", False),
+            "release_date": version.get("releaseDate", ""),
+            "start_date": version.get("startDate", ""),
+            "archived": version.get("archived", False),
+        }
+        if version.get("released"):
+            released.append(entry)
+        else:
+            unreleased.append(entry)
+
+    # Sort released by date descending, unreleased by name
+    released.sort(key=lambda v: v.get("release_date", ""), reverse=True)
+    unreleased.sort(key=lambda v: v.get("name", ""))
+
+    return {
+        "project": project_key,
+        "total_versions": len(data),
+        "released": released,
+        "unreleased": unreleased,
+    }
+
+
+def _summarize_release(secrets: dict, release_name: str) -> dict:
+    """Pull all issues for a release and structure for release notes."""
+    project_key = secrets.get("project_key", "")
+    if not project_key:
+        project_key = _get_project_key_from_board(secrets)
+
+    # Build JQL
+    jql = f'fixVersion = "{release_name}"'
+    if project_key:
+        jql = f'project = "{project_key}" AND {jql}'
+    jql += " ORDER BY issuetype ASC, priority ASC, key ASC"
+
+    fields = [
+        "summary", "status", "issuetype", "priority",
+        "assignee", "reporter", "created", "updated",
+        "resolutiondate", "resolution", "labels",
+        "components", "fixVersions", "customfield_10016",
+    ]
+
+    raw_issues = _jira_search(secrets, jql, fields)
+
+    if not raw_issues:
+        return {
+            "release": release_name,
+            "total_issues": 0,
+            "error": f"No issues found for release '{release_name}'",
+        }
+
+    # Parse issues
+    issues = [_extract_issue(secrets, issue) for issue in raw_issues]
+
+    # Group by type
+    by_type = {}
+    for issue in issues:
+        issue_type = issue["issue_type"]
+        by_type.setdefault(issue_type, []).append(issue)
+
+    # Stats
+    statuses = {}
+    priorities = {}
+    assignees = {}
+    total_points = 0
+
+    for issue in issues:
+        statuses[issue["status"]] = statuses.get(issue["status"], 0) + 1
+        priorities[issue["priority"]] = priorities.get(issue["priority"], 0) + 1
+        assignees[issue["assignee"]] = assignees.get(issue["assignee"], 0) + 1
+        total_points += issue.get("story_points") or 0
+
+    # Release version metadata
+    version_info = _get_version_info(secrets, project_key, release_name)
+
+    return {
+        "release": release_name,
+        "version_info": version_info,
+        "total_issues": len(issues),
+        "total_story_points": total_points,
+        "summary": {
+            "by_status": statuses,
+            "by_priority": priorities,
+            "by_type": {t: len(items) for t, items in by_type.items()},
+            "contributors": assignees,
+        },
+        "issues_by_type": by_type,
+    }
+
+
+# --- Helpers ---
+
+
+def _extract_issue(secrets: dict, issue: dict) -> dict:
+    """Flatten a Jira issue into a clean dict."""
+    f = issue.get("fields", {})
+    base_url = secrets["url"].rstrip("/")
+    key = issue.get("key", "")
+
+    return {
+        "key": key,
+        "summary": f.get("summary", ""),
+        "status": (f.get("status") or {}).get("name", ""),
+        "issue_type": (f.get("issuetype") or {}).get("name", ""),
+        "priority": (f.get("priority") or {}).get("name", ""),
+        "assignee": (f.get("assignee") or {}).get("displayName", "Unassigned"),
+        "reporter": (f.get("reporter") or {}).get("displayName", ""),
+        "resolution": (f.get("resolution") or {}).get("name", "Unresolved"),
+        "resolved_date": f.get("resolutiondate", ""),
+        "labels": f.get("labels", []),
+        "components": [c.get("name", "") for c in (f.get("components") or [])],
+        "story_points": f.get("customfield_10016"),
+        "url": f"{base_url}/browse/{key}",
+    }
+
+
+def _get_version_info(secrets: dict, project_key: str, release_name: str) -> dict:
+    """Get metadata for a specific version."""
+    if not project_key:
+        return {}
+
+    try:
+        versions = _jira_rest_request(secrets, f"project/{project_key}/versions")
+        for v in versions:
+            if v.get("name") == release_name:
+                return {
+                    "name": v.get("name", ""),
+                    "description": v.get("description", ""),
+                    "released": v.get("released", False),
+                    "release_date": v.get("releaseDate", ""),
+                    "start_date": v.get("startDate", ""),
+                }
+    except Exception:
+        pass
+
+    return {}
+
+
+def _get_project_key_from_board(secrets: dict) -> str:
+    """Try to derive the project key from the board configuration."""
+    board_id = secrets.get("board_id", "")
+    if not board_id:
+        return ""
+
+    try:
+        url = f"{secrets['url'].rstrip('/')}/rest/agile/1.0/board/{board_id}/configuration"
+        req = urllib.request.Request(url, headers=_make_headers(secrets))
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as response:
+            data = json.loads(response.read().decode())
+
+        # The filter query usually contains the project key
+        filter_id = data.get("filter", {}).get("id", "")
+        if filter_id:
+            filter_data = _jira_rest_request(secrets, f"filter/{filter_id}")
+            jql = filter_data.get("jql", "")
+            # Try to extract project key from JQL like "project = PROJ ..."
+            if "project" in jql.lower():
+                parts = jql.split()
+                for i, part in enumerate(parts):
+                    if part.lower() == "project" and i + 2 < len(parts):
+                        key = parts[i + 2].strip('"').strip("'")
+                        if key and key.isalpha():
+                            return key
+
+        # Fallback: get project from board location
+        location = data.get("location", {})
+        project_key = location.get("projectKey", "")
+        if project_key:
+            return project_key
+
+    except Exception:
+        pass
+
+    return ""
