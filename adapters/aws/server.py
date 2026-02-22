@@ -133,18 +133,18 @@ def _strip_metadata(messages: list[dict]) -> list[dict]:
     return [{"role": m["role"], "content": m["content"]} for m in messages]
 
 
-def _get_auth_tenant(headers) -> str:
-    """Extract tenant_id from JWT in Authorization header.
+def _get_auth_info(headers) -> tuple[str, str]:
+    """Extract (tenant_id, user_email) from JWT in Authorization header.
 
     Falls back to DEFAULT_TENANT if no Cognito is configured or no auth header.
     """
     if not COGNITO_USER_POOL_ID:
-        return DEFAULT_TENANT
+        return DEFAULT_TENANT, ""
     try:
         auth = extract_auth(headers)
-        return auth.tenant_id
+        return auth.tenant_id, auth.email
     except AuthError:
-        return DEFAULT_TENANT
+        return DEFAULT_TENANT, ""
 
 
 def _uptime_human(seconds: float) -> str:
@@ -288,7 +288,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_settings_get(self):
         """Return current settings and available models."""
         try:
-            tenant_id = _get_auth_tenant(self.headers)
+            tenant_id, _ = _get_auth_info(self.headers)
             tenant = _run_async(tenants.get_tenant(tenant_id))
             self._json_response({
                 "ai_model": tenant.settings.ai_model or DEFAULT_MODEL_ID,
@@ -303,7 +303,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_history(self):
         """Return conversation history for the authenticated tenant."""
         try:
-            tenant_id = _get_auth_tenant(self.headers)
+            tenant_id, _ = _get_auth_info(self.headers)
             history = _run_async(
                 memory.get_conversation(tenant_id, "dashboard-default")
             )
@@ -318,7 +318,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_settings_post(self):
         """Update tenant settings."""
         try:
-            tenant_id = _get_auth_tenant(self.headers)
+            tenant_id, _ = _get_auth_info(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             tenant = _run_async(tenants.get_tenant(tenant_id))
 
@@ -345,7 +345,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_chat(self):
         """Handle chat — identical logic to local, different adapters underneath."""
         try:
-            tenant_id = _get_auth_tenant(self.headers)
+            tenant_id, user_email = _get_auth_info(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             text = body.get("text", "").strip()
             if not text:
@@ -434,14 +434,17 @@ When you have data to present, format it clearly with structure."""
                         route_type = "ai"
 
             stats["total_tokens"] += total_tokens
+            chat_metadata: dict = {
+                "route": route_type,
+                "model": model_short_name,
+                "tokens": total_tokens,
+            }
+            if user_email:
+                chat_metadata["user_email"] = user_email
             if not is_raw_response:
                 _run_async(memory.save_turn(
                     tenant_id, conversation_id, clean_text, assistant_text,
-                    metadata={
-                        "route": route_type,
-                        "model": model_short_name,
-                        "tokens": total_tokens,
-                    },
+                    metadata=chat_metadata,
                 ))
 
             self._json_response({
@@ -451,6 +454,7 @@ When you have data to present, format it clearly with structure."""
                 "route": route_type,
                 "raw": is_raw_response,
                 "model": model_short_name,
+                "user_email": user_email,
             })
         except Exception as e:
             logger.exception("Chat error")
@@ -463,7 +467,7 @@ When you have data to present, format it clearly with structure."""
 
     def _handle_clear(self):
         try:
-            tenant_id = _get_auth_tenant(self.headers)
+            tenant_id, _ = _get_auth_info(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             cid = body.get("conversation_id", "default")
             _run_async(memory.clear_conversation(tenant_id, cid))

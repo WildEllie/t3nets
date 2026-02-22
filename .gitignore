@@ -26,7 +26,7 @@ infra/**/*.tfstate.backup
 infra/**/*.tfplan
 
 # Local data
-data/
+/data/
 *.sqlite
 *.db
 
