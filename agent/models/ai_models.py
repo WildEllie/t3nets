@@ -68,22 +68,6 @@ AVAILABLE_MODELS: dict[str, AIModel] = {
         bedrock_id="meta.llama3-2-1b-instruct-v1:0",
         providers=["bedrock"],
     ),
-    "mistral-voxtral-mini": AIModel(
-        id="mistral-voxtral-mini",
-        short_name="Voxtral Mini 3B",
-        display_name="Mistral Voxtral Mini 3B 2507",
-        anthropic_id="",
-        bedrock_id="mistral.voxtral-mini-3b-2507-v1:0",
-        providers=["bedrock"],
-    ),
-    "gemma-3-4b": AIModel(
-        id="gemma-3-4b",
-        short_name="Gemma 3 4B",
-        display_name="Google Gemma 3 4B",
-        anthropic_id="",
-        bedrock_id="google.gemma-3-4b-v1:0",
-        providers=["bedrock"],
-    ),
 }
 
 DEFAULT_MODEL_ID = "claude-sonnet-4-5"
