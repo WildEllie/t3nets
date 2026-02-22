@@ -232,7 +232,9 @@
             <a href="/health">Health</a>
             <a href="/settings" class="active">Settings</a>
         </div>
-        <div class="nav-right"></div>
+        <div class="nav-right">
+            <button class="nav-btn" id="logout-btn" style="display:none;" onclick="logout()">Logout</button>
+        </div>
     </nav>
 
     <div class="settings-container">
@@ -250,12 +252,40 @@
     <div id="toast" class="toast">Model updated</div>
 
     <script>
+        // --- Auth helper ---
+        function getAuthHeaders() {
+            const token = localStorage.getItem('t3nets_id_token');
+            if (token) return { 'Authorization': 'Bearer ' + token };
+            return {};
+        }
+
+        async function checkAuth() {
+            try {
+                const resp = await fetch('/api/auth/config');
+                const config = await resp.json();
+                if (config.enabled) {
+                    const token = localStorage.getItem('t3nets_id_token');
+                    if (!token) { window.location.href = '/login'; return; }
+                    document.getElementById('logout-btn').style.display = 'inline-block';
+                }
+            } catch (e) { /* auth not available — continue without */ }
+        }
+
+        function logout() {
+            localStorage.removeItem('t3nets_id_token');
+            localStorage.removeItem('t3nets_access_token');
+            localStorage.removeItem('t3nets_refresh_token');
+            window.location.href = '/login';
+        }
+
+        checkAuth();
+
         let currentModel = '';
         let provider = 'anthropic';
 
         async function loadSettings() {
             try {
-                const resp = await fetch('/api/settings');
+                const resp = await fetch('/api/settings', { headers: getAuthHeaders() });
                 const data = await resp.json();
                 currentModel = data.ai_model || '';
                 provider = data.provider || 'anthropic';
@@ -315,7 +345,7 @@
             try {
                 const resp = await fetch('/api/settings', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     body: JSON.stringify({ ai_model: modelId }),
                 });
 

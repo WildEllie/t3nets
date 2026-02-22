@@ -164,12 +164,51 @@
         }
 
         .message.error {
-            align-self: center;
-            background: #7f1d1d;
+            align-self: flex-start;
+            max-width: 80%;
+            background: #1e1e1e;
             border: 1px solid #991b1b;
-            color: #fecaca;
-            font-size: 13px;
+            border-left: 3px solid #ef4444;
+            color: #e0e0e0;
+            font-size: 14px;
+            line-height: 1.5;
         }
+
+        .message.error.severity-info {
+            border-left-color: #3b82f6;
+            border-color: #1e3a5f;
+        }
+
+        .message.error.severity-config {
+            border-left-color: #f59e0b;
+            border-color: #78350f;
+        }
+
+        .message.error.severity-critical {
+            border-left-color: #ef4444;
+            border-color: #991b1b;
+        }
+
+        .error-action {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #888;
+            font-style: italic;
+        }
+
+        .error-badge {
+            display: inline-block;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .error-badge.info { background: #1e3a5f; color: #7dd3fc; }
+        .error-badge.config { background: #78350f; color: #fbbf24; }
+        .error-badge.critical { background: #7f1d1d; color: #fca5a5; }
 
         .message .meta {
             margin-top: 8px;
@@ -317,6 +356,7 @@
         </div>
         <div class="nav-right">
             <button class="nav-btn" onclick="clearChat()">Clear Chat</button>
+            <button class="nav-btn" id="logout-btn" style="display:none;" onclick="logout()">Logout</button>
         </div>
     </nav>
 
@@ -339,6 +379,34 @@
     </div>
 
     <script>
+        // --- Auth helper ---
+        function getAuthHeaders() {
+            const token = localStorage.getItem('t3nets_id_token');
+            if (token) return { 'Authorization': 'Bearer ' + token };
+            return {};
+        }
+
+        async function checkAuth() {
+            try {
+                const resp = await fetch('/api/auth/config');
+                const config = await resp.json();
+                if (config.enabled) {
+                    const token = localStorage.getItem('t3nets_id_token');
+                    if (!token) { window.location.href = '/login'; return; }
+                    document.getElementById('logout-btn').style.display = 'inline-block';
+                }
+            } catch (e) { /* auth not available — continue without */ }
+        }
+
+        function logout() {
+            localStorage.removeItem('t3nets_id_token');
+            localStorage.removeItem('t3nets_access_token');
+            localStorage.removeItem('t3nets_refresh_token');
+            window.location.href = '/login';
+        }
+
+        checkAuth();
+
         const chatContainer = document.getElementById('chat-container');
         const input = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
@@ -365,7 +433,7 @@
             try {
                 await fetch('/api/clear', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     body: JSON.stringify({ conversation_id: conversationId }),
                 });
             } catch (e) {}
@@ -415,7 +483,7 @@
             try {
                 const response = await fetch('/api/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     body: JSON.stringify({
                         text: text,
                         conversation_id: conversationId,
@@ -426,7 +494,7 @@
                 thinking.remove();
 
                 if (data.error) {
-                    addMessage('Error: ' + data.error, 'error');
+                    addErrorMessage(data);
                 } else {
                     addMessage(data.text, 'assistant', data.tokens, data.route, data.raw, data.model);
                 }
@@ -505,9 +573,38 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        function addErrorMessage(data) {
+            const div = document.createElement('div');
+            const severity = data.severity || 'info';
+            div.className = 'message error severity-' + severity;
+
+            let html = '';
+
+            // Severity badge
+            const badgeLabels = { info: 'transient', config: 'config issue', critical: 'critical' };
+            html += '<span class="error-badge ' + severity + '">'
+                + (badgeLabels[severity] || severity) + '</span>';
+
+            if (data.admin_required) {
+                html += ' <span class="error-badge config">admin</span>';
+            }
+
+            // Message
+            html += '<div style="margin-top:4px;">' + data.message + '</div>';
+
+            // Action hint
+            if (data.action) {
+                html += '<div class="error-action">' + data.action + '</div>';
+            }
+
+            div.innerHTML = html;
+            chatContainer.appendChild(div);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
         async function loadHistory() {
             try {
-                const resp = await fetch('/api/history');
+                const resp = await fetch('/api/history', { headers: getAuthHeaders() });
                 const data = await resp.json();
                 if (data.platform) {
                     document.getElementById('platform-badge').textContent = data.platform.toUpperCase();

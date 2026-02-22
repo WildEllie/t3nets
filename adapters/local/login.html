@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T3nets — Sign In</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-card {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-card h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        .login-card p {
+            font-size: 13px;
+            color: #666;
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .form-group input {
+            width: 100%;
+            background: #0f0f0f;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px 14px;
+            color: #e0e0e0;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .form-group input:focus { border-color: #2563eb; }
+        .form-group input::placeholder { color: #555; }
+
+        .login-btn {
+            width: 100%;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+
+        .login-btn:hover { background: #1d4ed8; }
+        .login-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+        .login-footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 12px;
+            color: #555;
+        }
+
+        .login-footer a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        .login-footer a:hover { text-decoration: underline; }
+
+        .error-msg {
+            background: #7f1d1d;
+            border: 1px solid #991b1b;
+            color: #fecaca;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .brand {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .brand span {
+            font-size: 28px;
+            font-weight: 800;
+            color: #fff;
+        }
+
+        .brand .badge {
+            font-size: 10px;
+            background: #22c55e;
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="brand">
+            <span>T3nets</span>
+        </div>
+
+        <h1>Sign In</h1>
+        <p>Enter your credentials to access the dashboard</p>
+
+        <div id="error-msg" class="error-msg"></div>
+
+        <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="email" placeholder="you@company.com" autofocus>
+        </div>
+
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="Enter your password">
+        </div>
+
+        <button class="login-btn" id="login-btn" onclick="handleLogin()">Sign In</button>
+
+        <div class="login-footer">
+            <a href="#" id="signup-link">Create an account</a>
+        </div>
+    </div>
+
+    <script>
+        let authConfig = null;
+
+        // Load auth config from server
+        async function loadAuthConfig() {
+            try {
+                const resp = await fetch('/api/auth/config');
+                authConfig = await resp.json();
+
+                if (!authConfig.enabled) {
+                    // No Cognito configured — redirect to chat directly
+                    window.location.href = '/chat';
+                    return;
+                }
+
+                // Set signup link to Cognito hosted signup
+                const signupUrl = `${authConfig.auth_domain}/signup?client_id=${authConfig.client_id}&response_type=code&scope=openid+email+profile&redirect_uri=${encodeURIComponent(window.location.origin + '/callback')}`;
+                document.getElementById('signup-link').href = signupUrl;
+            } catch (e) {
+                console.error('Failed to load auth config:', e);
+            }
+        }
+
+        async function handleLogin() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const errorEl = document.getElementById('error-msg');
+            const btn = document.getElementById('login-btn');
+
+            if (!email || !password) {
+                errorEl.textContent = 'Please enter email and password.';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            if (!authConfig || !authConfig.enabled) {
+                window.location.href = '/chat';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+            errorEl.style.display = 'none';
+
+            try {
+                // Use Cognito's InitiateAuth via the OAuth token endpoint
+                // For SRP auth, we redirect to Cognito hosted UI with login_hint
+                const loginUrl = `${authConfig.auth_domain}/login?client_id=${authConfig.client_id}&response_type=code&scope=openid+email+profile&redirect_uri=${encodeURIComponent(window.location.origin + '/callback')}&login_hint=${encodeURIComponent(email)}`;
+                window.location.href = loginUrl;
+            } catch (err) {
+                errorEl.textContent = 'Sign in failed: ' + err.message;
+                errorEl.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        }
+
+        // Allow Enter key to submit
+        document.getElementById('password').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') handleLogin();
+        });
+        document.getElementById('email').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') document.getElementById('password').focus();
+        });
+
+        // If already logged in, redirect to chat
+        const existingToken = localStorage.getItem('t3nets_id_token');
+        if (existingToken) {
+            window.location.href = '/chat';
+        } else {
+            loadAuthConfig();
+        }
+    </script>
+</body>
+</html>

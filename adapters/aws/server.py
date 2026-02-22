@@ -35,7 +35,10 @@ from adapters.aws.bedrock_provider import BedrockProvider
 from adapters.aws.dynamodb_conversation_store import DynamoDBConversationStore
 from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
 from adapters.aws.secrets_manager import SecretsManagerProvider
+from adapters.aws.auth_middleware import extract_auth, AuthError
+from adapters.aws.admin_api import AdminAPI
 from adapters.local.direct_bus import DirectBus  # Reuse synchronous bus for Phase 1
+from agent.errors.handler import ErrorHandler
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
@@ -57,6 +60,8 @@ secrets: SecretsManagerProvider
 skills: SkillRegistry
 bus: DirectBus
 rule_router: RuleBasedRouter
+admin_api: AdminAPI
+error_handler: ErrorHandler
 started_at: float = 0.0
 
 DEFAULT_TENANT = "default"
@@ -64,6 +69,11 @@ BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]  # full inference profile ID f
 PROVIDER = "bedrock"
 PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")  # aws, gcp, azure
 STAGE = os.environ.get("T3NETS_STAGE", "dev")  # dev, staging, prod — set by Terraform
+
+# Cognito (set by Terraform → ECS env vars)
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
+COGNITO_APP_CLIENT_ID = os.environ.get("COGNITO_APP_CLIENT_ID", "")
+COGNITO_AUTH_DOMAIN = os.environ.get("COGNITO_AUTH_DOMAIN", "")
 
 stats = {
     "rule_routed": 0,
@@ -123,6 +133,20 @@ def _strip_metadata(messages: list[dict]) -> list[dict]:
     return [{"role": m["role"], "content": m["content"]} for m in messages]
 
 
+def _get_auth_tenant(headers) -> str:
+    """Extract tenant_id from JWT in Authorization header.
+
+    Falls back to DEFAULT_TENANT if no Cognito is configured or no auth header.
+    """
+    if not COGNITO_USER_POOL_ID:
+        return DEFAULT_TENANT
+    try:
+        auth = extract_auth(headers)
+        return auth.tenant_id
+    except AuthError:
+        return DEFAULT_TENANT
+
+
 def _uptime_human(seconds: float) -> str:
     s = int(seconds)
     if s < 60: return f"{s}s"
@@ -142,12 +166,22 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._serve_file("health.html", "adapters/local")
         elif path == "/settings":
             self._serve_file("settings.html", "adapters/local")
+        elif path == "/login":
+            self._serve_file("login.html", "adapters/local")
+        elif path == "/callback":
+            self._serve_file("callback.html", "adapters/local")
         elif path == "/api/health":
             self._handle_health_api()
         elif path == "/api/settings":
             self._handle_settings_get()
         elif path == "/api/history":
             self._handle_history()
+        elif path == "/api/auth/config":
+            self._handle_auth_config()
+        elif path == "/api/auth/me":
+            self._handle_auth_me()
+        elif path.startswith("/api/admin/"):
+            self._handle_admin("GET", path)
         else:
             self.send_error(404)
 
@@ -159,8 +193,24 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._handle_clear()
         elif path == "/api/settings":
             self._handle_settings_post()
+        elif path.startswith("/api/admin/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_admin("POST", path, body)
         else:
             self.send_error(404)
+
+    def do_PUT(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_admin("PUT", path, body)
+        else:
+            self.send_error(404)
+
+    def _handle_admin(self, method: str, path: str, body: dict | None = None):
+        """Delegate to admin API."""
+        data, status = admin_api.handle_request(method, path, self.headers, body)
+        self._json_response(data, status)
 
     def _handle_health_api(self):
         try:
@@ -210,10 +260,36 @@ class AWSHandler(BaseHTTPRequestHandler):
             logger.exception("Health check error")
             self._json_response({"status": "error", "error": str(e)}, 500)
 
+    def _handle_auth_config(self):
+        """Return Cognito config for the frontend login flow."""
+        self._json_response({
+            "enabled": bool(COGNITO_USER_POOL_ID),
+            "client_id": COGNITO_APP_CLIENT_ID,
+            "auth_domain": COGNITO_AUTH_DOMAIN,
+            "user_pool_id": COGNITO_USER_POOL_ID,
+        })
+
+    def _handle_auth_me(self):
+        """Return current authenticated user info."""
+        if not COGNITO_USER_POOL_ID:
+            self._json_response({"authenticated": False, "tenant_id": DEFAULT_TENANT})
+            return
+        try:
+            auth = extract_auth(self.headers)
+            self._json_response({
+                "authenticated": True,
+                "user_id": auth.user_id,
+                "tenant_id": auth.tenant_id,
+                "email": auth.email,
+            })
+        except AuthError as e:
+            self._json_response({"error": e.message}, e.status)
+
     def _handle_settings_get(self):
         """Return current settings and available models."""
         try:
-            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            tenant_id = _get_auth_tenant(self.headers)
+            tenant = _run_async(tenants.get_tenant(tenant_id))
             self._json_response({
                 "ai_model": tenant.settings.ai_model or DEFAULT_MODEL_ID,
                 "provider": PROVIDER,
@@ -225,10 +301,11 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._json_response({"error": str(e)}, 500)
 
     def _handle_history(self):
-        """Return conversation history for the default conversation."""
+        """Return conversation history for the authenticated tenant."""
         try:
+            tenant_id = _get_auth_tenant(self.headers)
             history = _run_async(
-                memory.get_conversation(DEFAULT_TENANT, "dashboard-default")
+                memory.get_conversation(tenant_id, "dashboard-default")
             )
             self._json_response({
                 "messages": history,
@@ -241,8 +318,9 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_settings_post(self):
         """Update tenant settings."""
         try:
+            tenant_id = _get_auth_tenant(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            tenant = _run_async(tenants.get_tenant(tenant_id))
 
             if "ai_model" in body:
                 model_id = body["ai_model"]
@@ -267,6 +345,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_chat(self):
         """Handle chat — identical logic to local, different adapters underneath."""
         try:
+            tenant_id = _get_auth_tenant(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             text = body.get("text", "").strip()
             if not text:
@@ -277,12 +356,12 @@ class AWSHandler(BaseHTTPRequestHandler):
             clean_text, is_raw = strip_raw_flag(text)
             is_raw_response = False
 
-            logger.info(f"Chat: {text[:100]}" + (" [RAW]" if is_raw else ""))
+            logger.info(f"Chat [{tenant_id}]: {text[:100]}" + (" [RAW]" if is_raw else ""))
 
             history = _strip_metadata(
-                _run_async(memory.get_conversation(DEFAULT_TENANT, conversation_id))
+                _run_async(memory.get_conversation(tenant_id, conversation_id))
             )
-            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            tenant = _run_async(tenants.get_tenant(tenant_id))
             active_model, model_short_name = _resolve_model(tenant)
 
             system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
@@ -302,7 +381,7 @@ When you have data to present, format it clearly with structure."""
                 if match:
                     request_id = f"rule-{conversation_id}"
                     _run_async(bus.publish_skill_invocation(
-                        DEFAULT_TENANT, match.skill_name, match.params,
+                        tenant_id, match.skill_name, match.params,
                         conversation_id, request_id, "dashboard", "user",
                     ))
                     skill_result = bus.get_result(request_id) or {"error": "No result"}
@@ -332,7 +411,7 @@ When you have data to present, format it clearly with structure."""
                         tc = response.tool_calls[0]
                         request_id = f"ai-{conversation_id}"
                         _run_async(bus.publish_skill_invocation(
-                            DEFAULT_TENANT, tc.tool_name, tc.tool_params,
+                            tenant_id, tc.tool_name, tc.tool_params,
                             conversation_id, request_id, "dashboard", "user",
                         ))
                         skill_result = bus.get_result(request_id) or {"error": "No result"}
@@ -357,7 +436,7 @@ When you have data to present, format it clearly with structure."""
             stats["total_tokens"] += total_tokens
             if not is_raw_response:
                 _run_async(memory.save_turn(
-                    DEFAULT_TENANT, conversation_id, clean_text, assistant_text,
+                    tenant_id, conversation_id, clean_text, assistant_text,
                     metadata={
                         "route": route_type,
                         "model": model_short_name,
@@ -376,13 +455,18 @@ When you have data to present, format it clearly with structure."""
         except Exception as e:
             logger.exception("Chat error")
             stats["errors"] += 1
-            self._json_response({"error": str(e)}, 500)
+            friendly = error_handler.handle(e, context="chat")
+            self._json_response({
+                "error": friendly.message,
+                **friendly.to_dict(),
+            }, 500)
 
     def _handle_clear(self):
         try:
+            tenant_id = _get_auth_tenant(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             cid = body.get("conversation_id", "default")
-            _run_async(memory.clear_conversation(DEFAULT_TENANT, cid))
+            _run_async(memory.clear_conversation(tenant_id, cid))
             self._json_response({"cleared": True})
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
@@ -426,7 +510,7 @@ AWS_REGION = "us-east-1"
 
 
 def init():
-    global ai, memory, tenants, secrets, skills, bus, rule_router, started_at
+    global ai, memory, tenants, secrets, skills, bus, rule_router, admin_api, error_handler, started_at
 
     started_at = time.time()
 
@@ -452,6 +536,8 @@ def init():
 
     rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
     bus = DirectBus(skills, secrets)
+    admin_api = AdminAPI(tenants, secrets, skills)
+    error_handler = ErrorHandler()
 
     channels = ChannelRegistry()
     channels.register(DashboardAdapter())

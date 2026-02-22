@@ -111,6 +111,27 @@ else
     echo "⚠ Jira credentials not found in .env — skipping"
 fi
 
+# --- Seed second tenant (for multi-tenancy testing) ---
+TENANT2_ID="${SECOND_TENANT_ID:-acme}"
+TENANT2_NAME="${SECOND_TENANT_NAME:-Acme Corp}"
+
+echo "→ Seeding tenant '${TENANT2_ID}' into DynamoDB..."
+aws dynamodb put-item \
+    --table-name "${TENANTS_TABLE}" \
+    --region "${REGION}" \
+    --item '{
+        "pk": {"S": "TENANT#'"${TENANT2_ID}"'"},
+        "sk": {"S": "META"},
+        "tenant_id": {"S": "'"${TENANT2_ID}"'"},
+        "name": {"S": "'"${TENANT2_NAME}"'"},
+        "status": {"S": "active"},
+        "created_at": {"S": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"},
+        "settings": {"S": "{\"enabled_skills\": [\"sprint_status\", \"ping\"], \"ai_model\": \"'"${MODEL_ID}"'\"}"}
+    }' \
+    --no-cli-pager
+echo "  ✓ Tenant '${TENANT2_ID}' seeded"
+
 echo ""
 echo "✅ Seed complete. You can now deploy and test."
+echo "   Tenants: ${TENANT_ID}, ${TENANT2_ID}"
 echo ""

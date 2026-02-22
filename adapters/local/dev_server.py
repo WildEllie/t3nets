@@ -40,6 +40,7 @@ from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
 from adapters.local.env_secrets import EnvSecretsProvider
 from adapters.local.direct_bus import DirectBus
+from agent.errors.handler import ErrorHandler
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
@@ -61,6 +62,7 @@ secrets: EnvSecretsProvider
 skills: SkillRegistry
 bus: DirectBus
 rule_router: RuleBasedRouter
+error_handler: ErrorHandler
 started_at: float = 0.0
 
 DEFAULT_TENANT = "local"
@@ -141,6 +143,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_settings_get()
         elif path == "/api/history":
             self._handle_history()
+        elif path == "/api/auth/config":
+            self._handle_auth_config()
         else:
             self.send_error(404)
 
@@ -229,6 +233,15 @@ class DevHandler(BaseHTTPRequestHandler):
                 "status": "error",
                 "error": str(e),
             }, 500)
+
+    def _handle_auth_config(self):
+        """Return auth config — always disabled for local dev."""
+        self._json_response({
+            "enabled": False,
+            "client_id": "",
+            "auth_domain": "",
+            "user_pool_id": "",
+        })
 
     def _handle_settings_get(self):
         """Return current settings and available models."""
@@ -513,7 +526,11 @@ Include risk assessment and actionable suggestions where relevant."""
         except Exception as e:
             logger.exception("Chat error")
             stats["errors"] += 1
-            self._json_response({"error": str(e)}, 500)
+            friendly = error_handler.handle(e, context="chat")
+            self._json_response({
+                "error": friendly.message,
+                **friendly.to_dict(),
+            }, 500)
 
     def _handle_clear(self):
         """Clear conversation history."""
@@ -556,7 +573,7 @@ Include risk assessment and actionable suggestions where relevant."""
 
 def init():
     """Initialize all components."""
-    global ai, memory, tenants, secrets, skills, bus, rule_router, started_at
+    global ai, memory, tenants, secrets, skills, bus, rule_router, error_handler, started_at
 
     started_at = time.time()
 
@@ -580,8 +597,9 @@ def init():
     skills.load_from_directory(skills_dir)
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
-    # Rule-based router
+    # Rule-based router and error handler
     rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
+    error_handler = ErrorHandler()
 
     # Direct bus
     bus = DirectBus(skills, secrets)
