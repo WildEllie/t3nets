@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** February 21, 2026
+**Last Updated:** February 22, 2026
 
 ---
 
@@ -27,21 +27,28 @@
 - [x] AWS server entry point (`adapters/aws/server.py`)
 - [x] Dockerfile for router container
 - [x] Deploy scripts (`deploy.sh`, `seed.sh`)
-- [x] Bedrock model access verified (Sonnet 4.5, Haiku 4.5, Sonnet 4)
-- [x] AI model pricing research (Claude vs Nova options)
+- [x] Bedrock model access verified (Sonnet 4.5, Sonnet 4.6, Nova Pro/Lite/Micro, Llama 3.2 1B)
+- [x] AI model pricing research (Claude vs Nova vs third-party options)
 - [x] Project documentation (docs/ folder)
+- [x] Geographic inference profiles for Bedrock (us/eu/apac prefixes)
+- [x] Cross-region IAM for Bedrock inference (us-east-1, us-east-2, us-west-2)
+- [x] Bedrock tool_use/tool_result message conversion fix
 
 ---
 
 ## Up Next 🔜
 
-### Phase 1b: Deploy & Settings (Current)
+### Phase 1b: Deploy & Settings
 - [x] `terraform apply` — deploy infrastructure to AWS
-- [ ] Simplify AI model references into a single location if possible
-- [ ] Settings page in dashboard (model selection per routing tier)
-- [ ] Test Nova models for formatting tier
-- [ ] Per-tier model configuration (conversational / formatting / routing models)
-- [ ] **Milestone:** Platform running on AWS with configurable AI models
+- [x] Centralized AI model registry (`agent/models/ai_models.py`)
+- [x] Settings page with model selection UI
+- [x] Chat history persistence across page navigation
+- [x] Markdown rendering in chat (tables, code, lists)
+- [x] Dynamic environment badges: platform (LOCAL/AWS) + stage (DEV/STAGING/PROD)
+- [x] Staging and prod Terraform tfvars templates
+- [x] Ping skill for lightweight model testing (no integrations needed)
+- [x] Verified models: Sonnet 4.5, Sonnet 4.6, Nova Pro, Nova Lite, Nova Micro, Llama 3.2 1B
+- [x] **Milestone:** Platform running on AWS with configurable AI models
 
 ### Phase 2: Multi-Tenancy
 - [ ] Cognito user pool + auth flow
@@ -65,10 +72,9 @@
 
 ### Phase 5: Theming and Single Page App
 - [ ] Add a theme and make the console/dashboard an SPA
-- [ ] Make sure we run static HTMl from a CDN, using pure ajax to load pages and data
+- [ ] Serve static HTML from a CDN, using pure AJAX to load pages and data
 
-
-### Phase 5: Long-Term Memory & Polish
+### Phase 6: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
 - [ ] Additional channels (Slack, WhatsApp)
 - [ ] OSS contributor guides
@@ -79,18 +85,19 @@
 ## Backlog 📋
 
 ### Dashboard & UX
+- [x] Markdown rendering in chat responses
 - [ ] Dashboard theming — polished design system (dark mode, consistent components)
 - [ ] Mobile-responsive layout
-- [ ] Markdown rendering in chat responses
 - [ ] Conversation history browser
 - [ ] Skill configuration UI
 
 ### AI & Models
+- [x] Centralized model registry with per-provider resolution
 - [ ] Per-tenant model selection
+- [ ] Per-tier model configuration (conversational / formatting / routing models)
 - [ ] Bedrock Intelligent Prompt Routing evaluation
 - [ ] Token usage tracking per tenant
 - [ ] Streaming responses (SSE or WebSocket)
-- [ ] Nova 2 Lite/Pro evaluation for tool use
 
 ### Developer Experience
 - [ ] Auto-reload dev server (watchdog / uvicorn)
