@@ -1,6 +1,6 @@
 # T3nets — Architecture Decision Log
 
-**Last Updated:** February 21, 2026
+**Last Updated:** February 22, 2026
 
 This document captures key architecture decisions, their rationale, and alternatives considered.
 
@@ -180,12 +180,59 @@ GSI `channel-mapping` on `gsi1pk = CHANNEL#{type}#{id}` enables tenant resolutio
 
 ---
 
+## ADR-016: Public API Gateway Routes for UI Pages
+
+**Decision:** Add explicit public (no-auth) API Gateway routes for `GET /`, `/chat`, `/settings`, and `/api/auth/config`. Keep JWT authorizer on the `$default` catch-all for all API data endpoints.
+
+**Rationale:** The `$default` route's JWT authorizer blocks browser requests that don't carry an `Authorization` header. UI pages must load first so the frontend JavaScript can check localStorage for tokens and redirect to `/login` if unauthenticated. The `/api/auth/config` endpoint is a chicken-and-egg case — the frontend needs Cognito config to initiate the OAuth flow, but can't get it without a token.
+
+**Alternatives considered:**
+- Remove JWT from `$default` entirely — simpler but eliminates the API Gateway security boundary; unauthenticated users could hit `/api/chat` and consume Bedrock credits on the default tenant
+- Server-side redirects — would require the server to handle auth redirects instead of the client, breaking the SPA pattern
+
+---
+
+## ADR-017: Client-Side JWT Decoding for User Identity
+
+**Decision:** Decode the Cognito JWT `id_token` client-side (base64url decode, no crypto) to extract the user's email for display.
+
+**Rationale:** The JWT is already validated by the API Gateway JWT authorizer — the client doesn't need to verify the signature. Decoding the payload avoids an extra API round-trip to `/api/auth/me`. The `email` claim is always present in Cognito ID tokens.
+
+**Alternatives considered:**
+- Call `/api/auth/me` on page load — adds latency and a network request; the endpoint exists but is behind JWT auth itself
+- Store email separately in localStorage during callback — adds more state to manage; the token already contains the email
+
+---
+
+## ADR-018: User Email in Message Metadata (Shared Tenant Chat)
+
+**Decision:** Store `user_email` in the `metadata` dict of user messages in DynamoDB. The existing `metadata` parameter on `save_turn()` is reused — no interface changes.
+
+**Rationale:** Chat conversations are shared across all users in a tenant. Without sender identification, users can't tell who posted what. Storing email in metadata (rather than a new field) avoids changing the `ConversationStore` interface or the message schema. Old messages without `user_email` render without a sender label (backward compatible).
+
+**Trade-offs:**
+- Email as identifier — not a display name, but always available from Cognito without extra DB lookups
+- Only stored on AWS (DynamoDB) — local dev has no auth, so no user identity to store
+- `_strip_metadata()` already removes metadata before sending to Claude, so user emails don't leak into AI context
+
+---
+
+## ADR-019: Cognito Callback URLs — Multi-Environment Support
+
+**Decision:** Include both `localhost` and API Gateway URLs in `cognito_callback_urls` and `cognito_logout_urls` in `dev.tfvars`.
+
+**Rationale:** Cognito allows multiple callback URLs. The frontend uses `window.location.origin + '/callback'` dynamically, so the correct URL is selected automatically based on where the app is running. This allows local dev and deployed environments to share one Cognito user pool.
+
+**Note:** The API Gateway ID (`i9yxlqqro8`) is stable across deploys. If the API Gateway is destroyed and recreated, the callback URL must be updated. A custom domain would make this more robust (future improvement).
+
+---
+
 ## Pending Decisions
 
 | Topic | Status | Notes |
 |-------|--------|-------|
 | Nova models for conversational tier | Testing needed | Need to validate quality |
 | WebSocket vs SSE for streaming | Deferred to Phase 2 | Current chat is request/response |
-| Cognito vs Auth0 | Phase 2 | Cognito is cheaper but less flexible |
+| Cognito vs Auth0 | **Decided: Cognito** | See ADR-016/017/019. Cheaper, native AWS integration |
 | S3 vs DynamoDB for long-term memory | Phase 5 | S3 is cheaper for large blobs |
 | Dashboard restart from browser | In progress | Settings page + server restart API |
