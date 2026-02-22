@@ -218,10 +218,10 @@ resource "aws_iam_role_policy" "ecs_task" {
         Action = [
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",
+          "bedrock:Converse",
         ]
         Resource = [
-          "arn:aws:bedrock:us-east-1::foundation-model/*",
-          "arn:aws:bedrock:us-east-1:${data.aws_caller_identity.current.account_id}:inference-profile/*",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/*",
         ]
       },
       {

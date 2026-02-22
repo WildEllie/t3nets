@@ -37,5 +37,5 @@ variable "router_memory" {
 variable "bedrock_model_id" {
   description = "Bedrock model ID for Claude"
   type        = string
-  default     = "us-east-1.anthropic.claude-3-5-sonnet-20241022-v2:0"
+  default     = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 }
