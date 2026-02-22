@@ -529,10 +529,17 @@
                 const data = await response.json();
                 thinking.remove();
 
-                if (data.error) {
-                    addErrorMessage(data);
+                if (response.status === 401) {
+                    // Token expired or invalid — redirect to login
+                    localStorage.removeItem('t3nets_id_token');
+                    window.location.href = '/login';
+                    return;
+                }
+
+                if (data.error || data.message) {
+                    addErrorMessage(data.error ? data : { message: data.message, severity: 'config' });
                 } else {
-                    addMessage(data.text, 'assistant', data.tokens, data.route, data.raw, data.model);
+                    addMessage(data.text || 'No response', 'assistant', data.tokens, data.route, data.raw, data.model);
                 }
             } catch (err) {
                 thinking.remove();
