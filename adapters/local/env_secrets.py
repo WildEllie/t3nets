@@ -19,6 +19,7 @@ INTEGRATION_KEYS = {
         "email": "JIRA_EMAIL",
         "api_token": "JIRA_API_TOKEN",
         "board_id": "JIRA_BOARD_ID",
+        "project_key": "JIRA_PROJECT_KEY",
     },
     "github": {
         "token": "GITHUB_TOKEN",
