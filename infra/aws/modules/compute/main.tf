@@ -18,6 +18,9 @@ variable "secrets_base_arn" { type = string }
 variable "router_cpu" { type = number }
 variable "router_memory" { type = number }
 variable "bedrock_model_id" { type = string }
+variable "cognito_user_pool_id" { type = string }
+variable "cognito_app_client_id" { type = string }
+variable "cognito_auth_domain" { type = string }
 
 locals {
   name_prefix = "${var.project}-${var.environment}"
@@ -289,6 +292,9 @@ resource "aws_ecs_task_definition" "router" {
         { name = "DYNAMODB_CONVERSATIONS_TABLE", value = "${local.name_prefix}-conversations" },
         { name = "DYNAMODB_TENANTS_TABLE", value = "${local.name_prefix}-tenants" },
         { name = "SECRETS_PREFIX", value = "/${var.project}/${var.environment}/tenants" },
+        { name = "COGNITO_USER_POOL_ID", value = var.cognito_user_pool_id },
+        { name = "COGNITO_APP_CLIENT_ID", value = var.cognito_app_client_id },
+        { name = "COGNITO_AUTH_DOMAIN", value = var.cognito_auth_domain },
       ]
 
       logConfiguration = {

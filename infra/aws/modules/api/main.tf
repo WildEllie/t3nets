@@ -10,6 +10,16 @@ variable "environment" { type = string }
 variable "alb_listener_arn" { type = string }
 variable "alb_dns_name" { type = string }
 variable "vpc_link_id" { type = string }
+variable "cognito_user_pool_endpoint" {
+  description = "Cognito issuer URL for JWT validation"
+  type        = string
+  default     = ""
+}
+variable "cognito_app_client_id" {
+  description = "Cognito app client ID (audience for JWT)"
+  type        = string
+  default     = ""
+}
 
 locals {
   name_prefix = "${var.project}-${var.environment}"
@@ -42,12 +52,58 @@ resource "aws_apigatewayv2_integration" "alb" {
   integration_uri    = var.alb_listener_arn
 }
 
-# --- Catch-all route (forward everything to ALB) ---
+# --- JWT Authorizer (Cognito) ---
 
+resource "aws_apigatewayv2_authorizer" "cognito" {
+  count = var.cognito_user_pool_endpoint != "" ? 1 : 0
+
+  api_id           = aws_apigatewayv2_api.main.id
+  authorizer_type  = "JWT"
+  name             = "${local.name_prefix}-cognito"
+  identity_sources = ["$request.header.Authorization"]
+
+  jwt_configuration {
+    audience = [var.cognito_app_client_id]
+    issuer   = var.cognito_user_pool_endpoint
+  }
+}
+
+# --- Routes ---
+
+# Public routes (no auth): health check, static pages, login, callback
+resource "aws_apigatewayv2_route" "public_health" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /health"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_health_api" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/health"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_login" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /login"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_callback" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /callback"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+# Authenticated catch-all (requires JWT when Cognito is configured)
 resource "aws_apigatewayv2_route" "catch_all" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "$default"
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+
+  # Attach JWT authorizer when Cognito is configured
+  authorization_type = var.cognito_user_pool_endpoint != "" ? "JWT" : "NONE"
+  authorizer_id      = var.cognito_user_pool_endpoint != "" ? aws_apigatewayv2_authorizer.cognito[0].id : null
 }
 
 # --- Stage (auto-deploy) ---

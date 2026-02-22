@@ -8,6 +8,7 @@
 #   - DynamoDB tables (conversations, tenants)
 #   - Secrets Manager (tenant integration credentials)
 #   - ECR repository (router container image)
+#   - Cognito user pool + app client (authentication)
 #   - CloudWatch log groups
 #   - IAM roles and policies
 #
@@ -87,6 +88,17 @@ module "ecr" {
   environment = var.environment
 }
 
+# --- Authentication (Cognito) ---
+module "cognito" {
+  source = "./modules/cognito"
+
+  project     = var.project
+  environment = var.environment
+
+  callback_urls = var.cognito_callback_urls
+  logout_urls   = var.cognito_logout_urls
+}
+
 # --- Compute (ECS Fargate) ---
 module "compute" {
   source = "./modules/compute"
@@ -111,6 +123,11 @@ module "compute" {
   # Geographic prefix for Bedrock inference profiles: us., eu., apac.
   # Single-region prefixes (e.g. us-east-1.) are NOT valid for newer models.
   bedrock_model_id = "${local.bedrock_geo_prefix}.${var.bedrock_model_id}"
+
+  # Cognito (for login URLs in the application)
+  cognito_user_pool_id  = module.cognito.user_pool_id
+  cognito_app_client_id = module.cognito.app_client_id
+  cognito_auth_domain   = module.cognito.auth_domain
 }
 
 # --- API Gateway ---
@@ -123,4 +140,7 @@ module "api" {
   alb_listener_arn = module.compute.alb_listener_arn
   alb_dns_name     = module.compute.alb_dns_name
   vpc_link_id      = module.compute.vpc_link_id
+
+  cognito_user_pool_endpoint = module.cognito.user_pool_endpoint
+  cognito_app_client_id      = module.cognito.app_client_id
 }

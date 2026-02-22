@@ -40,3 +40,15 @@ variable "bedrock_model_id" {
   # No default — must be set in .tfvars per environment
   # Example: "anthropic.claude-sonnet-4-5-20250929-v1:0" (foundation model, single-region)
 }
+
+variable "cognito_callback_urls" {
+  description = "Allowed OAuth callback URLs for Cognito"
+  type        = list(string)
+  default     = ["http://localhost:8080/callback"]
+}
+
+variable "cognito_logout_urls" {
+  description = "Allowed logout redirect URLs for Cognito"
+  type        = list(string)
+  default     = ["http://localhost:8080/login"]
+}
