@@ -87,6 +87,23 @@
 
         .nav-btn:hover { border-color: #555; color: #ccc; }
 
+        .nav-user-email {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .message-sender {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .message.user .message-sender {
+            text-align: right;
+            color: #93c5fd;
+        }
+
         #chat-container {
             flex: 1;
             overflow-y: auto;
@@ -356,6 +373,7 @@
         </div>
         <div class="nav-right">
             <button class="nav-btn" onclick="clearChat()">Clear Chat</button>
+            <span class="nav-user-email" id="user-email" style="display:none;"></span>
             <button class="nav-btn" id="logout-btn" style="display:none;" onclick="logout()">Logout</button>
         </div>
     </nav>
@@ -386,6 +404,17 @@
             return {};
         }
 
+        function parseJwtEmail(token) {
+            try {
+                const parts = token.split('.');
+                if (parts.length !== 3) return null;
+                const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+                return payload.email || null;
+            } catch (e) {
+                return null;
+            }
+        }
+
         async function checkAuth() {
             try {
                 const resp = await fetch('/api/auth/config');
@@ -394,6 +423,12 @@
                     const token = localStorage.getItem('t3nets_id_token');
                     if (!token) { window.location.href = '/login'; return; }
                     document.getElementById('logout-btn').style.display = 'inline-block';
+                    const email = parseJwtEmail(token);
+                    if (email) {
+                        const emailEl = document.getElementById('user-email');
+                        emailEl.textContent = email;
+                        emailEl.style.display = 'inline';
+                    }
                 }
             } catch (e) { /* auth not available — continue without */ }
         }
@@ -467,7 +502,8 @@
             const welcome = chatContainer.querySelector('.welcome');
             if (welcome) welcome.remove();
 
-            addMessage(text, 'user');
+            const currentEmail = parseJwtEmail(localStorage.getItem('t3nets_id_token') || '') || '';
+            addMessage(text, 'user', undefined, undefined, false, undefined, currentEmail);
             input.value = '';
             input.style.height = 'auto';
 
@@ -508,9 +544,16 @@
             input.focus();
         }
 
-        function addMessage(text, type, tokens, route, isRaw, modelName) {
+        function addMessage(text, type, tokens, route, isRaw, modelName, senderEmail) {
             const div = document.createElement('div');
             div.className = 'message ' + type;
+
+            if (senderEmail && type === 'user') {
+                const sender = document.createElement('div');
+                sender.className = 'message-sender';
+                sender.textContent = senderEmail;
+                div.appendChild(sender);
+            }
 
             // Raw JSON — use syntax highlighting
             if (isRaw) {
@@ -523,7 +566,9 @@
                 // Render markdown for assistant messages
                 div.innerHTML = marked.parse(text);
             } else {
-                div.textContent = text;
+                const textNode = document.createElement('span');
+                textNode.textContent = text;
+                div.appendChild(textNode);
             }
 
             if (type === 'assistant' && (tokens !== undefined || route)) {
@@ -624,6 +669,7 @@
                             meta.route,
                             false,
                             meta.model,
+                            meta.user_email || '',
                         );
                     }
                 }
