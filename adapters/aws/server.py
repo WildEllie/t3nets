@@ -62,6 +62,8 @@ started_at: float = 0.0
 DEFAULT_TENANT = "default"
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]  # full inference profile ID from Terraform
 PROVIDER = "bedrock"
+PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")  # aws, gcp, azure
+STAGE = os.environ.get("T3NETS_STAGE", "dev")  # dev, staging, prod — set by Terraform
 
 stats = {
     "rule_routed": 0,
@@ -168,7 +170,8 @@ class AWSHandler(BaseHTTPRequestHandler):
 
             health = {
                 "status": "ok",
-                "environment": "aws",
+                "platform": PLATFORM,
+                "stage": STAGE,
                 "started_at": datetime.fromtimestamp(started_at, tz=timezone.utc).isoformat(),
                 "uptime_seconds": round(uptime_secs, 1),
                 "uptime_human": _uptime_human(uptime_secs),
@@ -215,6 +218,8 @@ class AWSHandler(BaseHTTPRequestHandler):
                 "ai_model": tenant.settings.ai_model or DEFAULT_MODEL_ID,
                 "provider": PROVIDER,
                 "models": get_models_for_provider(PROVIDER),
+                "platform": PLATFORM,
+                "stage": STAGE,
             })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
@@ -225,7 +230,11 @@ class AWSHandler(BaseHTTPRequestHandler):
             history = _run_async(
                 memory.get_conversation(DEFAULT_TENANT, "dashboard-default")
             )
-            self._json_response({"messages": history})
+            self._json_response({
+                "messages": history,
+                "platform": PLATFORM,
+                "stage": STAGE,
+            })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 

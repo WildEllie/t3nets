@@ -191,7 +191,8 @@ class DevHandler(BaseHTTPRequestHandler):
 
             health = {
                 "status": "ok",
-                "environment": os.getenv("T3NETS_ENV", "local"),
+                "platform": os.getenv("T3NETS_PLATFORM", "local"),
+                "stage": os.getenv("T3NETS_STAGE", "dev"),
                 "started_at": datetime.fromtimestamp(started_at, tz=timezone.utc).isoformat(),
                 "uptime_seconds": round(uptime_secs, 1),
                 "uptime_human": _uptime_human(uptime_secs),
@@ -237,6 +238,8 @@ class DevHandler(BaseHTTPRequestHandler):
                 "ai_model": tenant.settings.ai_model or DEFAULT_MODEL_ID,
                 "provider": PROVIDER,
                 "models": get_models_for_provider(PROVIDER),
+                "platform": os.getenv("T3NETS_PLATFORM", "local"),
+                "stage": os.getenv("T3NETS_STAGE", "dev"),
             })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
@@ -247,7 +250,11 @@ class DevHandler(BaseHTTPRequestHandler):
             history = _run_async(
                 memory.get_conversation(DEFAULT_TENANT, DEFAULT_CONVERSATION)
             )
-            self._json_response({"messages": history})
+            self._json_response({
+                "messages": history,
+                "platform": os.getenv("T3NETS_PLATFORM", "local"),
+                "stage": os.getenv("T3NETS_STAGE", "dev"),
+            })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 

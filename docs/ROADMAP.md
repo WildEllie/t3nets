@@ -39,9 +39,8 @@
 - [x] `terraform apply` — deploy infrastructure to AWS
 - [ ] Simplify AI model references into a single location if possible
 - [ ] Settings page in dashboard (model selection per routing tier)
-- [ ] Server restart from dashboard (dev_server hot reload)
-- [ ] Per-tier model configuration (conversational / formatting / routing models)
 - [ ] Test Nova models for formatting tier
+- [ ] Per-tier model configuration (conversational / formatting / routing models)
 - [ ] **Milestone:** Platform running on AWS with configurable AI models
 
 ### Phase 2: Multi-Tenancy
@@ -62,6 +61,12 @@
 - [ ] Email triage skill (Gmail / Outlook)
 - [ ] Skill marketplace page in dashboard
 - [ ] **Milestone:** 3+ skills across 2+ channels
+
+
+### Phase 5: Theming and Single Page App
+- [ ] Add a theme and make the console/dashboard an SPA
+- [ ] Make sure we run static HTMl from a CDN, using pure ajax to load pages and data
+
 
 ### Phase 5: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization

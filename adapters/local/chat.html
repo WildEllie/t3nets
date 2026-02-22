@@ -37,14 +37,14 @@
 
         .nav-badge {
             font-size: 10px;
-            background: #22c55e;
-            color: #000;
             padding: 1px 6px;
             border-radius: 8px;
             font-weight: 600;
             margin-left: 6px;
             vertical-align: middle;
         }
+        .nav-badge.platform { background: #22c55e; color: #000; }
+        .nav-badge.stage { background: #3b82f6; color: #fff; }
 
         .nav-links {
             display: flex;
@@ -309,7 +309,7 @@
 </head>
 <body>
     <nav>
-        <a href="/" class="nav-brand">T3nets <span class="nav-badge">LOCAL</span></a>
+        <a href="/" class="nav-brand">T3nets <span class="nav-badge platform" id="platform-badge">...</span><span class="nav-badge stage" id="stage-badge">...</span></a>
         <div class="nav-links">
             <a href="/chat" class="active">Chat</a>
             <a href="/health">Health</a>
@@ -509,6 +509,12 @@
             try {
                 const resp = await fetch('/api/history');
                 const data = await resp.json();
+                if (data.platform) {
+                    document.getElementById('platform-badge').textContent = data.platform.toUpperCase();
+                }
+                if (data.stage) {
+                    document.getElementById('stage-badge').textContent = data.stage.toUpperCase();
+                }
                 if (data.messages && data.messages.length > 0) {
                     const welcome = chatContainer.querySelector('.welcome');
                     if (welcome) welcome.remove();

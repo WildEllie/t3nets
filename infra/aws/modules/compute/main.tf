@@ -282,7 +282,8 @@ resource "aws_ecs_task_definition" "router" {
       ]
 
       environment = [
-        { name = "T3NETS_ENV", value = "aws" },
+        { name = "T3NETS_PLATFORM", value = "aws" },
+        { name = "T3NETS_STAGE", value = var.environment },
         { name = "AWS_REGION", value = var.aws_region },
         { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
         { name = "DYNAMODB_CONVERSATIONS_TABLE", value = "${local.name_prefix}-conversations" },
