@@ -95,6 +95,31 @@ resource "aws_apigatewayv2_route" "public_callback" {
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
+# Public routes: UI pages that must load before auth (JS checks tokens client-side)
+resource "aws_apigatewayv2_route" "public_root" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_chat" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /chat"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_settings_page" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /settings"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_auth_config" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/auth/config"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
 # Authenticated catch-all (requires JWT when Cognito is configured)
 resource "aws_apigatewayv2_route" "catch_all" {
   api_id    = aws_apigatewayv2_api.main.id
