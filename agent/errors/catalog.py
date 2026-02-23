@@ -67,6 +67,21 @@ ERROR_PATTERNS: list[tuple[re.Pattern, FriendlyError]] = [
         ),
     ),
     (
+        re.compile(r"ServiceUnavailableException|Service Unavailable", re.IGNORECASE),
+        FriendlyError(
+            message=(
+                "The AI model is currently unavailable. This usually means model access "
+                "hasn't been enabled in the Amazon Bedrock console. Your admin should go to "
+                "Bedrock → Model access and enable the model for all regions used by the "
+                "cross-region inference profile (us-east-1, us-east-2, us-west-2)."
+            ),
+            severity=ErrorSeverity.CONFIG,
+            error_code="BEDROCK_SERVICE_UNAVAILABLE",
+            action="Enable model access in Bedrock console for all inference profile regions",
+            admin_required=True,
+        ),
+    ),
+    (
         re.compile(r"ThrottlingException", re.IGNORECASE),
         FriendlyError(
             message=(
