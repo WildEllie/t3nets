@@ -15,9 +15,6 @@ import urllib.parse
 import base64
 from datetime import datetime
 
-# Timeout for Jira API requests (seconds)
-_REQUEST_TIMEOUT = 30
-
 
 def execute(params: dict, secrets: dict) -> dict:
     """
@@ -73,31 +70,38 @@ def _jira_rest_request(secrets: dict, endpoint: str) -> dict:
     """Make authenticated request to Jira Cloud REST API v3."""
     url = f"{secrets['url'].rstrip('/')}/rest/api/3/{endpoint}"
     req = urllib.request.Request(url, headers=_make_headers(secrets))
-    with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as response:
+    with urllib.request.urlopen(req) as response:
         return json.loads(response.read().decode())
 
 
 def _jira_search(secrets: dict, jql: str, fields: list[str],
                  max_per_page: int = 100) -> list[dict]:
-    """Execute a JQL search with automatic pagination."""
-    all_issues = []
-    start_at = 0
+    """Execute a JQL search with automatic pagination.
+
+    Uses the /rest/api/3/search/jql endpoint with nextPageToken pagination.
+    The old /rest/api/3/search endpoint was removed by Atlassian on 2025-08-01.
+    """
+    all_issues: list[dict] = []
+    next_page_token: str | None = None
 
     while True:
-        params = urllib.parse.urlencode({
+        query: dict[str, str | int] = {
             "jql": jql,
-            "startAt": start_at,
             "maxResults": max_per_page,
             "fields": ",".join(fields),
-        })
-        data = _jira_rest_request(secrets, f"search?{params}")
+        }
+        if next_page_token:
+            query["nextPageToken"] = next_page_token
+
+        params = urllib.parse.urlencode(query)
+        data = _jira_rest_request(secrets, f"search/jql?{params}")
         issues = data.get("issues", [])
         all_issues.extend(issues)
-        total = data.get("total", 0)
 
-        if len(all_issues) >= total or not issues:
+        # Token-based pagination: stop when no nextPageToken or isLast is True
+        next_page_token = data.get("nextPageToken")
+        if not next_page_token or data.get("isLast", False) or not issues:
             break
-        start_at += max_per_page
 
     return all_issues
 
@@ -155,6 +159,15 @@ def _summarize_release(secrets: dict, release_name: str) -> dict:
     if not project_key:
         project_key = _get_project_key_from_board(secrets)
 
+    # Check if the release version exists and whether work has started
+    version_info = _get_version_info(secrets, project_key, release_name)
+    if not version_info:
+        return {
+            "release": release_name,
+            "total_issues": 0,
+            "error": f"Release '{release_name}' was not found in project '{project_key}'.",
+        }
+
     # Build JQL
     jql = f'fixVersion = "{release_name}"'
     if project_key:
@@ -171,11 +184,44 @@ def _summarize_release(secrets: dict, release_name: str) -> dict:
     raw_issues = _jira_search(secrets, jql, fields)
 
     if not raw_issues:
+        # Release exists but no issues — work hasn't started
+        if not version_info.get("released", False):
+            return {
+                "release": release_name,
+                "version_info": version_info,
+                "total_issues": 0,
+                "not_started": True,
+                "message": (
+                    f"Release '{release_name}' exists but has no issues assigned to it. "
+                    f"Work has not started on this release yet — there is nothing to summarize."
+                ),
+            }
         return {
             "release": release_name,
+            "version_info": version_info,
             "total_issues": 0,
-            "error": f"No issues found for release '{release_name}'",
+            "error": f"No issues found for release '{release_name}'.",
         }
+
+    # Check if this is a future release with no meaningful work done
+    if not version_info.get("released", False):
+        statuses = [
+            (issue.get("fields", {}).get("status") or {}).get("name", "")
+            for issue in raw_issues
+        ]
+        work_statuses = {"In Progress", "In Review", "Done", "Closed", "Resolved"}
+        has_work = any(s in work_statuses for s in statuses)
+        if not has_work:
+            return {
+                "release": release_name,
+                "version_info": version_info,
+                "total_issues": len(raw_issues),
+                "not_started": True,
+                "message": (
+                    f"Release '{release_name}' has {len(raw_issues)} issue(s) assigned "
+                    f"but none have started yet. There is no work to summarize."
+                ),
+            }
 
     # Parse issues
     issues = [_extract_issue(secrets, issue) for issue in raw_issues]
@@ -197,9 +243,6 @@ def _summarize_release(secrets: dict, release_name: str) -> dict:
         priorities[issue["priority"]] = priorities.get(issue["priority"], 0) + 1
         assignees[issue["assignee"]] = assignees.get(issue["assignee"], 0) + 1
         total_points += issue.get("story_points") or 0
-
-    # Release version metadata
-    version_info = _get_version_info(secrets, project_key, release_name)
 
     return {
         "release": release_name,
@@ -273,7 +316,7 @@ def _get_project_key_from_board(secrets: dict) -> str:
     try:
         url = f"{secrets['url'].rstrip('/')}/rest/agile/1.0/board/{board_id}/configuration"
         req = urllib.request.Request(url, headers=_make_headers(secrets))
-        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as response:
+        with urllib.request.urlopen(req) as response:
             data = json.loads(response.read().decode())
 
         # The filter query usually contains the project key

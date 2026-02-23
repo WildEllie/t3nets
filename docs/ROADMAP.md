@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** February 22, 2026
+**Last Updated:** February 23, 2026
 
 ---
 
@@ -64,6 +64,8 @@
 - [ ] **Milestone:** Team member asks sprint status in Teams, gets answer
 
 ### Phase 4: Expand Skills
+- [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
+      ↳ ✅ Completed — see [handoff notes](../handoffs/001-fix-release-notes-skill.md)
 - [ ] Meeting prep skill (Google Calendar / Outlook)
 - [ ] Email triage skill (Gmail / Outlook)
 - [ ] Skill marketplace page in dashboard

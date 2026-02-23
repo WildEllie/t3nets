@@ -110,6 +110,23 @@ SKILL_ACTION_RULES: dict[str, list[tuple[str, str]]] = {
         (r"\bemail\b", "summary"),
         (r"\bmail\b", "summary"),
     ],
+    "release_notes": [
+        # List releases
+        (r"\blist\b.*\brelease", "list_releases"),
+        (r"\bshow\b.*\b(version|release)s\b", "list_releases"),
+        (r"\bwhat\s+(version|release)s\b", "list_releases"),
+        (r"\ball\b.*\brelease", "list_releases"),
+        (r"\bavailable\b.*\brelease", "list_releases"),
+        # Summarize (specific release)
+        (r"\brelease\s*notes?\b", "summarize"),
+        (r"\bchangelog\b", "summarize"),
+        (r"\bwhat\b.*\bship(ped)?\b", "summarize"),
+        (r"\bgenerate\b.*\brelease\b", "summarize"),
+        (r"\bsummariz\w*\b.*\brelease\b", "summarize"),
+        (r"\brelease\b.*\bsummar\w*\b", "summarize"),
+        # Fallback
+        (r"\brelease\b", "summarize"),
+    ],
 }
 
 # --- Skill detection patterns (broader than action rules) ---
@@ -167,6 +184,20 @@ SKILL_PATTERNS: dict[str, list[str]] = {
         r"\b(inbox|email|mail)\b",
         r"\bunread\b",
         r"\b(urgent|important)\s+(email|message)\b",
+    ],
+    "release_notes": [
+        r"\brelease\s*notes?\b",
+        r"\bchangelog\b",
+        r"\bwhat\b.*\bship(ped)?\b",
+        r"\bwhat'?s?\s+in\b.*\b(release|version)\b",
+        r"\blist\b.*\breleases?\b",
+        r"\bfix\s*version\b",
+        r"\bwhat\s+(did we|have we)\s+release\b",
+        r"\bwhat\s+versions?\b",
+        r"\bgenerate\b.*\b(release|changelog)\b",
+        r"\bsummariz\w*\b.*\brelease\b",
+        r"\brelease\b.*\bsummar\w*\b",
+        r"\brelease\b(?!\s*(status|ready|readiness)\b)",
     ],
 }
 
@@ -254,7 +285,7 @@ class RuleBasedRouter:
             if confidence > best_confidence:
                 best_confidence = confidence
                 action = self._determine_action(text_lower, rule_set)
-                params = self._extract_params(text_lower, rule_set, action)
+                params = self._extract_params(text_lower, rule_set, action, text)
                 best_match = RouteMatch(
                     skill_name=skill_name,
                     action=action,
@@ -317,7 +348,9 @@ class RuleBasedRouter:
             return rule_set.action_rules[-1][1]
         return "status"
 
-    def _extract_params(self, text_lower: str, rule_set: RuleSet, action: str) -> dict:
+    def _extract_params(
+        self, text_lower: str, rule_set: RuleSet, action: str, text_original: str = ""
+    ) -> dict:
         """Extract parameters from the message text."""
         params = {"action": action}
 
@@ -327,7 +360,44 @@ class RuleBasedRouter:
             if email_match:
                 params["assignee_email"] = email_match.group()
 
+        # Extract release name for release_notes skill (use original case)
+        if rule_set.skill_name == "release_notes" and action == "summarize":
+            release_name = self._extract_release_name(text_original or text_lower)
+            if release_name:
+                params["release_name"] = release_name
+
         return params
+
+    @staticmethod
+    def _extract_release_name(text: str) -> str:
+        """Extract a release/version name from user text."""
+        # Match quoted release names first: "Nova 2.0", 'Sprint 5', etc.
+        quoted = re.search(r'["\']([^"\']+)["\']', text)
+        if quoted:
+            return quoted.group(1)
+
+        # Match version patterns: v1.0, v2.5.0, 1.0.0, etc.
+        version_match = re.search(r'\bv?\d+\.\d+(?:\.\d+)?(?:-\w+)?\b', text)
+        if version_match:
+            return version_match.group()
+
+        # Match "release <name>" or "version <name>" patterns
+        named = re.search(
+            r'\b(?:release|version)\s+([A-Za-z0-9][A-Za-z0-9._\- ]*)',
+            text,
+        )
+        if named:
+            candidate = named.group(1).strip()
+            # Stop at common filler words
+            for stop in ("for", "of", "in", "to", "from", "with", "and", "notes", "note"):
+                idx = candidate.lower().find(f" {stop} ")
+                if idx >= 0:
+                    candidate = candidate[:idx].strip()
+                    break
+            if candidate:
+                return candidate
+
+        return ""
 
     def is_conversational(self, text: str) -> bool:
         """

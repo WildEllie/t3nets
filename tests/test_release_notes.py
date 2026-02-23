@@ -3,7 +3,9 @@ Release Notes skill tests.
 
 Tests cover:
 - Worker: execute() dispatch, credential validation, issue parsing, error handling
+- Worker: future/unstarted release handling
 - Routing: rule_router correctly routes release-related messages
+- Routing: release_name extraction from user messages
 - Registration: skill.yaml loads into the registry
 """
 
@@ -132,6 +134,11 @@ def test_summarize_missing_release_name():
 @patch("agent.skills.release_notes.worker._jira_search")
 def test_summarize_success(mock_search, mock_version_info):
     """Should return structured release summary."""
+    mock_version_info.return_value = {
+        "name": "v1.0.0",
+        "released": True,
+        "release_date": "2025-06-20",
+    }
     mock_search.return_value = [
         {
             "key": "PROJ-1",
@@ -166,11 +173,6 @@ def test_summarize_success(mock_search, mock_version_info):
             },
         },
     ]
-    mock_version_info.return_value = {
-        "name": "v1.0.0",
-        "released": True,
-        "release_date": "2025-06-20",
-    }
 
     result = execute(
         {"action": "summarize", "release_name": "v1.0.0"},
@@ -187,10 +189,16 @@ def test_summarize_success(mock_search, mock_version_info):
     assert result["summary"]["contributors"]["Alice"] == 2
 
 
+@patch("agent.skills.release_notes.worker._get_version_info")
 @patch("agent.skills.release_notes.worker._jira_search")
-def test_summarize_no_issues(mock_search):
-    """Should return error-like response when no issues found."""
+def test_summarize_no_issues(mock_search, mock_version_info):
+    """Should return not_started when unreleased version has no issues."""
     mock_search.return_value = []
+    mock_version_info.return_value = {
+        "name": "v99.0.0",
+        "released": False,
+        "release_date": "",
+    }
 
     result = execute(
         {"action": "summarize", "release_name": "v99.0.0"},
@@ -198,7 +206,158 @@ def test_summarize_no_issues(mock_search):
     )
 
     assert result["total_issues"] == 0
+    assert result.get("not_started") is True
+    assert "not started" in result["message"].lower()
+
+
+@patch("agent.skills.release_notes.worker._get_version_info")
+def test_summarize_release_not_found(mock_version_info):
+    """Should return error when release doesn't exist in Jira."""
+    mock_version_info.return_value = {}
+
+    result = execute(
+        {"action": "summarize", "release_name": "v999.0.0"},
+        FAKE_SECRETS,
+    )
+
     assert "error" in result
+    assert "not found" in result["error"].lower()
+
+
+@patch("agent.skills.release_notes.worker._get_version_info")
+@patch("agent.skills.release_notes.worker._jira_search")
+def test_summarize_future_release_no_work_started(mock_search, mock_version_info):
+    """Should return not_started when issues exist but none have started."""
+    mock_version_info.return_value = {
+        "name": "v3.0.0",
+        "released": False,
+        "release_date": "",
+    }
+    mock_search.return_value = [
+        {
+            "key": "PROJ-10",
+            "fields": {
+                "summary": "New feature planned",
+                "status": {"name": "To Do"},
+                "issuetype": {"name": "Story"},
+                "priority": {"name": "Medium"},
+                "assignee": None,
+                "reporter": {"displayName": "PM"},
+                "resolution": None,
+                "labels": [],
+                "components": [],
+                "customfield_10016": 5,
+            },
+        },
+        {
+            "key": "PROJ-11",
+            "fields": {
+                "summary": "Another planned item",
+                "status": {"name": "Backlog"},
+                "issuetype": {"name": "Task"},
+                "priority": {"name": "Low"},
+                "assignee": None,
+                "reporter": {"displayName": "PM"},
+                "resolution": None,
+                "labels": [],
+                "components": [],
+                "customfield_10016": 3,
+            },
+        },
+    ]
+
+    result = execute(
+        {"action": "summarize", "release_name": "v3.0.0"},
+        FAKE_SECRETS,
+    )
+
+    assert result.get("not_started") is True
+    assert result["total_issues"] == 2
+    assert "no work to summarize" in result["message"].lower()
+
+
+@patch("agent.skills.release_notes.worker._get_version_info")
+@patch("agent.skills.release_notes.worker._jira_search")
+def test_summarize_future_release_with_work(mock_search, mock_version_info):
+    """Should summarize normally if unreleased version has work in progress."""
+    mock_version_info.return_value = {
+        "name": "v2.0.0",
+        "released": False,
+        "release_date": "",
+    }
+    mock_search.return_value = [
+        {
+            "key": "PROJ-20",
+            "fields": {
+                "summary": "Feature in progress",
+                "status": {"name": "In Progress"},
+                "issuetype": {"name": "Story"},
+                "priority": {"name": "High"},
+                "assignee": {"displayName": "Alice"},
+                "reporter": {"displayName": "Bob"},
+                "resolution": None,
+                "resolutiondate": None,
+                "labels": [],
+                "components": [],
+                "customfield_10016": 8,
+            },
+        },
+    ]
+
+    result = execute(
+        {"action": "summarize", "release_name": "v2.0.0"},
+        FAKE_SECRETS,
+    )
+
+    assert result.get("not_started") is not True
+    assert result["total_issues"] == 1
+    assert "issues_by_type" in result
+
+
+# --- Worker: search endpoint and pagination ---
+
+
+@patch("agent.skills.release_notes.worker._jira_rest_request")
+def test_jira_search_uses_new_endpoint(mock_req):
+    """Should use /rest/api/3/search/jql (not deprecated /search)."""
+    from agent.skills.release_notes.worker import _jira_search
+
+    mock_req.return_value = {"issues": [], "isLast": True}
+    _jira_search(FAKE_SECRETS, 'project = "NV"', ["summary"])
+
+    call_args = mock_req.call_args[0]
+    endpoint = call_args[1]
+    assert endpoint.startswith("search/jql?"), f"Expected search/jql endpoint, got: {endpoint}"
+    assert "startAt" not in endpoint, "Should not use deprecated startAt parameter"
+
+
+@patch("agent.skills.release_notes.worker._jira_rest_request")
+def test_jira_search_pagination_with_token(mock_req):
+    """Should paginate using nextPageToken until isLast or no token."""
+    from agent.skills.release_notes.worker import _jira_search
+
+    mock_req.side_effect = [
+        {
+            "issues": [{"key": "NV-1", "fields": {}}],
+            "nextPageToken": "token-page-2",
+            "isLast": False,
+        },
+        {
+            "issues": [{"key": "NV-2", "fields": {}}],
+            "isLast": True,
+        },
+    ]
+
+    results = _jira_search(FAKE_SECRETS, 'project = "NV"', ["summary"])
+
+    assert len(results) == 2
+    assert results[0]["key"] == "NV-1"
+    assert results[1]["key"] == "NV-2"
+    assert mock_req.call_count == 2
+
+    # Second call should include nextPageToken
+    second_call_endpoint = mock_req.call_args_list[1][0][1]
+    assert "nextPageToken=token-page-2" in second_call_endpoint
 
 
 # --- Worker: _extract_issue ---
@@ -321,6 +480,20 @@ class TestReleaseNotesRouting:
         assert match.skill_name == "release_notes"
         assert match.action == "summarize"
 
+    def test_summarize_extracts_version(self, router):
+        """Should extract version number from message."""
+        match = router.match("release notes for v2.5.0", ENABLED_SKILLS)
+        assert match is not None
+        assert match.skill_name == "release_notes"
+        assert match.params.get("release_name") == "v2.5.0"
+
+    def test_summarize_extracts_quoted_name(self, router):
+        """Should extract quoted release name."""
+        match = router.match('generate release notes for "Nova 3.0"', ENABLED_SKILLS)
+        assert match is not None
+        assert match.skill_name == "release_notes"
+        assert match.params.get("release_name") == "Nova 3.0"
+
     def test_sprint_status_not_stolen(self, router):
         """'sprint status' should still route to sprint_status, not release_notes."""
         match = router.match("sprint status", ENABLED_SKILLS)
@@ -335,6 +508,13 @@ class TestReleaseNotesRouting:
 
     def test_raw_mode_supported(self, router):
         assert router.supports_raw("release_notes") is True
+
+    def test_raw_flag_stripped(self):
+        """--raw flag should be stripped from message text."""
+        clean, is_raw = strip_raw_flag("list releases --raw")
+        assert is_raw is True
+        assert "--raw" not in clean
+        assert "list releases" in clean
 
 
 # --- Skill registration ---
