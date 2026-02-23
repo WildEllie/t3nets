@@ -51,9 +51,12 @@
 - [x] **Milestone:** Platform running on AWS with configurable AI models
 
 ### Phase 2: Multi-Tenancy
-- [ ] Cognito user pool + auth flow
-- [ ] Tenant resolution from JWT
-- [ ] Admin Lambda (tenant/team/integration CRUD)
+- [x] Cognito user pool + auth flow (PKCE, hosted UI, token exchange)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/002-cognito-auth-and-tenant-resolution.md)
+- [x] Tenant resolution from JWT (`custom:tenant_id` claim, API Gateway JWT authorizer)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/002-cognito-auth-and-tenant-resolution.md)
+- [x] Admin API (tenant CRUD — list, get, create, update) — TODO: role-based access
+      ↳ ✅ Completed — see [handoff notes](../handoffs/002-cognito-auth-and-tenant-resolution.md)
 - [ ] Onboarding wizard (React)
 - [ ] Seed a second tenant, verify isolation
 - [ ] **Milestone:** Two teams onboarded, data fully isolated
@@ -105,7 +108,7 @@
 - [ ] Auto-reload dev server (watchdog / uvicorn)
 - [ ] CLI tool for scaffolding new skills
 - [ ] Local development docker-compose with hot reload
-- [ ] Unit test suite for router, rule engine, skills
+- [x] Unit test suite for router, rule engine, skills (tenant isolation, release notes, error handler)
 - [ ] Integration test harness
 
 ### Platform
