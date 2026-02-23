@@ -437,7 +437,7 @@ def router():
     """Build a RuleBasedRouter with release_notes loaded."""
     skills_dir = Path(__file__).parent.parent / "agent" / "skills"
     registry = SkillRegistry()
-    registry.load_from_directory(str(skills_dir))
+    registry.load_from_directory(skills_dir)
     return RuleBasedRouter(registry)
 
 
@@ -524,7 +524,7 @@ def test_skill_yaml_loads():
     """skill.yaml should load into the registry without errors."""
     skills_dir = Path(__file__).parent.parent / "agent" / "skills"
     registry = SkillRegistry()
-    registry.load_from_directory(str(skills_dir))
+    registry.load_from_directory(skills_dir)
 
     skill = registry.get_skill("release_notes")
     assert skill is not None
@@ -540,7 +540,7 @@ def test_worker_importable():
     """Registry should be able to import the worker module."""
     skills_dir = Path(__file__).parent.parent / "agent" / "skills"
     registry = SkillRegistry()
-    registry.load_from_directory(str(skills_dir))
+    registry.load_from_directory(skills_dir)
 
     worker_fn = registry.get_worker("release_notes")
     assert callable(worker_fn)
