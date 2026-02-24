@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** February 23, 2026
+**Last Updated:** February 24, 2026
 
 ---
 
@@ -57,7 +57,8 @@
       ↳ ✅ Completed — see [handoff notes](../handoffs/002-cognito-auth-and-tenant-resolution.md)
 - [x] Admin API (tenant CRUD — list, get, create, update) — TODO: role-based access
       ↳ ✅ Completed — see [handoff notes](../handoffs/002-cognito-auth-and-tenant-resolution.md)
-- [ ] Onboarding wizard (React)
+- [x] Onboarding wizard (vanilla HTML + backend endpoints)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/003-onboarding-wizard.md)
 - [ ] Seed a second tenant, verify isolation
 - [ ] **Milestone:** Two teams onboarded, data fully isolated
 

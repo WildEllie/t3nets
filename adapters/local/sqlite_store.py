@@ -74,7 +74,10 @@ class SQLiteConversationStore(ConversationStore):
             else:
                 messages = []
 
-            messages.append({"role": "user", "content": user_message})
+            user_msg: dict = {"role": "user", "content": user_message}
+            if metadata and metadata.get("user_email"):
+                user_msg["metadata"] = {"user_email": metadata["user_email"]}
+            messages.append(user_msg)
             assistant_msg: dict = {"role": "assistant", "content": assistant_message}
             if metadata:
                 assistant_msg["metadata"] = metadata

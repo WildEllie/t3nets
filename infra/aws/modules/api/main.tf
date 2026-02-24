@@ -33,7 +33,7 @@ resource "aws_apigatewayv2_api" "main" {
 
   cors_configuration {
     allow_origins = ["*"]
-    allow_methods = ["GET", "POST", "OPTIONS"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "OPTIONS"]
     allow_headers = ["Content-Type", "Authorization"]
     max_age       = 3600
   }
@@ -117,6 +117,51 @@ resource "aws_apigatewayv2_route" "public_settings_page" {
 resource "aws_apigatewayv2_route" "public_auth_config" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "GET /api/auth/config"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_onboard" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /onboard"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+# Onboarding API routes — no JWT required because users don't have
+# custom:tenant_id in their token yet during the onboarding flow.
+# Server-side auth handles validation (extracts sub/email from JWT directly).
+resource "aws_apigatewayv2_route" "public_create_tenant" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/admin/tenants"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_auth_me" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/auth/me"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_assign_tenant" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/auth/assign-tenant"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_integrations" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/integrations/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_activate_tenant" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "PATCH /api/admin/tenants/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_update_tenant" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "PUT /api/admin/tenants/{proxy+}"
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 

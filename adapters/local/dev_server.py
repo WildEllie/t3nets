@@ -69,6 +69,10 @@ DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
 PROVIDER = "anthropic"
 
+# Build number — read from version.txt at startup
+_version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
+BUILD_NUMBER = _version_path.read_text().strip() if _version_path.exists() else "0"
+
 # Stats for the session
 stats = {
     "rule_routed": 0,
@@ -137,6 +141,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._serve_file("health.html")
         elif path == "/settings":
             self._serve_file("settings.html")
+        elif path == "/onboard":
+            self._serve_file("onboard.html")
         elif path == "/api/health":
             self._handle_health_api()
         elif path == "/api/settings":
@@ -145,6 +151,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_history()
         elif path == "/api/auth/config":
             self._handle_auth_config()
+        elif path == "/api/auth/me":
+            self._handle_auth_me()
         else:
             self.send_error(404)
 
@@ -157,6 +165,27 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_clear()
         elif path == "/api/settings":
             self._handle_settings_post()
+        elif path.startswith("/api/integrations/"):
+            self._handle_integrations_post(path)
+        elif path == "/api/admin/tenants":
+            self._handle_create_tenant()
+        elif path == "/api/auth/assign-tenant":
+            # Local dev: no Cognito, just acknowledge
+            self._json_response({"ok": True, "message": "Skipped (local dev)"})
+        else:
+            self.send_error(404)
+
+    def do_PUT(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/tenants/"):
+            self._handle_update_tenant(path)
+        else:
+            self.send_error(404)
+
+    def do_PATCH(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/tenants/") and path.endswith("/activate"):
+            self._handle_activate_tenant(path)
         else:
             self.send_error(404)
 
@@ -243,6 +272,152 @@ class DevHandler(BaseHTTPRequestHandler):
             "user_pool_id": "",
         })
 
+    def _handle_auth_me(self):
+        """Return current user info — local dev always returns the default tenant."""
+        tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+        self._json_response({
+            "authenticated": True,
+            "user_id": "local-admin",
+            "tenant_id": DEFAULT_TENANT,
+            "email": "admin@local.dev",
+            "tenant_status": tenant.status,
+        })
+
+    def _handle_integrations_post(self, path: str):
+        """Handle POST /api/integrations/{name} and /api/integrations/{name}/test."""
+        try:
+            parts = path.rstrip("/").split("/")
+            is_test = parts[-1] == "test"
+            integration_name = parts[-2] if is_test else parts[-1]
+
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            tenant_id = body.get("tenant_id") or DEFAULT_TENANT
+
+            if is_test:
+                result = self._test_integration(integration_name, body)
+                self._json_response(result, 200 if result.get("ok") else 400)
+            else:
+                _run_async(secrets.put(tenant_id, integration_name, body))
+                logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
+                self._json_response({"ok": True})
+        except Exception as e:
+            logger.exception("Integration endpoint error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _test_integration(self, name: str, creds: dict) -> dict:
+        """Test integration credentials."""
+        if name == "jira":
+            return self._test_jira(creds)
+        return {"ok": False, "error": f"Testing not supported for '{name}'"}
+
+    def _test_jira(self, creds: dict) -> dict:
+        """Validate Jira credentials by calling /rest/api/3/myself."""
+        import urllib.request
+        import base64
+
+        url = creds.get("url", "").rstrip("/")
+        email = creds.get("email", "")
+        api_token = creds.get("api_token", "")
+
+        if not all([url, email, api_token]):
+            return {"ok": False, "error": "url, email, and api_token are required"}
+
+        try:
+            auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+            req = urllib.request.Request(
+                f"{url}/rest/api/3/myself",
+                headers={
+                    "Authorization": f"Basic {auth}",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                return {
+                    "ok": True,
+                    "user": data.get("emailAddress", email),
+                    "display_name": data.get("displayName", ""),
+                }
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "error": f"Jira returned {e.code}: {e.reason}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _handle_create_tenant(self):
+        """Handle POST /api/admin/tenants for local dev."""
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            tenant_id = body.get("tenant_id", "").strip()
+            name = body.get("name", "").strip()
+
+            if not tenant_id or not name:
+                self._json_response({"error": "tenant_id and name are required"}, 400)
+                return
+
+            from agent.models.tenant import Tenant, TenantSettings, TenantUser
+
+            now = datetime.now(timezone.utc).isoformat()
+            status = body.get("status", "active")
+            tenant = Tenant(
+                tenant_id=tenant_id,
+                name=name,
+                status=status,
+                created_at=now,
+                settings=TenantSettings(
+                    enabled_skills=skills.list_skill_names(),
+                ),
+            )
+            _run_async(tenants.create_tenant(tenant))
+            logger.info(f"Created tenant: {tenant_id} ({name})")
+
+            # Create admin user if provided
+            admin_data = body.get("admin_user")
+            if admin_data:
+                user = TenantUser(
+                    user_id=admin_data.get("cognito_sub", f"admin-{tenant_id}"),
+                    tenant_id=tenant_id,
+                    email=admin_data.get("email", "admin@local.dev"),
+                    display_name=admin_data.get("display_name", "Admin"),
+                    role="admin",
+                )
+                _run_async(tenants.create_user(user))
+
+            self._json_response({"tenant_id": tenant_id, "created": True}, 201)
+        except Exception as e:
+            logger.exception("Create tenant error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_update_tenant(self, path: str):
+        """Handle PUT /api/admin/tenants/{id} for local dev."""
+        try:
+            tenant_id = path.split("/")[-1]
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+
+            if "name" in body:
+                tenant.name = body["name"]
+            if "status" in body:
+                tenant.status = body["status"]
+            if "ai_model" in body:
+                tenant.settings.ai_model = body["ai_model"]
+
+            _run_async(tenants.update_tenant(tenant))
+            self._json_response({"tenant_id": tenant_id, "updated": True})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_activate_tenant(self, path: str):
+        """Handle PATCH /api/admin/tenants/{id}/activate for local dev."""
+        try:
+            parts = path.rstrip("/").split("/")
+            tenant_id = parts[-2]
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+            tenant.status = "active"
+            _run_async(tenants.update_tenant(tenant))
+            self._json_response({"tenant_id": tenant_id, "status": "active", "activated": True})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
     def _handle_settings_get(self):
         """Return current settings and available models."""
         try:
@@ -253,6 +428,7 @@ class DevHandler(BaseHTTPRequestHandler):
                 "models": get_models_for_provider(PROVIDER),
                 "platform": os.getenv("T3NETS_PLATFORM", "local"),
                 "stage": os.getenv("T3NETS_STAGE", "dev"),
+                "build": BUILD_NUMBER,
             })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
@@ -308,6 +484,21 @@ class DevHandler(BaseHTTPRequestHandler):
                 return
 
             conversation_id = body.get("conversation_id", DEFAULT_CONVERSATION)
+
+            # Extract user email from JWT (if present) for message attribution
+            user_email = ""
+            auth_header = self.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                try:
+                    import base64
+                    payload_b64 = auth_header[7:].split(".")[1]
+                    padding = 4 - len(payload_b64) % 4
+                    if padding != 4:
+                        payload_b64 += "=" * padding
+                    claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+                    user_email = claims.get("email", "")
+                except Exception:
+                    pass
 
             # Check for --raw flag
             clean_text, is_raw = strip_raw_flag(text)
@@ -504,14 +695,17 @@ Include risk assessment and actionable suggestions where relevant."""
             stats["total_tokens"] += total_tokens
 
             # Save conversation (don't save raw output to history)
+            chat_metadata: dict = {
+                "route": route_type,
+                "model": model_short_name,
+                "tokens": total_tokens,
+            }
+            if user_email:
+                chat_metadata["user_email"] = user_email
             if not is_raw_response:
                 _run_async(memory.save_turn(
                     DEFAULT_TENANT, conversation_id, clean_text, assistant_text,
-                    metadata={
-                        "route": route_type,
-                        "model": model_short_name,
-                        "tokens": total_tokens,
-                    },
+                    metadata=chat_metadata,
                 ))
 
             self._json_response({
@@ -521,6 +715,7 @@ Include risk assessment and actionable suggestions where relevant."""
                 "route": route_type,
                 "raw": is_raw_response,
                 "model": model_short_name,
+                "user_email": user_email,
             })
 
         except Exception as e:
@@ -563,8 +758,8 @@ Include risk assessment and actionable suggestions where relevant."""
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     def log_message(self, format, *args):

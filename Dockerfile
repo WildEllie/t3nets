@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir pyyaml boto3
 # Copy application code
 COPY agent/ agent/
 COPY adapters/ adapters/
+COPY version.txt .
 
 EXPOSE 8080
 

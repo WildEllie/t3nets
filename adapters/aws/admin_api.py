@@ -3,6 +3,9 @@ T3nets Admin API — Tenant management endpoints.
 
 These endpoints require admin-level authentication (checked via JWT claims).
 Used by platform operators to manage tenants, users, and configuration.
+
+The onboarding flow uses a relaxed auth mode: users without a tenant_id
+can still call POST /api/admin/tenants to create their first tenant.
 """
 
 import json
@@ -10,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from agent.models.tenant import Tenant, TenantSettings
+from agent.models.tenant import Tenant, TenantSettings, TenantUser
 from adapters.aws.auth_middleware import extract_auth, AuthError
 
 logger = logging.getLogger("t3nets.admin")
@@ -33,7 +36,12 @@ class AdminAPI:
     ) -> tuple[dict, int]:
         """Route an admin API request. Returns (response_dict, status_code)."""
         try:
-            # Verify admin access
+            # Onboarding: allow tenant creation without a tenant_id in JWT.
+            # The user just signed up via Cognito and has no tenant yet.
+            if method == "POST" and path == "/api/admin/tenants":
+                return self._create_tenant(body or {}, headers)
+
+            # All other admin routes require full auth (with tenant_id)
             auth = extract_auth(headers)
             # For now, any authenticated user with a tenant can access admin.
             # TODO: add role-based access (admin claim in JWT)
@@ -43,11 +51,14 @@ class AdminAPI:
             elif method == "GET" and path.startswith("/api/admin/tenants/"):
                 tenant_id = path.split("/")[-1]
                 return self._get_tenant(tenant_id)
-            elif method == "POST" and path == "/api/admin/tenants":
-                return self._create_tenant(body or {})
             elif method == "PUT" and path.startswith("/api/admin/tenants/"):
                 tenant_id = path.split("/")[-1]
                 return self._update_tenant(tenant_id, body or {})
+            elif method == "PATCH" and path.endswith("/activate"):
+                # PATCH /api/admin/tenants/{id}/activate
+                parts = path.rstrip("/").split("/")
+                tenant_id = parts[-2]  # /api/admin/tenants/{id}/activate
+                return self._activate_tenant(tenant_id)
             else:
                 return {"error": "Not found"}, 404
 
@@ -101,8 +112,13 @@ class AdminAPI:
             "integrations": list(connected),
         }, 200
 
-    def _create_tenant(self, body: dict) -> tuple[dict, int]:
-        """Create a new tenant."""
+    def _create_tenant(self, body: dict, headers: dict) -> tuple[dict, int]:
+        """Create a new tenant, optionally with a first admin user.
+
+        This endpoint uses relaxed auth: the user may not have a tenant_id
+        yet (they're onboarding), so we extract sub/email from JWT without
+        requiring custom:tenant_id.
+        """
         import asyncio
 
         tenant_id = body.get("tenant_id", "").strip()
@@ -110,6 +126,13 @@ class AdminAPI:
 
         if not tenant_id or not name:
             return {"error": "tenant_id and name are required"}, 400
+
+        # Validate tenant_id format (URL-safe: lowercase, numbers, hyphens)
+        import re
+        if not re.match(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$", tenant_id) or len(tenant_id) < 3:
+            return {
+                "error": "tenant_id must be 3+ chars, lowercase letters/numbers/hyphens only"
+            }, 400
 
         # Check if already exists
         try:
@@ -119,10 +142,11 @@ class AdminAPI:
             pass  # Expected — tenant doesn't exist yet
 
         now = datetime.now(timezone.utc).isoformat()
+        status = body.get("status", "active")
         tenant = Tenant(
             tenant_id=tenant_id,
             name=name,
-            status="active",
+            status=status,
             created_at=now,
             settings=TenantSettings(
                 enabled_skills=body.get("enabled_skills", self.skills.list_skill_names()),
@@ -130,9 +154,41 @@ class AdminAPI:
             ),
         )
         asyncio.run(self.tenants.create_tenant(tenant))
-        logger.info(f"Created tenant: {tenant_id} ({name})")
+        logger.info(f"Created tenant: {tenant_id} ({name}) [status={status}]")
+
+        # Create first admin user if admin_user data is provided
+        admin_data = body.get("admin_user")
+        if admin_data:
+            user = TenantUser(
+                user_id=admin_data.get("cognito_sub", f"admin-{tenant_id}"),
+                tenant_id=tenant_id,
+                email=admin_data.get("email", ""),
+                display_name=admin_data.get("display_name", "Admin"),
+                role="admin",
+                cognito_sub=admin_data.get("cognito_sub", ""),
+            )
+            asyncio.run(self.tenants.create_user(user))
+            logger.info(f"Created admin user for tenant {tenant_id}: {user.email}")
 
         return {"tenant_id": tenant_id, "created": True}, 201
+
+    def _activate_tenant(self, tenant_id: str) -> tuple[dict, int]:
+        """Set tenant status from 'onboarding' to 'active'."""
+        import asyncio
+
+        try:
+            tenant = asyncio.run(self.tenants.get_tenant(tenant_id))
+        except Exception:
+            return {"error": f"Tenant '{tenant_id}' not found"}, 404
+
+        if tenant.status == "active":
+            return {"tenant_id": tenant_id, "status": "active", "message": "Already active"}, 200
+
+        tenant.status = "active"
+        asyncio.run(self.tenants.update_tenant(tenant))
+        logger.info(f"Activated tenant: {tenant_id}")
+
+        return {"tenant_id": tenant_id, "status": "active", "activated": True}, 200
 
     def _update_tenant(self, tenant_id: str, body: dict) -> tuple[dict, int]:
         """Update an existing tenant's settings."""

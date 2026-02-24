@@ -70,6 +70,10 @@ PROVIDER = "bedrock"
 PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")  # aws, gcp, azure
 STAGE = os.environ.get("T3NETS_STAGE", "dev")  # dev, staging, prod — set by Terraform
 
+# Build number — read from version.txt at startup
+_version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
+BUILD_NUMBER = _version_path.read_text().strip() if _version_path.exists() else "0"
+
 # Cognito (set by Terraform → ECS env vars)
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
 COGNITO_APP_CLIENT_ID = os.environ.get("COGNITO_APP_CLIENT_ID", "")
@@ -170,6 +174,8 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._serve_file("login.html", "adapters/local")
         elif path == "/callback":
             self._serve_file("callback.html", "adapters/local")
+        elif path == "/onboard":
+            self._serve_file("onboard.html", "adapters/local")
         elif path == "/api/health":
             self._handle_health_api()
         elif path == "/api/settings":
@@ -193,6 +199,10 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._handle_clear()
         elif path == "/api/settings":
             self._handle_settings_post()
+        elif path.startswith("/api/integrations/"):
+            self._handle_integrations_post(path)
+        elif path == "/api/auth/assign-tenant":
+            self._handle_assign_tenant()
         elif path.startswith("/api/admin/"):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             self._handle_admin("POST", path, body)
@@ -204,6 +214,14 @@ class AWSHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/admin/"):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             self._handle_admin("PUT", path, body)
+        else:
+            self.send_error(404)
+
+    def do_PATCH(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_admin("PATCH", path, body)
         else:
             self.send_error(404)
 
@@ -260,6 +278,128 @@ class AWSHandler(BaseHTTPRequestHandler):
             logger.exception("Health check error")
             self._json_response({"status": "error", "error": str(e)}, 500)
 
+    def _handle_integrations_post(self, path: str):
+        """Handle POST /api/integrations/{name} and /api/integrations/{name}/test."""
+        try:
+            parts = path.rstrip("/").split("/")
+            # /api/integrations/{name}/test or /api/integrations/{name}
+            is_test = parts[-1] == "test"
+            integration_name = parts[-2] if is_test else parts[-1]
+
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+
+            # During onboarding the JWT may not yet have custom:tenant_id,
+            # so accept tenant_id from the request body as a fallback.
+            tenant_id, _ = _get_auth_info(self.headers)
+            if tenant_id == DEFAULT_TENANT and body.get("tenant_id"):
+                tenant_id = body["tenant_id"]
+
+            if is_test:
+                result = self._test_integration(integration_name, body)
+                self._json_response(result, 200 if result.get("ok") else 400)
+            else:
+                _run_async(secrets.put(tenant_id, integration_name, body))
+                logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
+                self._json_response({"ok": True})
+        except Exception as e:
+            logger.exception("Integration endpoint error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _test_integration(self, name: str, creds: dict) -> dict:
+        """Test integration credentials by making a real API call."""
+        if name == "jira":
+            return self._test_jira(creds)
+        return {"ok": False, "error": f"Testing not supported for '{name}'"}
+
+    def _test_jira(self, creds: dict) -> dict:
+        """Validate Jira credentials by calling /rest/api/3/myself."""
+        import urllib.request
+        import base64
+
+        url = creds.get("url", "").rstrip("/")
+        email = creds.get("email", "")
+        api_token = creds.get("api_token", "")
+
+        if not all([url, email, api_token]):
+            return {"ok": False, "error": "url, email, and api_token are required"}
+
+        try:
+            auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+            req = urllib.request.Request(
+                f"{url}/rest/api/3/myself",
+                headers={
+                    "Authorization": f"Basic {auth}",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                return {
+                    "ok": True,
+                    "user": data.get("emailAddress", email),
+                    "display_name": data.get("displayName", ""),
+                }
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "error": f"Jira returned {e.code}: {e.reason}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _handle_assign_tenant(self):
+        """Set custom:tenant_id on the Cognito user.
+
+        Called at the end of onboarding to associate the user with their new tenant.
+        Requires the JWT to have a valid 'sub' claim (but tenant_id may be empty).
+        """
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            target_tenant_id = body.get("tenant_id", "").strip()
+
+            if not target_tenant_id:
+                self._json_response({"error": "tenant_id is required"}, 400)
+                return
+
+            if not COGNITO_USER_POOL_ID:
+                # Local dev — no Cognito, just acknowledge
+                self._json_response({"ok": True, "message": "Skipped (no Cognito)"})
+                return
+
+            # Extract user sub from JWT (relaxed — don't require tenant_id)
+            auth_header = self.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                self._json_response({"error": "Missing Authorization header"}, 401)
+                return
+
+            import base64
+            token = auth_header[7:]
+            parts = token.split(".")
+            payload_b64 = parts[1]
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            user_sub = payload.get("sub", "")
+
+            if not user_sub:
+                self._json_response({"error": "JWT missing sub claim"}, 401)
+                return
+
+            # Use boto3 to set custom:tenant_id on the Cognito user
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            client.admin_update_user_attributes(
+                UserPoolId=COGNITO_USER_POOL_ID,
+                Username=user_sub,
+                UserAttributes=[
+                    {"Name": "custom:tenant_id", "Value": target_tenant_id},
+                ],
+            )
+            logger.info(f"Assigned tenant {target_tenant_id} to Cognito user {user_sub[:8]}...")
+            self._json_response({"ok": True})
+
+        except Exception as e:
+            logger.exception("Assign tenant error")
+            self._json_response({"error": str(e)}, 500)
+
     def _handle_auth_config(self):
         """Return Cognito config for the frontend login flow."""
         self._json_response({
@@ -270,20 +410,42 @@ class AWSHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_auth_me(self):
-        """Return current authenticated user info."""
+        """Return current authenticated user info, including tenant status."""
         if not COGNITO_USER_POOL_ID:
-            self._json_response({"authenticated": False, "tenant_id": DEFAULT_TENANT})
+            self._json_response({
+                "authenticated": False,
+                "tenant_id": DEFAULT_TENANT,
+                "tenant_status": "active",
+            })
             return
         try:
             auth = extract_auth(self.headers)
+            # Look up tenant status for onboarding redirect
+            tenant_status = "active"
+            if auth.tenant_id:
+                try:
+                    tenant = _run_async(tenants.get_tenant(auth.tenant_id))
+                    tenant_status = tenant.status
+                except Exception:
+                    pass
             self._json_response({
                 "authenticated": True,
                 "user_id": auth.user_id,
                 "tenant_id": auth.tenant_id,
                 "email": auth.email,
+                "tenant_status": tenant_status,
             })
         except AuthError as e:
-            self._json_response({"error": e.message}, e.status)
+            # User may not have tenant_id yet (onboarding) — return partial info
+            if e.status == 403:
+                self._json_response({
+                    "authenticated": True,
+                    "tenant_id": "",
+                    "tenant_status": "onboarding",
+                    "email": "",
+                })
+            else:
+                self._json_response({"error": e.message}, e.status)
 
     def _handle_settings_get(self):
         """Return current settings and available models."""
@@ -296,6 +458,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 "models": get_models_for_provider(PROVIDER),
                 "platform": PLATFORM,
                 "stage": STAGE,
+                "build": BUILD_NUMBER,
             })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
@@ -501,8 +664,8 @@ When you have data to present, format it clearly with structure."""
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     def log_message(self, format, *args):
