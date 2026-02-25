@@ -164,6 +164,8 @@
             <button class="login-btn" id="login-btn" onclick="handleLogin()">Sign In</button>
 
             <div class="login-footer">
+                <a onclick="showPanel('forgotPanel')">Forgot password?</a>
+                &nbsp;&middot;&nbsp;
                 <a onclick="showPanel('signupPanel')">Create an account</a>
             </div>
         </div>
@@ -211,6 +213,49 @@
             </div>
 
             <button class="login-btn" id="verify-btn" onclick="handleVerify()">Verify & Sign In</button>
+
+            <div class="login-footer">
+                <a onclick="showPanel('loginPanel')">Back to sign in</a>
+            </div>
+        </div>
+        <!-- Forgot Password Panel -->
+        <div class="panel" id="forgotPanel">
+            <h1>Reset Password</h1>
+            <p>Enter your email and we'll send you a reset code</p>
+
+            <div id="forgot-error" class="error-msg"></div>
+
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="forgot-email" placeholder="you@company.com">
+            </div>
+
+            <button class="login-btn" id="forgot-btn" onclick="handleForgotPassword()">Send Reset Code</button>
+
+            <div class="login-footer">
+                <a onclick="showPanel('loginPanel')">Back to sign in</a>
+            </div>
+        </div>
+
+        <!-- Reset Password Panel -->
+        <div class="panel" id="resetPanel">
+            <h1>New Password</h1>
+            <p id="reset-info">Enter the code we sent to your email and choose a new password.</p>
+
+            <div id="reset-error" class="error-msg"></div>
+            <div id="reset-success" class="success-msg"></div>
+
+            <div class="form-group">
+                <label>Verification Code</label>
+                <input type="text" id="reset-code" placeholder="Enter the 6-digit code" maxlength="6">
+            </div>
+
+            <div class="form-group">
+                <label>New Password</label>
+                <input type="password" id="reset-password" placeholder="Min 8 chars, uppercase, lowercase, number">
+            </div>
+
+            <button class="login-btn" id="reset-btn" onclick="handleConfirmReset()">Reset Password</button>
 
             <div class="login-footer">
                 <a onclick="showPanel('loginPanel')">Back to sign in</a>
@@ -285,6 +330,13 @@
                         showPanel('verifyPanel');
                         document.getElementById('verify-info').textContent =
                             `Your email (${email}) needs to be verified. Check your inbox for a code.`;
+                        setLoading('login-btn', false, 'Sign In');
+                        return;
+                    }
+                    if (data.code === 'PASSWORD_RESET_REQUIRED') {
+                        pendingEmail = email;
+                        document.getElementById('forgot-email').value = email;
+                        handleForgotPassword();
                         setLoading('login-btn', false, 'Sign In');
                         return;
                     }
@@ -390,6 +442,86 @@
             setLoading('verify-btn', false, 'Verify & Sign In');
         }
 
+        async function handleForgotPassword() {
+            const email = document.getElementById('forgot-email').value.trim() || pendingEmail;
+
+            if (!email) {
+                showError('forgot-error', 'Please enter your email.');
+                showPanel('forgotPanel');
+                return;
+            }
+
+            pendingEmail = email;
+            document.getElementById('forgot-email').value = email;
+            showPanel('forgotPanel');
+            setLoading('forgot-btn', true, 'Sending code...');
+            document.getElementById('forgot-error').style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/auth/forgot-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    showError('forgot-error', data.error || 'Failed to send reset code');
+                    setLoading('forgot-btn', false, 'Send Reset Code');
+                    return;
+                }
+
+                // Show reset panel
+                showPanel('resetPanel');
+                document.getElementById('reset-info').textContent =
+                    `We sent a reset code to ${email}. Enter it below with your new password.`;
+            } catch (err) {
+                showError('forgot-error', 'Failed to send reset code: ' + err.message);
+            }
+            setLoading('forgot-btn', false, 'Send Reset Code');
+        }
+
+        async function handleConfirmReset() {
+            const code = document.getElementById('reset-code').value.trim();
+            const newPassword = document.getElementById('reset-password').value;
+
+            if (!code || !newPassword) {
+                showError('reset-error', 'Please enter the code and a new password.');
+                return;
+            }
+
+            setLoading('reset-btn', true, 'Resetting password...');
+            document.getElementById('reset-error').style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/auth/confirm-reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: pendingEmail, code, new_password: newPassword }),
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    showError('reset-error', data.error || 'Password reset failed');
+                    setLoading('reset-btn', false, 'Reset Password');
+                    return;
+                }
+
+                // Success — go to login with success message
+                showPanel('loginPanel');
+                document.getElementById('login-email').value = pendingEmail;
+                const errEl = document.getElementById('login-error');
+                errEl.textContent = 'Password reset! You can now sign in.';
+                errEl.style.background = '#14532d';
+                errEl.style.borderColor = '#166534';
+                errEl.style.color = '#bbf7d0';
+                errEl.style.display = 'block';
+            } catch (err) {
+                showError('reset-error', 'Password reset failed: ' + err.message);
+            }
+            setLoading('reset-btn', false, 'Reset Password');
+        }
+
         // === Enter key support ===
         document.getElementById('login-password').addEventListener('keydown', e => {
             if (e.key === 'Enter') handleLogin();
@@ -402,6 +534,12 @@
         });
         document.getElementById('verify-code').addEventListener('keydown', e => {
             if (e.key === 'Enter') handleVerify();
+        });
+        document.getElementById('forgot-email').addEventListener('keydown', e => {
+            if (e.key === 'Enter') handleForgotPassword();
+        });
+        document.getElementById('reset-password').addEventListener('keydown', e => {
+            if (e.key === 'Enter') handleConfirmReset();
         });
 
         // === Init ===

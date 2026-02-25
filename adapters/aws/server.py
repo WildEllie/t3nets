@@ -225,6 +225,10 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._handle_auth_confirm()
         elif path == "/api/auth/refresh":
             self._handle_auth_refresh()
+        elif path == "/api/auth/forgot-password":
+            self._handle_auth_forgot_password()
+        elif path == "/api/auth/confirm-reset":
+            self._handle_auth_confirm_reset()
         elif path.startswith("/api/admin/"):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             self._handle_admin("POST", path, body)
@@ -425,8 +429,96 @@ class AWSHandler(BaseHTTPRequestHandler):
                 )
             elif err_code == "UserNotFoundException":
                 self._json_response({"error": "Invalid email or password"}, 401)
+            elif err_code == "PasswordResetRequiredException":
+                self._json_response(
+                    {"error": "Password reset required", "code": "PASSWORD_RESET_REQUIRED"},
+                    403,
+                )
             else:
                 logger.exception("Auth login error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_forgot_password(self):
+        """Initiate password reset — sends a verification code to the user's email."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+
+            if not email:
+                self._json_response({"error": "Email is required"}, 400)
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            client.forgot_password(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+            )
+
+            # Always return success — don't leak whether the email exists
+            self._json_response({"message": "Reset code sent"})
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code in ("UserNotFoundException", "InvalidParameterException"):
+                # Don't leak email existence
+                self._json_response({"message": "Reset code sent"})
+            elif err_code == "LimitExceededException":
+                self._json_response(
+                    {"error": "Too many attempts. Please try again later."}, 429
+                )
+            else:
+                logger.exception("Auth forgot-password error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_confirm_reset(self):
+        """Complete password reset with verification code and new password."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            code = body.get("code", "").strip()
+            new_password = body.get("new_password", "")
+
+            if not email or not code or not new_password:
+                self._json_response(
+                    {"error": "Email, code, and new password are required"}, 400
+                )
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            client.confirm_forgot_password(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+                ConfirmationCode=code,
+                Password=new_password,
+            )
+
+            self._json_response({"message": "Password reset successful"})
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "CodeMismatchException":
+                self._json_response({"error": "Invalid verification code"}, 400)
+            elif err_code == "ExpiredCodeException":
+                self._json_response({"error": "Verification code has expired"}, 400)
+            elif err_code == "InvalidPasswordException":
+                msg = getattr(e, "response", {}).get("Error", {}).get("Message", str(e))
+                self._json_response({"error": msg}, 400)
+            else:
+                logger.exception("Auth confirm-reset error")
                 self._json_response({"error": str(e)}, 500)
 
     def _handle_auth_signup(self):

@@ -67,7 +67,7 @@ echo ""
 
 # --- Wait for deployment ---
 start=$(date +%s)
-echo "→ Waiting for deployment to stabilize..."
+echo "→ Waiting for deployment to stabilize... ${start}"
 aws ecs wait services-stable \
     --cluster "${NAME_PREFIX}-cluster" \
     --services "${NAME_PREFIX}-router" \

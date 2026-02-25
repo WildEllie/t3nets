@@ -172,6 +172,18 @@ resource "aws_apigatewayv2_route" "public_auth_refresh" {
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
+resource "aws_apigatewayv2_route" "public_auth_forgot_password" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/auth/forgot-password"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_auth_confirm_reset" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/auth/confirm-reset"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
 resource "aws_apigatewayv2_route" "public_integrations" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/integrations/{proxy+}"
