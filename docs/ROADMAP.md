@@ -75,6 +75,13 @@
       ↳ ✅ Completed — see [handoff notes](../handoffs/005-second-tenant-seed-and-isolation.md)
 - [x] **Milestone:** Two teams onboarded, data fully isolated
 
+### Phase 2b: Tenant Management & Settings
+- [ ] Show tenant name in nav bar across all pages
+- [ ] Extend settings API to expose full TenantSettings (model, skills, integrations)
+- [ ] Skill toggle per tenant — enable/disable skills from settings page
+- [ ] Per-skill integration config — edit/store integration credentials (e.g., Jira) from settings dashboard
+- [ ] **Milestone:** Admins can fully manage tenant settings, skills, and integrations from the dashboard
+
 ### Phase 3: First External Channel
 - [ ] Teams channel adapter (Azure Bot → webhook)
 - [ ] Async skill execution via EventBridge → SQS → response handler
