@@ -96,6 +96,7 @@
         .login-footer a {
             color: #3b82f6;
             text-decoration: none;
+            cursor: pointer;
         }
 
         .login-footer a:hover { text-decoration: underline; }
@@ -104,6 +105,17 @@
             background: #7f1d1d;
             border: 1px solid #991b1b;
             color: #fecaca;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .success-msg {
+            background: #14532d;
+            border: 1px solid #166534;
+            color: #bbf7d0;
             padding: 10px 14px;
             border-radius: 8px;
             font-size: 13px;
@@ -122,16 +134,8 @@
             color: #fff;
         }
 
-        .brand .badge {
-            font-size: 10px;
-            background: #22c55e;
-            color: #000;
-            padding: 2px 8px;
-            border-radius: 8px;
-            font-weight: 600;
-            margin-left: 8px;
-            vertical-align: middle;
-        }
+        .panel { display: none; }
+        .panel.active { display: block; }
     </style>
 </head>
 <body>
@@ -140,100 +144,290 @@
             <span>T3nets</span>
         </div>
 
-        <h1>Sign In</h1>
-        <p>Enter your credentials to access the dashboard</p>
+        <!-- Sign In Panel -->
+        <div class="panel active" id="loginPanel">
+            <h1>Sign In</h1>
+            <p>Enter your credentials to access the dashboard</p>
 
-        <div id="error-msg" class="error-msg"></div>
+            <div id="login-error" class="error-msg"></div>
 
-        <div class="form-group">
-            <label>Email</label>
-            <input type="email" id="email" placeholder="you@company.com" autofocus>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="login-email" placeholder="you@company.com" autofocus>
+            </div>
+
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="login-password" placeholder="Enter your password">
+            </div>
+
+            <button class="login-btn" id="login-btn" onclick="handleLogin()">Sign In</button>
+
+            <div class="login-footer">
+                <a onclick="showPanel('signupPanel')">Create an account</a>
+            </div>
         </div>
 
-        <div class="form-group">
-            <label>Password</label>
-            <input type="password" id="password" placeholder="Enter your password">
+        <!-- Sign Up Panel -->
+        <div class="panel" id="signupPanel">
+            <h1>Create Account</h1>
+            <p>Sign up for a new T3nets account</p>
+
+            <div id="signup-error" class="error-msg"></div>
+
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="signup-name" placeholder="Your name">
+            </div>
+
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="signup-email" placeholder="you@company.com">
+            </div>
+
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="signup-password" placeholder="Min 8 chars, uppercase, lowercase, number">
+            </div>
+
+            <button class="login-btn" id="signup-btn" onclick="handleSignup()">Create Account</button>
+
+            <div class="login-footer">
+                Already have an account? <a onclick="showPanel('loginPanel')">Sign in</a>
+            </div>
         </div>
 
-        <button class="login-btn" id="login-btn" onclick="handleLogin()">Sign In</button>
+        <!-- Verify Email Panel -->
+        <div class="panel" id="verifyPanel">
+            <h1>Verify Email</h1>
+            <p id="verify-info">We sent a verification code to your email.</p>
 
-        <div class="login-footer">
-            <a href="#" id="signup-link">Create an account</a>
+            <div id="verify-error" class="error-msg"></div>
+            <div id="verify-success" class="success-msg"></div>
+
+            <div class="form-group">
+                <label>Verification Code</label>
+                <input type="text" id="verify-code" placeholder="Enter the 6-digit code" maxlength="6">
+            </div>
+
+            <button class="login-btn" id="verify-btn" onclick="handleVerify()">Verify & Sign In</button>
+
+            <div class="login-footer">
+                <a onclick="showPanel('loginPanel')">Back to sign in</a>
+            </div>
         </div>
     </div>
 
     <script>
-        let authConfig = null;
+        let authEnabled = false;
+        let pendingEmail = '';
 
-        // Load auth config from server
-        async function loadAuthConfig() {
-            try {
-                const resp = await fetch('/api/auth/config');
-                authConfig = await resp.json();
-
-                if (!authConfig.enabled) {
-                    // No Cognito configured — redirect to chat directly
-                    window.location.href = '/chat';
-                    return;
-                }
-
-                // Set signup link to Cognito hosted signup
-                const signupUrl = `${authConfig.auth_domain}/signup?client_id=${authConfig.client_id}&response_type=code&scope=openid+email+profile&redirect_uri=${encodeURIComponent(window.location.origin + '/callback')}`;
-                document.getElementById('signup-link').href = signupUrl;
-            } catch (e) {
-                console.error('Failed to load auth config:', e);
-            }
+        // === Panel navigation ===
+        function showPanel(id) {
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            // Clear errors
+            document.querySelectorAll('.error-msg, .success-msg').forEach(el => {
+                el.style.display = 'none';
+                el.textContent = '';
+            });
         }
 
+        function showError(id, msg) {
+            const el = document.getElementById(id);
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        function showSuccess(id, msg) {
+            const el = document.getElementById(id);
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        function setLoading(btnId, loading, text) {
+            const btn = document.getElementById(btnId);
+            btn.disabled = loading;
+            btn.textContent = loading ? text : btn.dataset.origText || text;
+            if (loading) btn.dataset.origText = btn.textContent;
+        }
+
+        // === Auth handlers ===
         async function handleLogin() {
-            const email = document.getElementById('email').value.trim();
-            const password = document.getElementById('password').value;
-            const errorEl = document.getElementById('error-msg');
-            const btn = document.getElementById('login-btn');
+            const email = document.getElementById('login-email').value.trim();
+            const password = document.getElementById('login-password').value;
 
             if (!email || !password) {
-                errorEl.textContent = 'Please enter email and password.';
-                errorEl.style.display = 'block';
+                showError('login-error', 'Please enter email and password.');
                 return;
             }
 
-            if (!authConfig || !authConfig.enabled) {
+            if (!authEnabled) {
+                // No auth configured — go straight to chat
                 window.location.href = '/chat';
                 return;
             }
 
-            btn.disabled = true;
-            btn.textContent = 'Signing in...';
-            errorEl.style.display = 'none';
+            setLoading('login-btn', true, 'Signing in...');
+            document.getElementById('login-error').style.display = 'none';
 
             try {
-                // Use Cognito's InitiateAuth via the OAuth token endpoint
-                // For SRP auth, we redirect to Cognito hosted UI with login_hint
-                const loginUrl = `${authConfig.auth_domain}/login?client_id=${authConfig.client_id}&response_type=code&scope=openid+email+profile&redirect_uri=${encodeURIComponent(window.location.origin + '/callback')}&login_hint=${encodeURIComponent(email)}`;
-                window.location.href = loginUrl;
+                const resp = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password }),
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    if (data.code === 'USER_NOT_CONFIRMED') {
+                        pendingEmail = email;
+                        showPanel('verifyPanel');
+                        document.getElementById('verify-info').textContent =
+                            `Your email (${email}) needs to be verified. Check your inbox for a code.`;
+                        setLoading('login-btn', false, 'Sign In');
+                        return;
+                    }
+                    showError('login-error', data.error || 'Sign in failed');
+                    setLoading('login-btn', false, 'Sign In');
+                    return;
+                }
+
+                // Store tokens
+                if (data.id_token) localStorage.setItem('t3nets_id_token', data.id_token);
+                if (data.access_token) localStorage.setItem('t3nets_access_token', data.access_token);
+                if (data.refresh_token) localStorage.setItem('t3nets_refresh_token', data.refresh_token);
+
+                window.location.href = '/chat';
             } catch (err) {
-                errorEl.textContent = 'Sign in failed: ' + err.message;
-                errorEl.style.display = 'block';
-                btn.disabled = false;
-                btn.textContent = 'Sign In';
+                showError('login-error', 'Sign in failed: ' + err.message);
+                setLoading('login-btn', false, 'Sign In');
             }
         }
 
-        // Allow Enter key to submit
-        document.getElementById('password').addEventListener('keydown', function(e) {
+        async function handleSignup() {
+            const name = document.getElementById('signup-name').value.trim();
+            const email = document.getElementById('signup-email').value.trim();
+            const password = document.getElementById('signup-password').value;
+
+            if (!email || !password) {
+                showError('signup-error', 'Please enter email and password.');
+                return;
+            }
+
+            setLoading('signup-btn', true, 'Creating account...');
+            document.getElementById('signup-error').style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/auth/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, name }),
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    showError('signup-error', data.error || 'Sign up failed');
+                    setLoading('signup-btn', false, 'Create Account');
+                    return;
+                }
+
+                if (data.confirmed) {
+                    // Auto-confirmed (admin-created users) — go to login
+                    showPanel('loginPanel');
+                    showSuccess('login-error', ''); // clear errors
+                } else {
+                    // Need email verification
+                    pendingEmail = email;
+                    showPanel('verifyPanel');
+                    document.getElementById('verify-info').textContent =
+                        `We sent a verification code to ${email}. Enter it below.`;
+                }
+            } catch (err) {
+                showError('signup-error', 'Sign up failed: ' + err.message);
+            }
+            setLoading('signup-btn', false, 'Create Account');
+        }
+
+        async function handleVerify() {
+            const code = document.getElementById('verify-code').value.trim();
+
+            if (!code) {
+                showError('verify-error', 'Please enter the verification code.');
+                return;
+            }
+
+            setLoading('verify-btn', true, 'Verifying...');
+            document.getElementById('verify-error').style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/auth/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: pendingEmail, code }),
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    showError('verify-error', data.error || 'Verification failed');
+                    setLoading('verify-btn', false, 'Verify & Sign In');
+                    return;
+                }
+
+                // Email verified — show login with success message
+                showPanel('loginPanel');
+                document.getElementById('login-email').value = pendingEmail;
+                // Show a brief success then user can log in
+                const errEl = document.getElementById('login-error');
+                errEl.textContent = 'Email verified! You can now sign in.';
+                errEl.style.background = '#14532d';
+                errEl.style.borderColor = '#166534';
+                errEl.style.color = '#bbf7d0';
+                errEl.style.display = 'block';
+            } catch (err) {
+                showError('verify-error', 'Verification failed: ' + err.message);
+            }
+            setLoading('verify-btn', false, 'Verify & Sign In');
+        }
+
+        // === Enter key support ===
+        document.getElementById('login-password').addEventListener('keydown', e => {
             if (e.key === 'Enter') handleLogin();
         });
-        document.getElementById('email').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') document.getElementById('password').focus();
+        document.getElementById('login-email').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('login-password').focus();
+        });
+        document.getElementById('signup-password').addEventListener('keydown', e => {
+            if (e.key === 'Enter') handleSignup();
+        });
+        document.getElementById('verify-code').addEventListener('keydown', e => {
+            if (e.key === 'Enter') handleVerify();
         });
 
-        // If already logged in, redirect to chat
-        const existingToken = localStorage.getItem('t3nets_id_token');
-        if (existingToken) {
-            window.location.href = '/chat';
-        } else {
-            loadAuthConfig();
-        }
+        // === Init ===
+        (async function init() {
+            // If already logged in, redirect to chat
+            const existingToken = localStorage.getItem('t3nets_id_token');
+            if (existingToken) {
+                window.location.href = '/chat';
+                return;
+            }
+
+            // Check if auth is enabled
+            try {
+                const resp = await fetch('/api/auth/config');
+                const config = await resp.json();
+                authEnabled = config.enabled;
+
+                if (!authEnabled) {
+                    // No auth — redirect straight to chat
+                    window.location.href = '/chat';
+                    return;
+                }
+            } catch (e) {
+                console.error('Failed to load auth config:', e);
+            }
+        })();
     </script>
 </body>
 </html>

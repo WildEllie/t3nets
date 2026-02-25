@@ -69,6 +69,16 @@ class MockTenantStore:
                 return u
         raise Exception(f"User not found")
 
+    async def get_user_by_cognito_sub(self, cognito_sub: str):
+        """Cross-tenant lookup by cognito_sub."""
+        if not cognito_sub:
+            return None
+        for user_list in self.users.values():
+            for u in user_list:
+                if u.cognito_sub == cognito_sub:
+                    return u
+        return None
+
     async def list_users(self, tenant_id: str) -> list[TenantUser]:
         return self.users.get(tenant_id, [])
 
@@ -109,12 +119,11 @@ def make_admin_api():
     return api, store, secrets
 
 
-def make_auth_headers(tenant_id="test-tenant", sub="user-123", email="test@example.com"):
+def make_auth_headers(sub="user-123", email="test@example.com"):
     """Create mock headers that extract_auth can parse."""
     import base64
     payload = {
         "sub": sub,
-        "custom:tenant_id": tenant_id,
         "email": email,
     }
     # Create a fake JWT (header.payload.signature)
@@ -132,7 +141,7 @@ class TestCreateTenant(unittest.TestCase):
 
     def test_create_tenant_basic(self):
         api, store, _ = make_admin_api()
-        headers = make_auth_headers(tenant_id="")  # No tenant yet (onboarding)
+        headers = make_auth_headers()  # No tenant yet (onboarding)
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
@@ -324,7 +333,7 @@ class TestAdminAPIRouting(unittest.TestCase):
     def test_create_tenant_bypasses_auth(self):
         """POST /api/admin/tenants should work without custom:tenant_id."""
         api, store, _ = make_admin_api()
-        headers = make_auth_headers(tenant_id="")
+        headers = make_auth_headers()
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             # Simulate user without tenant_id
@@ -357,7 +366,7 @@ class TestAdminAPIRouting(unittest.TestCase):
             created_at=datetime.now(timezone.utc).isoformat(),
         )))
 
-        headers = make_auth_headers(tenant_id="my-team")
+        headers = make_auth_headers()
         data, status = api.handle_request("PATCH", "/api/admin/tenants/my-team/activate", headers)
         assert status == 200
         assert data["activated"] is True
@@ -396,3 +405,283 @@ class TestTenantModel(unittest.TestCase):
         )
         assert not user.is_admin()
         assert user.role == "member"
+
+
+# --- Tests: Cognito Sub Lookup (DynamoDB fallback) ---
+
+
+class TestCognitoSubLookup(unittest.TestCase):
+    """Tests for get_user_by_cognito_sub and cognito_sub persistence."""
+
+    def test_cognito_sub_roundtrip(self):
+        """cognito_sub should survive create → get."""
+        _, store, _ = make_admin_api()
+        user = TenantUser(
+            user_id="u1",
+            tenant_id="acme",
+            email="alice@acme.com",
+            display_name="Alice",
+            role="admin",
+            cognito_sub="sub-aaaa-1111",
+        )
+        asyncio.run(store.create_user(user))
+
+        found = asyncio.run(store.get_user("acme", "u1"))
+        assert found.cognito_sub == "sub-aaaa-1111"
+
+    def test_get_user_by_cognito_sub_found(self):
+        """Should find user across tenants by cognito_sub."""
+        _, store, _ = make_admin_api()
+
+        # Users in different tenants
+        asyncio.run(store.create_user(TenantUser(
+            user_id="u1", tenant_id="team-a",
+            email="alice@a.com", display_name="Alice",
+            cognito_sub="sub-alice",
+        )))
+        asyncio.run(store.create_user(TenantUser(
+            user_id="u2", tenant_id="team-b",
+            email="bob@b.com", display_name="Bob",
+            cognito_sub="sub-bob",
+        )))
+
+        # Look up Bob by cognito_sub — should find him in team-b
+        found = asyncio.run(store.get_user_by_cognito_sub("sub-bob"))
+        assert found is not None
+        assert found.tenant_id == "team-b"
+        assert found.email == "bob@b.com"
+
+    def test_get_user_by_cognito_sub_not_found(self):
+        """Should return None for unknown cognito_sub."""
+        _, store, _ = make_admin_api()
+
+        found = asyncio.run(store.get_user_by_cognito_sub("sub-unknown"))
+        assert found is None
+
+    def test_get_user_by_cognito_sub_empty(self):
+        """Should return None for empty cognito_sub."""
+        _, store, _ = make_admin_api()
+
+        found = asyncio.run(store.get_user_by_cognito_sub(""))
+        assert found is None
+
+    def test_create_tenant_with_cognito_sub_then_lookup(self):
+        """Full flow: create tenant + admin user, then look up by cognito_sub."""
+        api, store, _ = make_admin_api()
+        headers = make_auth_headers()
+
+        with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
+            mock_auth.side_effect = AuthError("No tenant", 403)
+            data, status = api._create_tenant({
+                "tenant_id": "startup-xyz",
+                "name": "Startup XYZ",
+                "status": "onboarding",
+                "admin_user": {
+                    "display_name": "Founder",
+                    "email": "founder@startup.xyz",
+                    "cognito_sub": "sub-founder-001",
+                },
+            }, headers)
+
+        assert status == 201
+
+        # Now look up by cognito_sub — should resolve to startup-xyz
+        found = asyncio.run(store.get_user_by_cognito_sub("sub-founder-001"))
+        assert found is not None
+        assert found.tenant_id == "startup-xyz"
+        assert found.email == "founder@startup.xyz"
+        assert found.role == "admin"
+
+
+class TestSQLiteCognitoSub(unittest.TestCase):
+    """Tests for SQLite tenant store cognito_sub support."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmp, "test.db")
+
+        from adapters.local.sqlite_tenant_store import SQLiteTenantStore
+        self.store = SQLiteTenantStore(db_path=self.db_path)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_create_user_with_cognito_sub(self):
+        """SQLite store should persist cognito_sub."""
+        user = TenantUser(
+            user_id="u1", tenant_id="local",
+            email="test@local.dev", display_name="Test",
+            cognito_sub="sub-sqlite-test",
+        )
+
+        # Seed tenant first
+        self.store.seed_default_tenant()
+        asyncio.run(self.store.create_user(user))
+
+        fetched = asyncio.run(self.store.get_user("local", "u1"))
+        assert fetched.cognito_sub == "sub-sqlite-test"
+
+    def test_get_user_by_cognito_sub_sqlite(self):
+        """SQLite store should support cross-tenant cognito_sub lookup."""
+        self.store.seed_default_tenant()
+
+        user = TenantUser(
+            user_id="u2", tenant_id="local",
+            email="alice@local.dev", display_name="Alice",
+            cognito_sub="sub-alice-sqlite",
+        )
+        asyncio.run(self.store.create_user(user))
+
+        found = asyncio.run(self.store.get_user_by_cognito_sub("sub-alice-sqlite"))
+        assert found is not None
+        assert found.email == "alice@local.dev"
+        assert found.tenant_id == "local"
+
+    def test_get_user_by_cognito_sub_not_found_sqlite(self):
+        """SQLite store returns None for unknown cognito_sub."""
+        self.store.seed_default_tenant()
+
+        found = asyncio.run(self.store.get_user_by_cognito_sub("sub-nonexistent"))
+        assert found is None
+
+    def test_update_user_cognito_sub_sqlite(self):
+        """SQLite store should update cognito_sub."""
+        self.store.seed_default_tenant()
+
+        user = TenantUser(
+            user_id="u3", tenant_id="local",
+            email="bob@local.dev", display_name="Bob",
+            cognito_sub="",
+        )
+        asyncio.run(self.store.create_user(user))
+
+        # Update with cognito_sub
+        user.cognito_sub = "sub-bob-updated"
+        asyncio.run(self.store.update_user(user))
+
+        fetched = asyncio.run(self.store.get_user("local", "u3"))
+        assert fetched.cognito_sub == "sub-bob-updated"
+
+    def test_avatar_url_roundtrip_sqlite(self):
+        """SQLite store should persist avatar_url."""
+        self.store.seed_default_tenant()
+
+        user = TenantUser(
+            user_id="u4", tenant_id="local",
+            email="carol@local.dev", display_name="Carol",
+            avatar_url="https://example.com/carol.png",
+        )
+        asyncio.run(self.store.create_user(user))
+
+        fetched = asyncio.run(self.store.get_user("local", "u4"))
+        assert fetched.avatar_url == "https://example.com/carol.png"
+
+    def test_avatar_url_update_sqlite(self):
+        """SQLite store should update avatar_url."""
+        self.store.seed_default_tenant()
+
+        user = TenantUser(
+            user_id="u5", tenant_id="local",
+            email="dave@local.dev", display_name="Dave",
+            avatar_url="",
+        )
+        asyncio.run(self.store.create_user(user))
+
+        user.avatar_url = "https://example.com/dave.jpg"
+        asyncio.run(self.store.update_user(user))
+
+        fetched = asyncio.run(self.store.get_user("local", "u5"))
+        assert fetched.avatar_url == "https://example.com/dave.jpg"
+
+
+# --- Tests: Auth Middleware (refactored) ---
+
+
+class TestAuthMiddleware(unittest.TestCase):
+    """Tests for the simplified auth middleware (no custom:tenant_id)."""
+
+    def test_extract_auth_returns_sub_and_email(self):
+        """extract_auth should return user_id and email from JWT."""
+        from adapters.aws.auth_middleware import extract_auth
+
+        headers = make_auth_headers(sub="sub-abc-123", email="user@test.com")
+        ctx = extract_auth(headers)
+
+        assert ctx.user_id == "sub-abc-123"
+        assert ctx.email == "user@test.com"
+
+    def test_extract_auth_no_tenant_id_field(self):
+        """AuthContext should not have tenant_id attribute."""
+        from adapters.aws.auth_middleware import extract_auth
+
+        headers = make_auth_headers()
+        ctx = extract_auth(headers)
+
+        assert not hasattr(ctx, "tenant_id")
+
+    def test_extract_auth_missing_bearer(self):
+        """extract_auth should raise AuthError if no Bearer token."""
+        from adapters.aws.auth_middleware import extract_auth, AuthError
+
+        with self.assertRaises(AuthError):
+            extract_auth({"Authorization": "Basic abc"})
+
+    def test_extract_auth_missing_sub(self):
+        """extract_auth should raise AuthError if JWT has no sub."""
+        import base64
+        from adapters.aws.auth_middleware import extract_auth, AuthError
+
+        payload = {"email": "no-sub@test.com"}
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).decode().rstrip("=")
+        body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+        token = f"{header}.{body}.fake-sig"
+
+        with self.assertRaises(AuthError):
+            extract_auth({"Authorization": f"Bearer {token}"})
+
+
+# --- Tests: Avatar URL in Model ---
+
+
+class TestAvatarUrl(unittest.TestCase):
+    """Tests for avatar_url field on TenantUser."""
+
+    def test_avatar_url_default_empty(self):
+        user = TenantUser(
+            user_id="u1", tenant_id="t1",
+            email="a@b.com", display_name="Test",
+        )
+        assert user.avatar_url == ""
+
+    def test_avatar_url_set(self):
+        user = TenantUser(
+            user_id="u1", tenant_id="t1",
+            email="a@b.com", display_name="Test",
+            avatar_url="https://img.example.com/avatar.png",
+        )
+        assert user.avatar_url == "https://img.example.com/avatar.png"
+
+    def test_create_tenant_with_avatar_url(self):
+        """Admin API should accept avatar_url in admin_user."""
+        api, store, _ = make_admin_api()
+        headers = make_auth_headers()
+
+        with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
+            mock_auth.side_effect = AuthError("No tenant", 403)
+            data, status = api._create_tenant({
+                "tenant_id": "avatar-team",
+                "name": "Avatar Team",
+                "admin_user": {
+                    "display_name": "Admin",
+                    "email": "admin@avatar.com",
+                    "cognito_sub": "sub-avatar-001",
+                    "avatar_url": "https://img.example.com/admin.png",
+                },
+            }, headers)
+
+        assert status == 201
+        users = store.users.get("avatar-team", [])
+        assert len(users) == 1
+        assert users[0].avatar_url == "https://img.example.com/admin.png"

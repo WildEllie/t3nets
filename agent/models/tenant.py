@@ -51,8 +51,9 @@ class TenantUser:
     email: str
     display_name: str
     role: str = "member"  # admin, member
-    cognito_sub: str = ""  # Cognito user pool subject ID (AWS only)
+    cognito_sub: str = ""  # IdP subject ID (Cognito sub, Authentik uid, etc.)
     last_login: str = ""  # ISO 8601 timestamp of last login
+    avatar_url: str = ""  # URL or data URI for user avatar
     channel_identities: dict = field(default_factory=dict)
     # e.g., {"teams": "aad-object-id", "whatsapp": "+1555...", "slack": "U12345"}
 

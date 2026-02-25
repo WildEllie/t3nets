@@ -87,6 +87,34 @@
 
         .nav-btn:hover { border-color: #555; color: #ccc; }
 
+        .nav-user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .nav-user-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: #aaa;
+            overflow: hidden;
+        }
+
+        .nav-user-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
         .nav-user-email {
             font-size: 12px;
             color: #888;
@@ -373,6 +401,10 @@
         </div>
         <div class="nav-right">
             <button class="nav-btn" onclick="clearChat()">Clear Chat</button>
+            <div class="nav-user-info" id="user-info" style="display:none;">
+                <div class="nav-user-avatar" id="user-avatar"></div>
+                <span id="user-display-name"></span>
+            </div>
             <span class="nav-user-email" id="user-email" style="display:none;"></span>
             <button class="nav-btn" id="logout-btn" style="display:none;" onclick="logout()">Logout</button>
         </div>
@@ -423,24 +455,21 @@
                     const token = localStorage.getItem('t3nets_id_token');
                     if (!token) { window.location.href = '/login'; return; }
                     document.getElementById('logout-btn').style.display = 'inline-block';
-                    const email = parseJwtEmail(token);
-                    if (email) {
-                        const emailEl = document.getElementById('user-email');
-                        emailEl.textContent = email;
-                        emailEl.style.display = 'inline';
-                    }
 
-                    // Verify the token is still valid by calling /api/auth/me.
+                    // Verify the token is still valid and get user info.
                     // API Gateway returns 401 when the JWT has expired.
                     try {
                         const meResp = await fetch('/api/auth/me', { headers: getAuthHeaders() });
                         if (meResp.status === 401) {
-                            // Token expired — force re-login
-                            localStorage.removeItem('t3nets_id_token');
-                            localStorage.removeItem('t3nets_access_token');
-                            localStorage.removeItem('t3nets_refresh_token');
-                            window.location.href = '/login';
-                            return;
+                            // Token expired — try refresh, else force re-login
+                            const refreshed = await tryRefreshToken();
+                            if (!refreshed) {
+                                localStorage.removeItem('t3nets_id_token');
+                                localStorage.removeItem('t3nets_access_token');
+                                localStorage.removeItem('t3nets_refresh_token');
+                                window.location.href = '/login';
+                                return;
+                            }
                         }
                         if (meResp.ok) {
                             const me = await meResp.json();
@@ -448,10 +477,44 @@
                                 window.location.href = '/onboard';
                                 return;
                             }
+                            // Show user info
+                            const displayName = me.display_name || me.email || '';
+                            const avatarUrl = me.avatar_url || '';
+                            if (displayName) {
+                                document.getElementById('user-display-name').textContent = displayName;
+                                const avatarEl = document.getElementById('user-avatar');
+                                if (avatarUrl) {
+                                    avatarEl.innerHTML = `<img src="${avatarUrl}" alt="">`;
+                                } else {
+                                    avatarEl.textContent = displayName.charAt(0).toUpperCase();
+                                }
+                                document.getElementById('user-info').style.display = 'flex';
+                            } else if (me.email) {
+                                const emailEl = document.getElementById('user-email');
+                                emailEl.textContent = me.email;
+                                emailEl.style.display = 'inline';
+                            }
                         }
                     } catch (e) { /* /api/auth/me not available — continue */ }
                 }
             } catch (e) { /* auth not available — continue without */ }
+        }
+
+        async function tryRefreshToken() {
+            const refreshToken = localStorage.getItem('t3nets_refresh_token');
+            if (!refreshToken) return false;
+            try {
+                const resp = await fetch('/api/auth/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refresh_token: refreshToken }),
+                });
+                if (!resp.ok) return false;
+                const data = await resp.json();
+                if (data.id_token) localStorage.setItem('t3nets_id_token', data.id_token);
+                if (data.access_token) localStorage.setItem('t3nets_access_token', data.access_token);
+                return true;
+            } catch { return false; }
         }
 
         function logout() {

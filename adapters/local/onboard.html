@@ -470,17 +470,11 @@
             const activateResult = await apiPatch(`/api/admin/tenants/${state.tenantId}/activate`);
             if (activateResult.error) {
                 content.innerHTML = `<div class="alert alert-danger">${activateResult.error}</div>
-                    <div class="text-center"><button class="btn btn-primary" onclick="startFreshLogin()">Go to Chat anyway</button></div>`;
+                    <div class="text-center"><button class="btn btn-primary" onclick="goToChat()">Go to Chat anyway</button></div>`;
                 return;
             }
 
-            // Assign tenant to Cognito user
-            const assignResult = await apiPost('/api/auth/assign-tenant', { tenant_id: state.tenantId });
-            if (assignResult.error && !assignResult.ok) {
-                console.warn('Tenant assignment:', assignResult.error || assignResult.message);
-            }
-
-            // Show success
+            // Show success — tenant is resolved from DynamoDB, no JWT refresh needed
             content.innerHTML = `
                 <div class="text-center mb-4">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" class="text-success" viewBox="0 0 16 16">
@@ -497,34 +491,31 @@
                     <div class="summary-item"><span class="summary-label">AI Model</span><span class="summary-value">${state.aiModel || 'Default'}</span></div>
                 </div>
                 <div class="text-center">
-                    <button class="btn btn-primary btn-lg" onclick="startFreshLogin()">Go to Chat</button>
-                    <p class="text-secondary mt-2" style="font-size:0.8125rem;">You'll be signed in again with your new team credentials.</p>
+                    <button class="btn btn-primary btn-lg" onclick="goToChat()">Go to Chat</button>
                 </div>`;
         } catch (err) {
             content.innerHTML = `<div class="alert alert-danger">${err.message || 'Failed to finalize setup'}</div>
-                <div class="text-center"><button class="btn btn-primary" onclick="startFreshLogin()">Go to Chat anyway</button></div>`;
+                <div class="text-center"><button class="btn btn-primary" onclick="goToChat()">Go to Chat anyway</button></div>`;
         }
     }
 
-    // === Post-onboarding: force fresh login so JWT gets custom:tenant_id ===
-    function startFreshLogin() {
-        // Clear stale tokens — the old JWT has no tenant_id claim
-        localStorage.removeItem('t3nets_id_token');
-        localStorage.removeItem('t3nets_access_token');
-        localStorage.removeItem('t3nets_refresh_token');
-        window.location.href = '/login';
+    function goToChat() {
+        window.location.href = '/chat';
     }
 
     // === Init ===
     (function init() {
         const claims = getJwtClaims();
-        if (claims) {
-            state.email = claims.email || '';
-            state.cognitoSub = claims.sub || '';
-            if (state.email) {
-                document.getElementById('emailRow').style.display = 'block';
-                document.getElementById('userEmail').value = state.email;
-            }
+        if (!claims || !claims.sub) {
+            // No valid token — must login first before onboarding
+            window.location.href = '/login';
+            return;
+        }
+        state.email = claims.email || '';
+        state.cognitoSub = claims.sub || '';
+        if (state.email) {
+            document.getElementById('emailRow').style.display = 'block';
+            document.getElementById('userEmail').value = state.email;
         }
     })();
     </script>
