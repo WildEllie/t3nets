@@ -171,8 +171,26 @@ class DynamoDBTenantStore(TenantStore):
             settings=TenantSettings(**settings_dict),
         )
 
+    async def get_user_by_cognito_sub(self, cognito_sub: str) -> "Optional[TenantUser]":
+        """Cross-tenant lookup by Cognito sub using the cognito-sub-lookup GSI."""
+        if not cognito_sub:
+            return None
+
+        gsi_key = f"COGNITO#{cognito_sub}"
+        response = self.table.query(
+            IndexName="cognito-sub-lookup",
+            KeyConditionExpression="gsi2pk = :gsi",
+            ExpressionAttributeValues={":gsi": gsi_key},
+        )
+
+        items = response.get("Items", [])
+        if not items:
+            return None
+
+        return self._item_to_user(items[0])
+
     def _user_to_item(self, user: TenantUser) -> dict:
-        return {
+        item: dict = {
             "pk": f"TENANT#{user.tenant_id}",
             "sk": f"USER#{user.user_id}",
             "user_id": user.user_id,
@@ -182,6 +200,14 @@ class DynamoDBTenantStore(TenantStore):
             "role": user.role,
             "channel_identities": json.dumps(user.channel_identities),
         }
+        if user.cognito_sub:
+            item["cognito_sub"] = user.cognito_sub
+            item["gsi2pk"] = f"COGNITO#{user.cognito_sub}"
+        if user.last_login:
+            item["last_login"] = user.last_login
+        if user.avatar_url:
+            item["avatar_url"] = user.avatar_url
+        return item
 
     def _item_to_user(self, item: dict) -> TenantUser:
         return TenantUser(
@@ -190,5 +216,8 @@ class DynamoDBTenantStore(TenantStore):
             email=item["email"],
             display_name=item["display_name"],
             role=item.get("role", "member"),
+            cognito_sub=item.get("cognito_sub", ""),
+            last_login=item.get("last_login", ""),
+            avatar_url=item.get("avatar_url", ""),
             channel_identities=json.loads(item.get("channel_identities", "{}")),
         )

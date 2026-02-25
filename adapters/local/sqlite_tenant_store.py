@@ -52,6 +52,25 @@ class SQLiteTenantStore(TenantStore):
                 )
             """)
 
+            # --- Safe migrations for new columns ---
+            # Add cognito_sub and last_login columns if they don't exist yet
+            existing_cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(tenant_users)").fetchall()
+            }
+            if "cognito_sub" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE tenant_users ADD COLUMN cognito_sub TEXT NOT NULL DEFAULT ''"
+                )
+            if "last_login" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE tenant_users ADD COLUMN last_login TEXT NOT NULL DEFAULT ''"
+                )
+            if "avatar_url" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE tenant_users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''"
+                )
+
     def seed_default_tenant(
         self,
         tenant_id: str = "local",
@@ -96,8 +115,11 @@ class SQLiteTenantStore(TenantStore):
                 (tenant_id, name, "active", now, json.dumps(settings.__dict__)),
             )
             conn.execute(
-                "INSERT OR IGNORE INTO tenant_users VALUES (?, ?, ?, ?, ?, ?)",
-                ("admin", tenant_id, admin_email, admin_name, "admin", "{}"),
+                "INSERT OR IGNORE INTO tenant_users"
+                " (user_id, tenant_id, email, display_name, role,"
+                " channel_identities, cognito_sub, last_login, avatar_url)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("admin", tenant_id, admin_email, admin_name, "admin", "{}", "", "", ""),
             )
 
         return Tenant(
@@ -195,21 +217,39 @@ class SQLiteTenantStore(TenantStore):
             ).fetchone()
         return self._row_to_user(row) if row else None
 
+    async def get_user_by_cognito_sub(self, cognito_sub: str) -> Optional[TenantUser]:
+        """Cross-tenant lookup by Cognito sub."""
+        if not cognito_sub:
+            return None
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM tenant_users WHERE cognito_sub = ? LIMIT 1",
+                (cognito_sub,),
+            ).fetchone()
+        return self._row_to_user(row) if row else None
+
     async def create_user(self, user: TenantUser) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "INSERT INTO tenant_users VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tenant_users (user_id, tenant_id, email, display_name,"
+                " role, channel_identities, cognito_sub, last_login, avatar_url)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (user.user_id, user.tenant_id, user.email,
                  user.display_name, user.role,
-                 json.dumps(user.channel_identities)),
+                 json.dumps(user.channel_identities),
+                 user.cognito_sub, user.last_login, user.avatar_url),
             )
 
     async def update_user(self, user: TenantUser) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "UPDATE tenant_users SET email=?, display_name=?, role=?, channel_identities=? WHERE tenant_id=? AND user_id=?",
+                "UPDATE tenant_users SET email=?, display_name=?, role=?,"
+                " channel_identities=?, cognito_sub=?, last_login=?,"
+                " avatar_url=?"
+                " WHERE tenant_id=? AND user_id=?",
                 (user.email, user.display_name, user.role,
                  json.dumps(user.channel_identities),
+                 user.cognito_sub, user.last_login, user.avatar_url,
                  user.tenant_id, user.user_id),
             )
 
@@ -249,4 +289,7 @@ class SQLiteTenantStore(TenantStore):
             display_name=row[3],
             role=row[4],
             channel_identities=json.loads(row[5]),
+            cognito_sub=row[6] if len(row) > 6 else "",
+            last_login=row[7] if len(row) > 7 else "",
+            avatar_url=row[8] if len(row) > 8 else "",
         )

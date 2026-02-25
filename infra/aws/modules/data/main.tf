@@ -69,6 +69,18 @@ resource "aws_dynamodb_table" "tenants" {
     projection_type = "ALL"
   }
 
+  # GSI for cognito_sub → user lookup (cross-tenant)
+  attribute {
+    name = "gsi2pk"   # COGNITO#{cognito_sub}
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "cognito-sub-lookup"
+    hash_key        = "gsi2pk"
+    projection_type = "ALL"
+  }
+
   tags = { Name = "${local.name_prefix}-tenants" }
 }
 

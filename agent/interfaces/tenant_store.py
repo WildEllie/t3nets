@@ -102,6 +102,23 @@ class TenantStore(ABC):
         ...
 
     @abstractmethod
+    async def get_user_by_cognito_sub(
+        self,
+        cognito_sub: str,
+    ) -> Optional[TenantUser]:
+        """
+        Find a user by their Cognito subject ID (cross-tenant lookup).
+
+        Unlike get_user_by_email which is scoped to a single tenant,
+        this searches across all tenants. Used when the JWT lacks
+        custom:tenant_id and we need to resolve the user's tenant
+        from DynamoDB.
+
+        Returns None if no user is found.
+        """
+        ...
+
+    @abstractmethod
     async def create_user(self, user: TenantUser) -> None:
         """Create a new user within a tenant."""
         ...
