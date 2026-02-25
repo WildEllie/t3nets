@@ -65,6 +65,8 @@
       ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
 - [x] In-app login/signup/verify (replace Cognito Hosted UI with server-side auth endpoints)
       ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
+- [x] Fix API Gateway auth routes (login/signup/confirm/refresh were blocked by JWT authorizer)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/006-fix-auth-api-gateway-routes.md)
 - [x] Add avatar_url to TenantUser model + DynamoDB/SQLite persistence
       ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
 - [x] Seed a second tenant, verify isolation
