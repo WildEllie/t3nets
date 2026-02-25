@@ -66,6 +66,7 @@ aws ecs update-service \
 echo ""
 
 # --- Wait for deployment ---
+start=$(date +%s)
 echo "→ Waiting for deployment to stabilize..."
 aws ecs wait services-stable \
     --cluster "${NAME_PREFIX}-cluster" \
@@ -75,6 +76,9 @@ aws ecs wait services-stable \
 echo ""
 echo "✅ Deployed ${ECR_REPO}:${TAG} to ${ENVIRONMENT}"
 echo ""
+
+end=$(date +%s)
+echo "Execution time: $((end - start)) seconds"
 
 # --- Show the API endpoint ---
 API_ENDPOINT=$(cd infra/aws && terraform output -raw api_endpoint 2>/dev/null || echo "unknown")

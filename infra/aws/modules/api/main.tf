@@ -147,6 +147,31 @@ resource "aws_apigatewayv2_route" "public_assign_tenant" {
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
+# Auth endpoints — no JWT because users don't have tokens yet
+resource "aws_apigatewayv2_route" "public_auth_login" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/auth/login"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_auth_signup" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/auth/signup"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_auth_confirm" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/auth/confirm"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
+resource "aws_apigatewayv2_route" "public_auth_refresh" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/auth/refresh"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
 resource "aws_apigatewayv2_route" "public_integrations" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/integrations/{proxy+}"

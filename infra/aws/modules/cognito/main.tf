@@ -98,8 +98,8 @@ resource "aws_cognito_user_pool_client" "dashboard" {
   }
 
   # Read custom attributes in tokens
-  read_attributes  = ["email", "custom:tenant_id"]
-  write_attributes = ["email", "custom:tenant_id"]
+  read_attributes  = ["email", "name", "custom:tenant_id"]
+  write_attributes = ["email", "name", "custom:tenant_id"]
 
   explicit_auth_flows = [
     "ALLOW_USER_SRP_AUTH",

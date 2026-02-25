@@ -398,6 +398,16 @@ class AWSHandler(BaseHTTPRequestHandler):
                 },
             )
 
+            # Handle Cognito challenges (e.g. FORCE_CHANGE_PASSWORD users)
+            challenge = result.get("ChallengeName", "")
+            if challenge:
+                logger.warning(f"Auth login challenge: {challenge} for {email}")
+                self._json_response(
+                    {"error": f"Account requires action: {challenge}", "code": challenge},
+                    403,
+                )
+                return
+
             auth_result = result.get("AuthenticationResult", {})
             self._json_response({
                 "id_token": auth_result.get("IdToken", ""),
@@ -439,14 +449,15 @@ class AWSHandler(BaseHTTPRequestHandler):
 
             import boto3
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            user_attrs = [
+                {"Name": "email", "Value": email},
+                {"Name": "name", "Value": name or email.split("@")[0]},
+            ]
             result = client.sign_up(
                 ClientId=COGNITO_APP_CLIENT_ID,
                 Username=email,
                 Password=password,
-                UserAttributes=[
-                    {"Name": "email", "Value": email},
-                    {"Name": "name", "Value": name or email.split("@")[0]},
-                ],
+                UserAttributes=user_attrs,
             )
 
             self._json_response({
