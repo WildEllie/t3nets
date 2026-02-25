@@ -166,6 +166,7 @@ class AdminAPI:
                 display_name=admin_data.get("display_name", "Admin"),
                 role="admin",
                 cognito_sub=admin_data.get("cognito_sub", ""),
+                avatar_url=admin_data.get("avatar_url", ""),
             )
             asyncio.run(self.tenants.create_user(user))
             logger.info(f"Created admin user for tenant {tenant_id}: {user.email}")

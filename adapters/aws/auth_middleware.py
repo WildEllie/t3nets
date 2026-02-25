@@ -8,10 +8,9 @@ reads the forwarded claims from headers.
 Headers set by API Gateway JWT authorizer context:
   - Authorization: Bearer {jwt}  (original token)
 
-The JWT id_token from Cognito contains:
-  - sub: Cognito user ID
+The JWT id_token contains standard OIDC claims:
+  - sub: IdP user ID (Cognito sub, Authentik uid, etc.)
   - email: User email
-  - custom:tenant_id: Tenant ID (custom Cognito attribute)
 """
 
 import base64
@@ -26,8 +25,7 @@ logger = logging.getLogger("t3nets.auth")
 class AuthContext:
     """Extracted authentication context from JWT."""
 
-    user_id: str       # Cognito sub
-    tenant_id: str     # custom:tenant_id claim
+    user_id: str       # IdP subject (sub claim)
     email: str = ""    # email claim
 
 
@@ -47,14 +45,17 @@ def extract_auth(headers) -> AuthContext:
     We just decode the payload to read claims. No signature verification
     needed — API Gateway already did that.
 
+    Tenant resolution is handled by the server layer via DynamoDB lookup,
+    not from JWT claims.
+
     Args:
         headers: HTTP headers (BaseHTTPRequestHandler.headers)
 
     Returns:
-        AuthContext with user_id, tenant_id, email
+        AuthContext with user_id (sub) and email
 
     Raises:
-        AuthError: If no valid auth is present
+        AuthError: If no valid auth is present.
     """
     auth_header = headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -78,16 +79,13 @@ def extract_auth(headers) -> AuthContext:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
 
         user_id = payload.get("sub", "")
-        tenant_id = payload.get("custom:tenant_id", "")
         email = payload.get("email", "")
 
         if not user_id:
             raise AuthError("JWT missing 'sub' claim")
-        if not tenant_id:
-            raise AuthError("JWT missing 'custom:tenant_id' claim", 403)
 
-        logger.info(f"Auth: user={user_id[:8]}... tenant={tenant_id} email={email}")
-        return AuthContext(user_id=user_id, tenant_id=tenant_id, email=email)
+        logger.info(f"Auth: user={user_id[:8]}... email={email}")
+        return AuthContext(user_id=user_id, email=email)
 
     except AuthError:
         raise

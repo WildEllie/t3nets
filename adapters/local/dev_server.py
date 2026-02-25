@@ -169,9 +169,6 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_integrations_post(path)
         elif path == "/api/admin/tenants":
             self._handle_create_tenant()
-        elif path == "/api/auth/assign-tenant":
-            # Local dev: no Cognito, just acknowledge
-            self._json_response({"ok": True, "message": "Skipped (local dev)"})
         else:
             self.send_error(404)
 

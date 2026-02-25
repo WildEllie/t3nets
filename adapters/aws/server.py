@@ -140,13 +140,29 @@ def _strip_metadata(messages: list[dict]) -> list[dict]:
 def _get_auth_info(headers) -> tuple[str, str]:
     """Extract (tenant_id, user_email) from JWT in Authorization header.
 
-    Falls back to DEFAULT_TENANT if no Cognito is configured or no auth header.
+    Resolution: DynamoDB lookup by IdP sub → DEFAULT_TENANT.
+    The email is always extracted from the JWT payload (never lost).
     """
     if not COGNITO_USER_POOL_ID:
         return DEFAULT_TENANT, ""
     try:
         auth = extract_auth(headers)
-        return auth.tenant_id, auth.email
+        email = auth.email
+
+        # Look up user in DynamoDB by IdP sub
+        try:
+            user = _run_async(tenants.get_user_by_cognito_sub(auth.user_id))
+            if user:
+                logger.info(
+                    f"Resolved tenant '{user.tenant_id}' from DynamoDB "
+                    f"for sub {auth.user_id[:8]}..."
+                )
+                return user.tenant_id, email
+        except Exception as e:
+            logger.warning(f"DynamoDB sub lookup failed: {e}")
+
+        # User not found — new user, needs onboarding
+        return DEFAULT_TENANT, email
     except AuthError:
         return DEFAULT_TENANT, ""
 
@@ -201,8 +217,14 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._handle_settings_post()
         elif path.startswith("/api/integrations/"):
             self._handle_integrations_post(path)
-        elif path == "/api/auth/assign-tenant":
-            self._handle_assign_tenant()
+        elif path == "/api/auth/login":
+            self._handle_auth_login()
+        elif path == "/api/auth/signup":
+            self._handle_auth_signup()
+        elif path == "/api/auth/confirm":
+            self._handle_auth_confirm()
+        elif path == "/api/auth/refresh":
+            self._handle_auth_refresh()
         elif path.startswith("/api/admin/"):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             self._handle_admin("POST", path, body)
@@ -344,60 +366,178 @@ class AWSHandler(BaseHTTPRequestHandler):
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    def _handle_assign_tenant(self):
-        """Set custom:tenant_id on the Cognito user.
+    def _handle_auth_login(self):
+        """Authenticate user via Cognito InitiateAuth (USER_PASSWORD_AUTH).
 
-        Called at the end of onboarding to associate the user with their new tenant.
-        Requires the JWT to have a valid 'sub' claim (but tenant_id may be empty).
+        Replaces the Cognito Hosted UI redirect — credentials are submitted
+        directly from the login form and exchanged for tokens server-side.
         """
         try:
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
-            target_tenant_id = body.get("tenant_id", "").strip()
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            password = body.get("password", "")
 
-            if not target_tenant_id:
-                self._json_response({"error": "tenant_id is required"}, 400)
+            if not email or not password:
+                self._json_response({"error": "Email and password are required"}, 400)
                 return
 
-            if not COGNITO_USER_POOL_ID:
-                # Local dev — no Cognito, just acknowledge
-                self._json_response({"ok": True, "message": "Skipped (no Cognito)"})
+            if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
                 return
 
-            # Extract user sub from JWT (relaxed — don't require tenant_id)
-            auth_header = self.headers.get("Authorization", "")
-            if not auth_header.startswith("Bearer "):
-                self._json_response({"error": "Missing Authorization header"}, 401)
-                return
-
-            import base64
-            token = auth_header[7:]
-            parts = token.split(".")
-            payload_b64 = parts[1]
-            padding = 4 - len(payload_b64) % 4
-            if padding != 4:
-                payload_b64 += "=" * padding
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-            user_sub = payload.get("sub", "")
-
-            if not user_sub:
-                self._json_response({"error": "JWT missing sub claim"}, 401)
-                return
-
-            # Use boto3 to set custom:tenant_id on the Cognito user
             import boto3
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
-            client.admin_update_user_attributes(
-                UserPoolId=COGNITO_USER_POOL_ID,
-                Username=user_sub,
+            result = client.initiate_auth(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                AuthFlow="USER_PASSWORD_AUTH",
+                AuthParameters={
+                    "USERNAME": email,
+                    "PASSWORD": password,
+                },
+            )
+
+            auth_result = result.get("AuthenticationResult", {})
+            self._json_response({
+                "id_token": auth_result.get("IdToken", ""),
+                "access_token": auth_result.get("AccessToken", ""),
+                "refresh_token": auth_result.get("RefreshToken", ""),
+            })
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "NotAuthorizedException":
+                self._json_response({"error": "Invalid email or password"}, 401)
+            elif err_code == "UserNotConfirmedException":
+                self._json_response(
+                    {"error": "Email not verified", "code": "USER_NOT_CONFIRMED"}, 403
+                )
+            elif err_code == "UserNotFoundException":
+                self._json_response({"error": "Invalid email or password"}, 401)
+            else:
+                logger.exception("Auth login error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_signup(self):
+        """Register a new user via Cognito SignUp."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            password = body.get("password", "")
+            name = body.get("name", "").strip()
+
+            if not email or not password:
+                self._json_response({"error": "Email and password are required"}, 400)
+                return
+
+            if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            result = client.sign_up(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+                Password=password,
                 UserAttributes=[
-                    {"Name": "custom:tenant_id", "Value": target_tenant_id},
+                    {"Name": "email", "Value": email},
+                    {"Name": "name", "Value": name or email.split("@")[0]},
                 ],
             )
-            logger.info(f"Assigned tenant {target_tenant_id} to Cognito user {user_sub[:8]}...")
+
+            self._json_response({
+                "user_sub": result.get("UserSub", ""),
+                "confirmed": result.get("UserConfirmed", False),
+            }, 201)
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "UsernameExistsException":
+                self._json_response(
+                    {"error": "An account with this email already exists"}, 409
+                )
+            elif err_code == "InvalidPasswordException":
+                msg = getattr(e, "response", {}).get("Error", {}).get("Message", str(e))
+                self._json_response({"error": msg}, 400)
+            else:
+                logger.exception("Auth signup error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_confirm(self):
+        """Confirm a user's email with the verification code."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            code = body.get("code", "").strip()
+
+            if not email or not code:
+                self._json_response({"error": "Email and code are required"}, 400)
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            client.confirm_sign_up(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+                ConfirmationCode=code,
+            )
+
             self._json_response({"ok": True})
 
         except Exception as e:
-            logger.exception("Assign tenant error")
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "CodeMismatchException":
+                self._json_response({"error": "Invalid verification code"}, 400)
+            elif err_code == "ExpiredCodeException":
+                self._json_response({"error": "Verification code has expired"}, 400)
+            else:
+                logger.exception("Auth confirm error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_refresh(self):
+        """Refresh tokens using a refresh token."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            refresh_token = body.get("refresh_token", "")
+
+            if not refresh_token:
+                self._json_response({"error": "refresh_token is required"}, 400)
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            result = client.initiate_auth(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                AuthFlow="REFRESH_TOKEN_AUTH",
+                AuthParameters={
+                    "REFRESH_TOKEN": refresh_token,
+                },
+            )
+
+            auth_result = result.get("AuthenticationResult", {})
+            self._json_response({
+                "id_token": auth_result.get("IdToken", ""),
+                "access_token": auth_result.get("AccessToken", ""),
+            })
+
+        except Exception as e:
+            logger.exception("Auth refresh error")
             self._json_response({"error": str(e)}, 500)
 
     def _handle_auth_config(self):
@@ -410,7 +550,11 @@ class AWSHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_auth_me(self):
-        """Return current authenticated user info, including tenant status."""
+        """Return current authenticated user info, including tenant status.
+
+        Resolves tenant from DynamoDB by IdP sub. If no user found,
+        returns empty tenant_id so the frontend redirects to onboarding.
+        """
         if not COGNITO_USER_POOL_ID:
             self._json_response({
                 "authenticated": False,
@@ -420,32 +564,46 @@ class AWSHandler(BaseHTTPRequestHandler):
             return
         try:
             auth = extract_auth(self.headers)
-            # Look up tenant status for onboarding redirect
-            tenant_status = "active"
-            if auth.tenant_id:
+            email = auth.email
+            tenant_id = ""
+            display_name = ""
+            avatar_url = ""
+            tenant_status = "onboarding"
+
+            # Look up user in DynamoDB by IdP sub
+            try:
+                user = _run_async(tenants.get_user_by_cognito_sub(auth.user_id))
+                if user:
+                    tenant_id = user.tenant_id
+                    email = email or user.email
+                    display_name = user.display_name
+                    avatar_url = user.avatar_url
+                    logger.info(
+                        f"auth/me: resolved tenant '{tenant_id}' from DynamoDB "
+                        f"for sub {auth.user_id[:8]}..."
+                    )
+            except Exception as e:
+                logger.warning(f"auth/me DynamoDB lookup failed: {e}")
+
+            # Determine tenant status
+            if tenant_id:
                 try:
-                    tenant = _run_async(tenants.get_tenant(auth.tenant_id))
+                    tenant = _run_async(tenants.get_tenant(tenant_id))
                     tenant_status = tenant.status
                 except Exception:
-                    pass
+                    tenant_status = "active"
+
             self._json_response({
                 "authenticated": True,
                 "user_id": auth.user_id,
-                "tenant_id": auth.tenant_id,
-                "email": auth.email,
+                "tenant_id": tenant_id,
+                "email": email,
+                "display_name": display_name,
+                "avatar_url": avatar_url,
                 "tenant_status": tenant_status,
             })
         except AuthError as e:
-            # User may not have tenant_id yet (onboarding) — return partial info
-            if e.status == 403:
-                self._json_response({
-                    "authenticated": True,
-                    "tenant_id": "",
-                    "tenant_status": "onboarding",
-                    "email": "",
-                })
-            else:
-                self._json_response({"error": e.message}, e.status)
+            self._json_response({"error": e.message}, e.status)
 
     def _handle_settings_get(self):
         """Return current settings and available models."""
