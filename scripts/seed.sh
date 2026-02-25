@@ -131,6 +131,25 @@ aws dynamodb put-item \
     --no-cli-pager
 echo "  ✓ Tenant '${TENANT2_ID}' seeded"
 
+# --- Seed admin user for second tenant ---
+TENANT2_EMAIL="${SECOND_TENANT_EMAIL:-admin@acme.dev}"
+echo "→ Seeding admin user for '${TENANT2_ID}'..."
+aws dynamodb put-item \
+    --table-name "${TENANTS_TABLE}" \
+    --region "${REGION}" \
+    --item '{
+        "pk": {"S": "TENANT#'"${TENANT2_ID}"'"},
+        "sk": {"S": "USER#admin"},
+        "user_id": {"S": "admin"},
+        "tenant_id": {"S": "'"${TENANT2_ID}"'"},
+        "email": {"S": "'"${TENANT2_EMAIL}"'"},
+        "display_name": {"S": "Acme Admin"},
+        "role": {"S": "admin"},
+        "channel_identities": {"S": "{}"}
+    }' \
+    --no-cli-pager
+echo "  ✓ Admin user for '${TENANT2_ID}' seeded"
+
 echo ""
 echo "✅ Seed complete. You can now deploy and test."
 echo "   Tenants: ${TENANT_ID}, ${TENANT2_ID}"

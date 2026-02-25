@@ -67,8 +67,9 @@
       ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
 - [x] Add avatar_url to TenantUser model + DynamoDB/SQLite persistence
       ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
-- [ ] Seed a second tenant, verify isolation
-- [ ] **Milestone:** Two teams onboarded, data fully isolated
+- [x] Seed a second tenant, verify isolation
+      ↳ ✅ Completed — see [handoff notes](../handoffs/005-second-tenant-seed-and-isolation.md)
+- [x] **Milestone:** Two teams onboarded, data fully isolated
 
 ### Phase 3: First External Channel
 - [ ] Teams channel adapter (Azure Bot → webhook)

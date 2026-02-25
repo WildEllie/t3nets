@@ -803,7 +803,7 @@ def init():
     # Seed default tenant
     tenant = tenants.seed_default_tenant(
         tenant_id="local",
-        name="Local Development",
+        name="Dev",
         enabled_skills=skills.list_skill_names(),
     )
     # Set default model if not already set
@@ -811,6 +811,16 @@ def init():
         tenant.settings.ai_model = DEFAULT_MODEL_ID
         _run_async(tenants.update_tenant(tenant))
     logger.info(f"Tenant: {tenant.name} (skills: {tenant.settings.enabled_skills})")
+
+    # Seed second tenant for multi-tenancy testing
+    acme = tenants.seed_default_tenant(
+        tenant_id="acme",
+        name="Acme Corp",
+        admin_email="admin@acme.dev",
+        admin_name="Acme Admin",
+        enabled_skills=["sprint_status", "ping"],
+    )
+    logger.info(f"Tenant: {acme.name} (skills: {acme.settings.enabled_skills})")
 
     connected = _run_async(secrets.list_integrations("local"))
     logger.info(f"Connected integrations: {connected}")
