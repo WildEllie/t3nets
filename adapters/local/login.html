@@ -164,7 +164,7 @@
             <button class="login-btn" id="login-btn" onclick="handleLogin()">Sign In</button>
 
             <div class="login-footer">
-                <a onclick="showPanel('forgotPanel')">Forgot password?</a>
+                <a onclick="startForgotPassword()">Forgot password?</a>
                 &nbsp;&middot;&nbsp;
                 <a onclick="showPanel('signupPanel')">Create an account</a>
             </div>
@@ -440,6 +440,15 @@
                 showError('verify-error', 'Verification failed: ' + err.message);
             }
             setLoading('verify-btn', false, 'Verify & Sign In');
+        }
+
+        function startForgotPassword() {
+            // Carry email from login form to forgot panel
+            const loginEmail = document.getElementById('login-email').value.trim();
+            if (loginEmail) {
+                document.getElementById('forgot-email').value = loginEmail;
+            }
+            showPanel('forgotPanel');
         }
 
         async function handleForgotPassword() {
