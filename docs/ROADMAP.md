@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** February 24, 2026
+**Last Updated:** February 25, 2026
 
 ---
 
@@ -59,6 +59,14 @@
       ↳ ✅ Completed — see [handoff notes](../handoffs/002-cognito-auth-and-tenant-resolution.md)
 - [x] Onboarding wizard (vanilla HTML + backend endpoints)
       ↳ ✅ Completed — see [handoff notes](../handoffs/003-onboarding-wizard.md)
+- [x] DynamoDB GSI for cross-tenant user lookup by IdP sub (cognito-sub-lookup)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
+- [x] Remove custom:tenant_id from JWT — DynamoDB is sole source of truth for user→tenant
+      ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
+- [x] In-app login/signup/verify (replace Cognito Hosted UI with server-side auth endpoints)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
+- [x] Add avatar_url to TenantUser model + DynamoDB/SQLite persistence
+      ↳ ✅ Completed — see [handoff notes](../handoffs/004-idp-agnostic-auth-phase1.md)
 - [ ] Seed a second tenant, verify isolation
 - [ ] **Milestone:** Two teams onboarded, data fully isolated
 
@@ -76,11 +84,24 @@
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
 
-### Phase 5: Theming and Single Page App
-- [ ] Add a theme and make the console/dashboard an SPA
-- [ ] Serve static HTML from a CDN, using pure AJAX to load pages and data
+### Phase 5: Practices — Skill Bundles & Customization
+- [ ] Define Practice model (name, description, list of skill IDs)
+- [ ] Bundle existing skills into default practices (e.g. "Engineering", "Project Management")
+- [ ] Per-tenant practice selection (assign a practice to a tenant)
+- [ ] Custom practices — allow tenants to create their own practice by selecting skills to add or remove
+- [ ] Practice management UI in dashboard (browse, select, customize, save)
+- [ ] Persist custom practices in DynamoDB / SQLite tenant settings
+- [ ] **Milestone:** Tenants can pick a practice or build a custom one from the skill catalog
 
-### Phase 6: Long-Term Memory & Polish
+### Phase 6: Dashboard & UX
+- [x] Markdown rendering in chat responses
+- [ ] Dashboard theming — polished design system (dark mode, consistent components)
+- [ ] Make the console/dashboard an SPA, serve static HTML from CDN with pure AJAX
+- [ ] Mobile-responsive layout
+- [ ] Conversation history browser
+- [ ] Skill configuration UI
+
+### Phase 7: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
 - [ ] Additional channels (Slack, WhatsApp)
 - [ ] OSS contributor guides
@@ -90,12 +111,15 @@
 
 ## Backlog 📋
 
-### Dashboard & UX
-- [x] Markdown rendering in chat responses
-- [ ] Dashboard theming — polished design system (dark mode, consistent components)
-- [ ] Mobile-responsive layout
-- [ ] Conversation history browser
-- [ ] Skill configuration UI
+### IdP-Agnostic Auth (Phase II)
+- [ ] Define IdentityProvider interface (`agent/interfaces/identity_provider.py`)
+- [ ] Cognito adapter implementing IdentityProvider
+- [ ] Authentik adapter implementing IdentityProvider (standard OIDC)
+- [ ] Inject IdentityProvider into AWS and local servers (replace direct boto3 calls)
+- [ ] Docker Compose with Authentik for local dev (real auth instead of hardcoded local-admin)
+- [ ] Authentik bootstrap script (`scripts/setup_authentik.py`)
+- [ ] Token refresh endpoint + frontend refresh logic
+- [ ] Documentation: ADR for IdP abstraction, local dev guide update
 
 ### AI & Models
 - [x] Centralized model registry with per-provider resolution
