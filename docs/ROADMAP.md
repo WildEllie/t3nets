@@ -78,8 +78,10 @@
 ### Phase 2b: Tenant Management & Settings
 - [x] Show tenant name in nav bar across all pages
       ↳ ✅ Completed — see [handoff notes](../handoffs/008-tenant-name-in-navbar.md)
-- [ ] Extend settings API to expose full TenantSettings (model, skills, integrations)
-- [ ] Skill toggle per tenant — enable/disable skills from settings page
+- [x] Extend settings API to expose full TenantSettings (model, skills, integrations)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/009-settings-api-and-skill-toggles.md)
+- [x] Skill toggle per tenant — enable/disable skills from settings page
+      ↳ ✅ Completed — see [handoff notes](../handoffs/009-settings-api-and-skill-toggles.md)
 - [ ] Per-skill integration config — edit/store integration credentials (e.g., Jira) from settings dashboard
 - [ ] **Milestone:** Admins can fully manage tenant settings, skills, and integrations from the dashboard
 
