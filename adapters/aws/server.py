@@ -688,11 +688,13 @@ class AWSHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.warning(f"auth/me DynamoDB lookup failed: {e}")
 
-            # Determine tenant status
+            # Determine tenant status and name
+            tenant_name = ""
             if tenant_id:
                 try:
                     tenant = _run_async(tenants.get_tenant(tenant_id))
                     tenant_status = tenant.status
+                    tenant_name = tenant.name
                 except Exception:
                     tenant_status = "active"
 
@@ -704,6 +706,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 "display_name": display_name,
                 "avatar_url": avatar_url,
                 "tenant_status": tenant_status,
+                "tenant_name": tenant_name,
             })
         except AuthError as e:
             self._json_response({"error": e.message}, e.status)

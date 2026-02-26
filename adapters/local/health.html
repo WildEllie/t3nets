@@ -47,6 +47,15 @@
         .nav-badge.platform { background: #22c55e; color: #000; }
         .nav-badge.stage { background: #3b82f6; color: #fff; }
 
+        .nav-tenant-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #888;
+            margin-left: 12px;
+            padding-left: 12px;
+            border-left: 1px solid #333;
+        }
+
         .nav-links {
             display: flex;
             gap: 0;
@@ -210,7 +219,7 @@
 </head>
 <body>
     <nav>
-        <a href="/" class="nav-brand">T3nets <span class="nav-badge platform" id="platform-badge">...</span><span class="nav-badge stage" id="stage-badge">...</span></a>
+        <a href="/" class="nav-brand">T3nets <span class="nav-badge platform" id="platform-badge">...</span><span class="nav-badge stage" id="stage-badge">...</span></a><span class="nav-tenant-name" id="nav-tenant-name" style="display:none;"></span>
         <div class="nav-links">
             <a href="/chat">Chat</a>
             <a href="/health" class="active">Health</a>
@@ -341,6 +350,30 @@
                     const token = localStorage.getItem('t3nets_id_token');
                     if (!token) { window.location.href = '/login'; return; }
                     document.getElementById('logout-btn').style.display = 'inline-block';
+                    try {
+                        const meResp = await fetch('/api/auth/me', { headers: getAuthHeaders() });
+                        if (meResp.ok) {
+                            const me = await meResp.json();
+                            if (me.tenant_name) {
+                                const tn = document.getElementById('nav-tenant-name');
+                                tn.textContent = me.tenant_name;
+                                tn.style.display = 'inline';
+                            }
+                        }
+                    } catch (e) { /* /api/auth/me not available */ }
+                } else {
+                    // Local mode — still fetch tenant name
+                    try {
+                        const meResp = await fetch('/api/auth/me');
+                        if (meResp.ok) {
+                            const me = await meResp.json();
+                            if (me.tenant_name) {
+                                const tn = document.getElementById('nav-tenant-name');
+                                tn.textContent = me.tenant_name;
+                                tn.style.display = 'inline';
+                            }
+                        }
+                    } catch (e) { /* /api/auth/me not available */ }
                 }
             } catch (e) { /* auth not available — continue without */ }
         }

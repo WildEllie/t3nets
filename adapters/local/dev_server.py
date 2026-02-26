@@ -278,6 +278,7 @@ class DevHandler(BaseHTTPRequestHandler):
             "tenant_id": DEFAULT_TENANT,
             "email": "admin@local.dev",
             "tenant_status": tenant.status,
+            "tenant_name": tenant.name,
         })
 
     def _handle_integrations_post(self, path: str):
