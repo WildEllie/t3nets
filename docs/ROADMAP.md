@@ -82,8 +82,9 @@
       ↳ ✅ Completed — see [handoff notes](../handoffs/009-settings-api-and-skill-toggles.md)
 - [x] Skill toggle per tenant — enable/disable skills from settings page
       ↳ ✅ Completed — see [handoff notes](../handoffs/009-settings-api-and-skill-toggles.md)
-- [ ] Per-skill integration config — edit/store integration credentials (e.g., Jira) from settings dashboard
-- [ ] **Milestone:** Admins can fully manage tenant settings, skills, and integrations from the dashboard
+- [x] Per-skill integration config — edit/store integration credentials (e.g., Jira) from settings dashboard
+      ↳ ✅ Completed — see [handoff notes](../handoffs/010-tabbed-settings-integration-config.md)
+- [x] **Milestone:** Admins can fully manage tenant settings, skills, and integrations from the dashboard
 
 ### Phase 3: First External Channel
 - [ ] Teams channel adapter (Azure Bot → webhook)
