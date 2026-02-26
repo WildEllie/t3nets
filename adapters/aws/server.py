@@ -458,9 +458,17 @@ class AWSHandler(BaseHTTPRequestHandler):
                 _run_async(secrets.put(tenant_id, integration_name, body))
                 logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
 
-                # Auto-register Telegram webhook after saving credentials
+                # Auto-register Telegram webhook and channel mapping after saving
                 if integration_name == "telegram":
                     self._register_telegram_webhook(body)
+                    # Save channel mapping for fast GSI lookup on incoming webhooks
+                    import hashlib
+                    bot_token = body.get("bot_token", "")
+                    if bot_token:
+                        t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
+                        _run_async(tenants.set_channel_mapping(
+                            tenant_id, "telegram", t_hash
+                        ))
 
                 self._json_response({"ok": True})
         except Exception as e:
@@ -1618,10 +1626,11 @@ When you have data to present, format it clearly with structure."""
         if not text:
             return
 
-        # Resolve tenant — look up by bot token hash or scan
-        bot_id = adapter.bot_token.split(":")[0]  # Telegram bot ID is before the colon
+        # Resolve tenant — look up by token hash in channel mapping GSI
+        import hashlib
+        token_hash = hashlib.sha256(adapter.bot_token.encode()).hexdigest()[:16]
         try:
-            tenant = _run_async(tenants.get_by_channel_id("telegram", bot_id))
+            tenant = _run_async(tenants.get_by_channel_id("telegram", token_hash))
         except Exception:
             logger.warning(f"No tenant mapped for Telegram bot {bot_id}")
             return
@@ -1724,36 +1733,21 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
         _run_async(adapter.send_response(outbound))
 
     def _get_telegram_adapter(self, token_hash: str) -> TelegramAdapter | None:
-        """Get TelegramAdapter by matching the token hash from the webhook URL."""
-        import hashlib
+        """Get TelegramAdapter by looking up the channel mapping GSI."""
+        if not token_hash or token_hash == "webhook":
+            logger.warning("No token hash in Telegram webhook URL")
+            return None
 
-        # Scan tenants for Telegram integration
+        # Fast path: GSI lookup by channel mapping (CHANNEL#telegram#{token_hash})
         try:
-            all_tenants = _run_async(tenants.list_tenants())
-            for t in all_tenants:
-                try:
-                    creds = _run_async(secrets.get(t.tenant_id, "telegram"))
-                    bot_token = creds.get("bot_token", "")
-                    if not bot_token:
-                        continue
-
-                    # Match by token hash in URL, or accept if only one tenant has Telegram
-                    t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
-                    if not token_hash or token_hash == "webhook" or t_hash == token_hash:
-                        webhook_secret = creds.get("webhook_secret", "")
-                        # Ensure channel mapping exists
-                        bot_id = bot_token.split(":")[0]
-                        try:
-                            _run_async(tenants.set_channel_mapping(
-                                t.tenant_id, "telegram", bot_id
-                            ))
-                        except Exception:
-                            pass
-                        return TelegramAdapter(bot_token, webhook_secret)
-                except Exception:
-                    continue
+            tenant = _run_async(tenants.get_by_channel_id("telegram", token_hash))
+            creds = _run_async(secrets.get(tenant.tenant_id, "telegram"))
+            bot_token = creds.get("bot_token", "")
+            if bot_token:
+                webhook_secret = creds.get("webhook_secret", "")
+                return TelegramAdapter(bot_token, webhook_secret)
         except Exception as e:
-            logger.error(f"Failed to find Telegram adapter: {e}")
+            logger.warning(f"Telegram channel mapping lookup failed: {e}")
         return None
 
     def _handle_clear(self):

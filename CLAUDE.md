@@ -107,6 +107,25 @@ Inbound message → ChannelAdapter.parse_inbound()
 | `docs/decision-log.md` | Architecture Decision Records |
 | `docs/ROADMAP.md` | Phases, backlog, TODO |
 
+## Lessons Learned
+
+### DynamoDB
+- **Cannot use `begins_with` on partition key in a `Query`**. DynamoDB `Query` requires an exact match (`pk = :value`) on the partition key. Use `begins_with` only on the sort key. If you need prefix matching on the partition key, use a `Scan` with a `FilterExpression` (expensive) or design a GSI with a fixed partition key.
+- **`list_tenants()` uses a Scan** because tenants have distinct partition keys (`TENANT#default`, `TENANT#acme`). This is acceptable for low-frequency admin calls but should never be used in hot paths like webhook handlers. Use GSI lookups instead.
+- **Channel mapping uses token hash, not bot ID**. Telegram channel mappings are keyed by `sha256(bot_token)[:16]`, not the numeric bot ID. All lookups (adapter resolution, tenant resolution in message handler) must use the same key consistently.
+- **When manually inserting DynamoDB items**, include all attributes that the code's `_item_to_*` methods expect — not just `pk`/`sk`. Check the deserialization method (e.g., `_item_to_user` expects `user_id`, `tenant_id`, `email`, `display_name` as top-level attributes, not just embedded in keys).
+
+### API Gateway
+- **Public webhook routes need explicit route entries** in API Gateway. The `$default` catch-all has a JWT authorizer, so any route without its own entry gets a 401. External service webhooks (Telegram, Teams) must be defined as separate routes with `authorization_type = "NONE"`.
+- **401 from webhooks**: if API Gateway routes look correct, the 401 is likely coming from the server code itself (e.g., adapter not found → 401 response), not from the API Gateway authorizer. Check ECS logs.
+
+### IAM / Secrets Manager
+- **`secretsmanager:TagResource`** is required when calling `create_secret` with Tags. Add it to the ECS task role's IAM policy alongside `CreateSecret`.
+
+### Channel Adapters
+- **Webhook registration must be triggered on credential save**. The server must call `setWebhook` (Telegram) or equivalent when the user saves channel config — not just store the credentials.
+- **Channel mapping must also be saved on credential save**, so the GSI lookup works on subsequent webhook calls.
+
 ## Session Rules
 
 - **No Co-Authored-By**: Do not add `Co-Authored-By` lines to git commit messages.

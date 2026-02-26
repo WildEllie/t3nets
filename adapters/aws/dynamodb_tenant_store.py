@@ -45,8 +45,8 @@ class DynamoDBTenantStore(TenantStore):
         self.table.put_item(Item=self._tenant_to_item(tenant))
 
     async def list_tenants(self) -> list[Tenant]:
-        response = self.table.query(
-            KeyConditionExpression="begins_with(pk, :prefix) AND sk = :meta",
+        response = self.table.scan(
+            FilterExpression="begins_with(pk, :prefix) AND sk = :meta",
             ExpressionAttributeValues={":prefix": "TENANT#", ":meta": "META"},
         )
         return [self._item_to_tenant(item) for item in response.get("Items", [])]

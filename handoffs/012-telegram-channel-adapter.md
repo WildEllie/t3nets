@@ -17,8 +17,11 @@ Implemented a Telegram channel adapter using the Telegram Bot API, plus a new "C
 | `adapters/local/dev_server.py` | Same additions for local dev server |
 | `adapters/local/settings.html` | **New Channels tab** with setup guides, config forms, connection testing for Telegram and Teams |
 | `infra/aws/modules/api/main.tf` | Added `POST /api/channels/telegram/webhook/{proxy+}` public route |
+| `infra/aws/modules/compute/main.tf` | Added `secretsmanager:TagResource` to ECS task IAM policy |
+| `adapters/aws/dynamodb_tenant_store.py` | Fixed `list_tenants()` — changed invalid `Query` to `Scan` |
 | `tests/test_telegram_adapter.py` | **New** — 19 unit tests covering parsing, command mapping, webhook validation, edge cases |
-| `docs/ROADMAP.md` | Marked Telegram adapter and Channels tab as completed |
+| `docs/ROADMAP.md` | Marked Telegram adapter and Channels tab as completed; added Phase 3b roadmap |
+| `CLAUDE.md` | Added Lessons Learned section (DynamoDB, API Gateway, IAM, Channel Adapters) |
 
 ## Architecture & Design Decisions
 
@@ -34,11 +37,20 @@ Implemented a Telegram channel adapter using the Telegram Bot API, plus a new "C
 
 **Markdown fallback:** `send_response()` first tries sending with `parse_mode=Markdown`. If Telegram rejects it (malformed Markdown), it retries without parse_mode. This prevents message delivery failures from formatting issues.
 
+## Bugs Found & Fixed During Deployment
+
+1. **`list_tenants()` used invalid DynamoDB Query** — `begins_with` on partition key is not supported in `Query`. Changed to `Scan` with filter. Only used in admin/health contexts (not hot path).
+2. **Webhook not registered on save** — `register_webhook()` existed on TelegramAdapter but neither server called it. Added auto-registration in `_handle_integrations_post` when saving Telegram credentials.
+3. **Channel mapping not saved on credential save** — GSI lookup (`CHANNEL#telegram#{token_hash}`) had no entry. Added `set_channel_mapping()` call alongside webhook registration.
+4. **Inconsistent channel mapping key** — `_get_telegram_adapter` used token hash but `_handle_telegram_message` used numeric bot ID (`8717639200`). Unified both to use `sha256(bot_token)[:16]`.
+5. **Missing IAM permission** — `secretsmanager:TagResource` needed for `create_secret` with tags. Added to ECS task role.
+6. **User record missing attributes** — Manual DynamoDB `put-item` must include `user_id` and `tenant_id` as top-level attributes (not just in pk/sk), since `_item_to_user()` reads them explicitly.
+
 ## Current State
 
-- **What works:** Full TelegramAdapter (parse, send, validate, register webhook, test connection). Settings UI with step-by-step setup guide. 19 passing unit tests. Terraform route ready.
-- **What doesn't yet:** End-to-end testing requires deploying to AWS and creating a real Telegram bot via @BotFather. Local dev testing possible with ngrok + Telegram webhook.
-- **Known issues:** None identified. The adapter is straightforward compared to Teams (no complex JWT/OAuth).
+- **What works:** Full end-to-end Telegram integration — messages from Telegram bot route through T3nets and responses are delivered back. Settings UI with setup guide and connection testing. 19 passing unit tests. Deployed and verified on AWS.
+- **What doesn't yet:** Inline keyboards (buttons) not yet rendered in Telegram responses. Only one tenant can use Telegram at a time (each tenant needs its own bot).
+- **Known issues:** `list_tenants()` uses a DynamoDB Scan which won't scale. Consider adding a GSI with a fixed partition key for tenant metadata lookups if tenant count grows significantly.
 
 ## How to Pick Up From Here
 
