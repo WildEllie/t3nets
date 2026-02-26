@@ -212,6 +212,7 @@ resource "aws_iam_role_policy" "ecs_task" {
           "secretsmanager:GetSecretValue",
           "secretsmanager:CreateSecret",
           "secretsmanager:UpdateSecret",
+          "secretsmanager:TagResource",
         ]
         Resource = var.secrets_base_arn
       },

@@ -106,3 +106,8 @@ Inbound message → ChannelAdapter.parse_inbound()
 | `docs/dynamodb-schema.md` | Table schemas, key patterns |
 | `docs/decision-log.md` | Architecture Decision Records |
 | `docs/ROADMAP.md` | Phases, backlog, TODO |
+
+## Session Rules
+
+- **No Co-Authored-By**: Do not add `Co-Authored-By` lines to git commit messages.
+- **HEAD.lock**: If `.git/HEAD.lock` blocks a commit, immediately ask the user to run `rm .git/HEAD.lock` from their terminal. Do not attempt to remove it yourself — it will fail due to filesystem permissions.

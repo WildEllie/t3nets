@@ -43,6 +43,7 @@ from adapters.local.direct_bus import DirectBus
 from agent.errors.handler import ErrorHandler
 from agent.models.tenant import Invitation
 from agent.channels.teams import TeamsAdapter
+from agent.channels.telegram import TelegramAdapter
 from agent.models.message import ChannelType
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
@@ -160,6 +161,25 @@ INTEGRATION_SCHEMAS: dict = {
             },
         ],
     },
+    "telegram": {
+        "label": "Telegram",
+        "fields": [
+            {
+                "key": "bot_token",
+                "label": "Bot Token",
+                "type": "password",
+                "required": True,
+                "placeholder": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+            },
+            {
+                "key": "webhook_secret",
+                "label": "Webhook Secret",
+                "type": "text",
+                "required": False,
+                "placeholder": "Optional — auto-generated if blank",
+            },
+        ],
+    },
 }
 
 # Build number — read from version.txt at startup
@@ -264,6 +284,8 @@ class DevHandler(BaseHTTPRequestHandler):
 
         if path == "/api/channels/teams/webhook":
             self._handle_teams_webhook()
+        elif path.startswith("/api/channels/telegram/webhook"):
+            self._handle_telegram_webhook()
         elif path == "/api/chat":
             self._handle_chat()
         elif path == "/api/clear":
@@ -314,6 +336,7 @@ class DevHandler(BaseHTTPRequestHandler):
                 "jira": {"connected": "jira" in connected_integrations},
                 "github": {"connected": "github" in connected_integrations},
                 "teams": {"connected": "teams" in connected_integrations},
+                "telegram": {"connected": "telegram" in connected_integrations},
                 "twilio": {"connected": "twilio" in connected_integrations},
             }
 
@@ -465,6 +488,11 @@ class DevHandler(BaseHTTPRequestHandler):
             else:
                 _run_async(secrets.put(tenant_id, integration_name, body))
                 logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
+
+                # Auto-register Telegram webhook after saving credentials
+                if integration_name == "telegram":
+                    self._register_telegram_webhook(body)
+
                 self._json_response({"ok": True})
         except Exception as e:
             logger.exception("Integration endpoint error")
@@ -474,7 +502,45 @@ class DevHandler(BaseHTTPRequestHandler):
         """Test integration credentials."""
         if name == "jira":
             return self._test_jira(creds)
+        elif name == "telegram":
+            return self._test_telegram(creds)
         return {"ok": False, "error": f"Testing not supported for '{name}'"}
+
+    def _register_telegram_webhook(self, creds: dict):
+        """Register the Telegram webhook URL after saving credentials."""
+        import hashlib
+
+        bot_token = creds.get("bot_token", "")
+        if not bot_token:
+            return
+        try:
+            token_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
+            host = self.headers.get("Host", "localhost:8080")
+            # Local dev uses http; in production behind HTTPS proxy, use https
+            scheme = "https" if "443" in host else "http"
+            base_url = f"{scheme}://{host}"
+            webhook_url = f"{base_url}/api/channels/telegram/webhook/{token_hash}"
+            webhook_secret = creds.get("webhook_secret", "")
+            adapter = TelegramAdapter(bot_token, webhook_secret)
+            result = adapter.register_webhook(webhook_url)
+            logger.info(f"Telegram webhook registration: {result}")
+        except Exception as e:
+            logger.error(f"Failed to register Telegram webhook: {e}")
+
+    def _test_telegram(self, creds: dict) -> dict:
+        """Validate Telegram bot token by calling getMe."""
+        bot_token = creds.get("bot_token", "")
+        if not bot_token:
+            return {"ok": False, "error": "Bot token is required"}
+        adapter = TelegramAdapter(bot_token)
+        info = adapter.get_bot_info()
+        if "error" in info:
+            return {"ok": False, "error": info["error"]}
+        return {
+            "ok": True,
+            "bot_name": f"@{info.get('username', '')}",
+            "display_name": info.get("first_name", ""),
+        }
 
     def _test_jira(self, creds: dict) -> dict:
         """Validate Jira credentials by calling /rest/api/3/myself."""
@@ -1363,6 +1429,151 @@ When you have data to present, format it clearly with structure."""
         app_secret = os.environ.get("TEAMS_APP_SECRET", "")
         if app_id and app_secret:
             return TeamsAdapter(app_id, app_secret)
+        return None
+
+    # --- Telegram webhook handlers ---
+
+    def _handle_telegram_webhook(self):
+        """Handle incoming Telegram webhook for local development."""
+        try:
+            content_length = int(self.headers.get("Content-Length", 0) or 0)
+            body_bytes = self.rfile.read(content_length)
+            update = json.loads(body_bytes) if body_bytes else {}
+
+            logger.info(f"Telegram webhook (local): update_id={update.get('update_id', '?')}")
+
+            adapter = self._get_telegram_adapter_local()
+            if not adapter:
+                logger.warning("No Telegram config found")
+                self._json_response({"error": "Telegram not configured"}, 400)
+                return
+
+            if TelegramAdapter.is_message_update(update):
+                self._handle_telegram_message_local(adapter, update)
+
+            self._json_response({"ok": True})
+
+        except Exception as e:
+            logger.exception("Telegram webhook error (local)")
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_telegram_message_local(self, adapter: TelegramAdapter, update: dict):
+        """Process a Telegram message through the local router."""
+        from agent.models.message import OutboundMessage
+
+        message = adapter.parse_inbound(update)
+        text = message.text
+        if not text:
+            return
+
+        tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+        tenant_id = tenant.tenant_id
+        conversation_id = f"tg-{message.conversation_id}"
+
+        logger.info(f"Telegram [{tenant_id}]: {text[:100]}")
+
+        _run_async(adapter.send_typing_indicator(message.conversation_id))
+
+        clean_text, is_raw = strip_raw_flag(text)
+        active_model, model_short_name = _resolve_model(tenant)
+
+        system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
+Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
+You are communicating via Telegram. Keep responses concise and well-formatted.
+Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
+
+        history = _strip_metadata(
+            _run_async(memory.get_conversation(tenant_id, conversation_id))
+        )
+
+        if not is_raw and rule_router.is_conversational(clean_text):
+            stats["conversational"] += 1
+            messages = history + [{"role": "user", "content": clean_text}]
+            response = _run_async(ai.chat(active_model, system, messages, []))
+            assistant_text = response.text or "Hey! How can I help?"
+            total_tokens = response.input_tokens + response.output_tokens
+        else:
+            match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+            if match:
+                request_id = f"tg-rule-{conversation_id}"
+                _run_async(bus.publish_skill_invocation(
+                    tenant_id, match.skill_name, match.params,
+                    conversation_id, request_id, "telegram", message.channel_user_id,
+                ))
+                skill_result = bus.get_result(request_id) or {"error": "No result"}
+                stats["rule_routed"] += 1
+                if is_raw and rule_router.supports_raw(match.skill_name):
+                    stats["raw"] += 1
+                    assistant_text = _format_raw_json(skill_result)
+                    total_tokens = 0
+                else:
+                    prompt = (
+                        f'{system}\n\nThe user asked: "{clean_text}"\n\n'
+                        f'Tool data:\n{json.dumps(skill_result, indent=2)}\n\n'
+                        f'Format this clearly and concisely for Telegram.'
+                    )
+                    messages = history + [{"role": "user", "content": prompt}]
+                    response = _run_async(ai.chat(active_model, system, messages, []))
+                    assistant_text = response.text or "Got data but couldn't format."
+                    total_tokens = response.input_tokens + response.output_tokens
+            else:
+                stats["ai_routed"] += 1
+                tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
+                messages = history + [{"role": "user", "content": clean_text}]
+                response = _run_async(ai.chat(active_model, system, messages, tools))
+                if response.has_tool_use:
+                    tc = response.tool_calls[0]
+                    request_id = f"tg-ai-{conversation_id}"
+                    _run_async(bus.publish_skill_invocation(
+                        tenant_id, tc.tool_name, tc.tool_params,
+                        conversation_id, request_id, "telegram", message.channel_user_id,
+                    ))
+                    skill_result = bus.get_result(request_id) or {"error": "No result"}
+                    messages_with_tool = messages + [
+                        {"role": "assistant", "content": [
+                            {"type": "tool_use", "id": tc.tool_use_id,
+                             "name": tc.tool_name, "input": tc.tool_params}
+                        ]}
+                    ]
+                    final = _run_async(ai.chat_with_tool_result(
+                        active_model, system, messages_with_tool,
+                        tools, tc.tool_use_id, skill_result,
+                    ))
+                    assistant_text = final.text or "Got data but couldn't format."
+                    total_tokens = (
+                        response.input_tokens + response.output_tokens
+                        + final.input_tokens + final.output_tokens
+                    )
+                else:
+                    assistant_text = response.text or "Not sure how to help."
+                    total_tokens = response.input_tokens + response.output_tokens
+
+        stats["total_tokens"] += total_tokens
+        _run_async(memory.save_turn(
+            tenant_id, conversation_id, clean_text, assistant_text,
+            metadata={"route": "telegram", "model": model_short_name, "tokens": total_tokens},
+        ))
+
+        outbound = OutboundMessage(
+            channel=ChannelType.TELEGRAM,
+            conversation_id=message.conversation_id,
+            recipient_id=message.channel_user_id,
+            text=assistant_text,
+        )
+        _run_async(adapter.send_response(outbound))
+
+    def _get_telegram_adapter_local(self) -> TelegramAdapter | None:
+        """Get TelegramAdapter from local secrets or env."""
+        try:
+            creds = _run_async(secrets.get(DEFAULT_TENANT, "telegram"))
+            bot_token = creds.get("bot_token", "")
+            if bot_token:
+                return TelegramAdapter(bot_token, creds.get("webhook_secret", ""))
+        except Exception:
+            pass
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        if bot_token:
+            return TelegramAdapter(bot_token, os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""))
         return None
 
     def _handle_clear(self):

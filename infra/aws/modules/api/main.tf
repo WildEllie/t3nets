@@ -206,6 +206,15 @@ resource "aws_apigatewayv2_route" "public_teams_webhook" {
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
+# Telegram webhook — Telegram Bot API sends updates here.
+# Uses path prefix matching so the token hash suffix is accepted.
+# No JWT authorizer — Telegram uses its own secret_token header.
+resource "aws_apigatewayv2_route" "public_telegram_webhook" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/channels/telegram/webhook/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
 resource "aws_apigatewayv2_route" "public_integrations" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/integrations/{proxy+}"

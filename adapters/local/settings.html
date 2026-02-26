@@ -381,6 +381,71 @@
         .save-btn:hover { background: #2563eb; }
         .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+        /* --- Channel cards --- */
+        .channel-card {
+            background: #1a1a1a; border: 1px solid #2a2a2a;
+            border-radius: 10px; padding: 16px 20px; margin-bottom: 12px;
+        }
+        .channel-card-header {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 4px;
+        }
+        .channel-icon {
+            width: 36px; height: 36px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; flex-shrink: 0;
+        }
+        .channel-icon.telegram { background: #0088cc; }
+        .channel-icon.teams { background: #464EB8; }
+        .channel-icon.slack { background: #4A154B; }
+        .channel-name { font-size: 15px; font-weight: 600; color: #e0e0e0; }
+        .channel-desc { font-size: 12px; color: #666; margin-top: 2px; }
+        .channel-status-row {
+            display: flex; align-items: center; gap: 8px; margin: 10px 0 0 0;
+        }
+        .channel-status-dot {
+            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+        }
+        .channel-status-dot.connected { background: #6ee7b7; }
+        .channel-status-dot.disconnected { background: #555; }
+        .channel-status-text { font-size: 12px; color: #888; }
+        .channel-config {
+            display: none; margin-top: 14px; padding-top: 14px;
+            border-top: 1px solid #2a2a2a;
+        }
+        .channel-config.open { display: block; }
+        .channel-config .field-group { margin-bottom: 12px; }
+        .channel-config label {
+            display: block; font-size: 12px; color: #888; margin-bottom: 4px;
+        }
+        .channel-config input {
+            width: 100%; background: #111; border: 1px solid #333;
+            border-radius: 6px; color: #e0e0e0; padding: 8px 10px;
+            font-size: 13px; font-family: monospace; outline: none;
+        }
+        .channel-config input:focus { border-color: #3b82f6; }
+        .channel-config .help-text {
+            font-size: 11px; color: #555; margin-top: 3px;
+        }
+        .channel-toggle-btn {
+            background: transparent; border: 1px solid #333; color: #aaa;
+            padding: 5px 14px; border-radius: 6px; font-size: 12px;
+            cursor: pointer; margin-left: auto;
+        }
+        .channel-toggle-btn:hover { border-color: #555; color: #e0e0e0; }
+        .channel-setup-steps {
+            margin: 12px 0 14px 0; padding: 12px 16px;
+            background: #111; border-radius: 8px; border: 1px solid #222;
+        }
+        .channel-setup-steps ol {
+            margin: 0; padding-left: 20px; font-size: 13px; color: #aaa;
+            line-height: 1.8;
+        }
+        .channel-setup-steps ol li { margin-bottom: 2px; }
+        .channel-setup-steps code {
+            background: #1a1a1a; padding: 1px 5px; border-radius: 3px;
+            font-size: 12px; color: #e0e0e0;
+        }
+
         /* --- Team table --- */
         .team-table {
             width: 100%;
@@ -512,6 +577,7 @@
         <div class="tab-bar">
             <button class="tab-btn active" onclick="switchTab('general')">General</button>
             <button class="tab-btn" onclick="switchTab('skills')">Skills</button>
+            <button class="tab-btn" onclick="switchTab('channels')">Channels</button>
             <button class="tab-btn" onclick="switchTab('team')">Team</button>
         </div>
 
@@ -549,6 +615,16 @@
         <div class="tab-panel" id="tab-skills">
             <div class="section-title">Skills</div>
             <div id="skill-list" class="skill-list"></div>
+        </div>
+
+        <!-- ===== Channels Tab ===== -->
+        <div class="tab-panel" id="tab-channels">
+            <div class="section-title">Channel Integrations</div>
+            <p style="color:#888;font-size:13px;margin-bottom:16px;">
+                Connect external messaging platforms to your T3nets agent.
+                Team members can message the bot directly from these channels.
+            </p>
+            <div id="channels-list"></div>
         </div>
 
         <!-- ===== Team Tab ===== -->
@@ -660,7 +736,8 @@
             btns.forEach(btn => {
                 if (btn.textContent.toLowerCase() === tabName) btn.classList.add('active');
             });
-            // Load team data when switching to team tab
+            // Load tab-specific data
+            if (tabName === 'channels') loadChannels();
             if (tabName === 'team') loadTeam();
         }
 
@@ -984,6 +1061,227 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Save Agent Settings';
+            }
+        }
+
+        // ==================== Channels ====================
+        // Channel definitions — which integrations are channels vs tool integrations
+        const CHANNEL_DEFS = {
+            telegram: {
+                name: 'Telegram',
+                icon: '✈',
+                iconClass: 'telegram',
+                description: 'Message your T3nets bot from any Telegram chat',
+                setupUrl: 'https://t.me/BotFather',
+                setupLabel: '@BotFather on Telegram',
+                setupSteps: [
+                    'Open Telegram and search for <strong>@BotFather</strong>',
+                    'Send <code>/newbot</code> and follow the prompts to name your bot',
+                    'Copy the <strong>Bot Token</strong> (looks like <code>123456:ABC-DEF...</code>)',
+                    'Paste it below and click <strong>Save</strong>',
+                    'T3nets will automatically register the webhook — you\'re done!',
+                ],
+            },
+            teams: {
+                name: 'Microsoft Teams',
+                icon: 'T',
+                iconClass: 'teams',
+                description: 'Receive and respond to messages from Microsoft Teams chats and channels',
+                setupUrl: 'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+                setupLabel: 'Azure Portal',
+                setupSteps: [
+                    'Go to Azure Portal → Bot Services → Create Azure Bot',
+                    'Choose "Multi-tenant" app type and note the <strong>App ID</strong>',
+                    'Create a client secret under Certificates & Secrets',
+                    'Set the Messaging Endpoint to your T3nets webhook URL',
+                    'Paste the App ID and Secret below, then install the bot in Teams',
+                ],
+            },
+        };
+
+        async function loadChannels() {
+            const list = document.getElementById('channels-list');
+            list.innerHTML = '<div style="color:#555;font-size:13px;">Loading...</div>';
+
+            try {
+                const resp = await fetch('/api/integrations', { headers: getAuthHeaders() });
+                const integrations = await resp.json();
+
+                list.innerHTML = '';
+                let hasChannels = false;
+
+                for (const integ of integrations) {
+                    const channelDef = CHANNEL_DEFS[integ.name];
+                    if (!channelDef) continue; // Skip non-channel integrations (jira, github)
+                    hasChannels = true;
+
+                    const card = document.createElement('div');
+                    card.className = 'channel-card';
+                    card.id = `channel-card-${integ.name}`;
+
+                    const statusDot = integ.connected ? 'connected' : 'disconnected';
+                    const statusText = integ.connected ? 'Connected' : 'Not configured';
+
+                    let fieldsHtml = '';
+                    for (const field of (integ.fields || [])) {
+                        const helpHtml = field.placeholder && !field.required
+                            ? `<div class="help-text">${escapeHtml(field.placeholder)}</div>` : '';
+                        fieldsHtml += `
+                            <div class="field-group">
+                                <label>${field.label}${field.required ? ' *' : ''}</label>
+                                <input type="${field.type === 'password' ? 'password' : 'text'}"
+                                       data-key="${field.key}"
+                                       placeholder="${escapeHtml(field.placeholder || '')}"
+                                       ${field.required ? 'required' : ''}>
+                                ${helpHtml}
+                            </div>
+                        `;
+                    }
+
+                    // Build setup steps HTML
+                    let stepsHtml = '';
+                    if (channelDef.setupSteps && !integ.connected) {
+                        const stepsLi = channelDef.setupSteps.map(s => `<li>${s}</li>`).join('');
+                        stepsHtml = `<div class="channel-setup-steps"><ol>${stepsLi}</ol></div>`;
+                    }
+
+                    card.innerHTML = `
+                        <div class="channel-card-header">
+                            <div class="channel-icon ${channelDef.iconClass}">${channelDef.icon}</div>
+                            <div>
+                                <div class="channel-name">${channelDef.name}</div>
+                                <div class="channel-desc">${channelDef.description}</div>
+                            </div>
+                            <button class="channel-toggle-btn" onclick="toggleChannelConfig('${integ.name}')">
+                                ${integ.connected ? 'Edit' : 'Set up'}
+                            </button>
+                        </div>
+                        <div class="channel-status-row">
+                            <div class="channel-status-dot ${statusDot}"></div>
+                            <span class="channel-status-text">${statusText}</span>
+                        </div>
+                        <div class="channel-config" id="channel-config-${integ.name}">
+                            ${stepsHtml}
+                            ${fieldsHtml}
+                            <div class="integration-actions">
+                                <button class="btn-test" onclick="testChannelConnection('${integ.name}')">Test Connection</button>
+                                <button class="btn-save" onclick="saveChannelConfig('${integ.name}')">Save</button>
+                                <span class="integration-status" id="channel-status-${integ.name}"></span>
+                            </div>
+                        </div>
+                    `;
+
+                    list.appendChild(card);
+
+                    // If connected, pre-fill the form
+                    if (integ.connected) {
+                        loadChannelConfig(integ.name);
+                    }
+                }
+
+                if (!hasChannels) {
+                    list.innerHTML = '<div style="color:#555;font-size:13px;">No channel integrations available</div>';
+                }
+            } catch (err) {
+                console.error('Failed to load channels:', err);
+                list.innerHTML = '<div style="color:#fca5a5;font-size:13px;">Failed to load channels</div>';
+            }
+        }
+
+        function toggleChannelConfig(channelName) {
+            const config = document.getElementById('channel-config-' + channelName);
+            const btn = document.querySelector(`#channel-card-${channelName} .channel-toggle-btn`);
+            if (config.classList.contains('open')) {
+                config.classList.remove('open');
+                btn.textContent = 'Configure';
+            } else {
+                config.classList.add('open');
+                btn.textContent = 'Close';
+                loadChannelConfig(channelName);
+            }
+        }
+
+        async function loadChannelConfig(channelName) {
+            try {
+                const resp = await fetch(`/api/integrations/${channelName}`, { headers: getAuthHeaders() });
+                const data = await resp.json();
+                if (data.config) {
+                    const pane = document.getElementById('channel-config-' + channelName);
+                    const inputs = pane.querySelectorAll('input[data-key]');
+                    inputs.forEach(input => {
+                        const val = data.config[input.dataset.key] || '';
+                        // Don't fill masked password values
+                        if (val && val !== '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022') {
+                            input.value = val;
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error('Failed to load channel config:', err);
+            }
+        }
+
+        async function testChannelConnection(channelName) {
+            const pane = document.getElementById('channel-config-' + channelName);
+            const inputs = pane.querySelectorAll('input[data-key]');
+            const formData = {};
+            inputs.forEach(input => { formData[input.dataset.key] = input.value; });
+
+            const statusEl = document.getElementById('channel-status-' + channelName);
+            statusEl.textContent = 'Testing...';
+            statusEl.className = 'integration-status';
+
+            try {
+                const resp = await fetch(`/api/integrations/${channelName}/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify(formData),
+                });
+                const result = await resp.json();
+                if (result.ok) {
+                    const name = result.bot_name || result.display_name || '';
+                    statusEl.textContent = name ? `Connected as ${name}` : 'Connection successful';
+                    statusEl.className = 'integration-status ok';
+                } else {
+                    statusEl.textContent = result.error || 'Connection failed';
+                    statusEl.className = 'integration-status error';
+                }
+            } catch (err) {
+                statusEl.textContent = 'Connection failed';
+                statusEl.className = 'integration-status error';
+            }
+        }
+
+        async function saveChannelConfig(channelName) {
+            const pane = document.getElementById('channel-config-' + channelName);
+            const inputs = pane.querySelectorAll('input[data-key]');
+            const formData = {};
+            inputs.forEach(input => { formData[input.dataset.key] = input.value; });
+
+            const statusEl = document.getElementById('channel-status-' + channelName);
+            statusEl.textContent = 'Saving...';
+            statusEl.className = 'integration-status';
+
+            try {
+                const resp = await fetch(`/api/integrations/${channelName}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify(formData),
+                });
+                if (resp.ok) {
+                    statusEl.textContent = 'Saved';
+                    statusEl.className = 'integration-status ok';
+                    showToast(`${CHANNEL_DEFS[channelName]?.name || channelName} credentials saved`);
+                    // Refresh to update connected status
+                    setTimeout(() => loadChannels(), 500);
+                } else {
+                    const err = await resp.json();
+                    statusEl.textContent = err.error || 'Failed to save';
+                    statusEl.className = 'integration-status error';
+                }
+            } catch (err) {
+                statusEl.textContent = 'Failed to save';
+                statusEl.className = 'integration-status error';
             }
         }
 
