@@ -716,13 +716,32 @@ class AWSHandler(BaseHTTPRequestHandler):
         try:
             tenant_id, _ = _get_auth_info(self.headers)
             tenant = _run_async(tenants.get_tenant(tenant_id))
+            s = tenant.settings
+
+            # Build available skills list from registry
+            available_skills = [
+                {
+                    "name": sk.name,
+                    "description": sk.description.strip(),
+                    "requires_integration": sk.requires_integration,
+                }
+                for sk in skills.list_skills()
+            ]
+
             self._json_response({
-                "ai_model": tenant.settings.ai_model or DEFAULT_MODEL_ID,
+                "ai_model": s.ai_model or DEFAULT_MODEL_ID,
                 "provider": PROVIDER,
                 "models": get_models_for_provider(PROVIDER),
                 "platform": PLATFORM,
                 "stage": STAGE,
                 "build": BUILD_NUMBER,
+                "enabled_skills": s.enabled_skills,
+                "available_skills": available_skills,
+                "enabled_channels": s.enabled_channels,
+                "system_prompt_override": s.system_prompt_override,
+                "max_tokens_per_message": s.max_tokens_per_message,
+                "messages_per_day": s.messages_per_day,
+                "max_conversation_history": s.max_conversation_history,
             })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
@@ -748,6 +767,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             tenant_id, _ = _get_auth_info(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             tenant = _run_async(tenants.get_tenant(tenant_id))
+            changed = False
 
             if "ai_model" in body:
                 model_id = body["ai_model"]
@@ -762,8 +782,61 @@ class AWSHandler(BaseHTTPRequestHandler):
                     )
                     return
                 tenant.settings.ai_model = model_id
-                _run_async(tenants.update_tenant(tenant))
+                changed = True
                 logger.info(f"Model changed to: {model.display_name} ({model_id})")
+
+            if "enabled_skills" in body:
+                skill_list = body["enabled_skills"]
+                if not isinstance(skill_list, list):
+                    self._json_response({"error": "enabled_skills must be a list"}, 400)
+                    return
+                known = set(skills.list_skill_names())
+                unknown = [s for s in skill_list if s not in known]
+                if unknown:
+                    self._json_response(
+                        {"error": f"Unknown skills: {', '.join(unknown)}"}, 400
+                    )
+                    return
+                tenant.settings.enabled_skills = skill_list
+                changed = True
+                logger.info(f"Enabled skills updated: {skill_list}")
+
+            if "system_prompt_override" in body:
+                tenant.settings.system_prompt_override = body["system_prompt_override"]
+                changed = True
+
+            if "max_tokens_per_message" in body:
+                val = body["max_tokens_per_message"]
+                if not isinstance(val, int) or val < 256 or val > 16384:
+                    self._json_response(
+                        {"error": "max_tokens_per_message must be 256-16384"}, 400
+                    )
+                    return
+                tenant.settings.max_tokens_per_message = val
+                changed = True
+
+            if "messages_per_day" in body:
+                val = body["messages_per_day"]
+                if not isinstance(val, int) or val < 1:
+                    self._json_response(
+                        {"error": "messages_per_day must be a positive integer"}, 400
+                    )
+                    return
+                tenant.settings.messages_per_day = val
+                changed = True
+
+            if "max_conversation_history" in body:
+                val = body["max_conversation_history"]
+                if not isinstance(val, int) or val < 1 or val > 100:
+                    self._json_response(
+                        {"error": "max_conversation_history must be 1-100"}, 400
+                    )
+                    return
+                tenant.settings.max_conversation_history = val
+                changed = True
+
+            if changed:
+                _run_async(tenants.update_tenant(tenant))
 
             self._json_response({"ok": True})
         except Exception as e:

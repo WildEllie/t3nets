@@ -211,6 +211,152 @@
             color: #6ee7b7;
         }
 
+        /* --- Skills toggle --- */
+        .skill-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .skill-item {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .skill-toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            flex-shrink: 0;
+        }
+
+        .skill-toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .skill-toggle .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #333;
+            border-radius: 22px;
+            transition: 0.2s;
+        }
+
+        .skill-toggle .slider::before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #888;
+            left: 3px;
+            bottom: 3px;
+            transition: 0.2s;
+        }
+
+        .skill-toggle input:checked + .slider {
+            background: #1d4ed8;
+        }
+
+        .skill-toggle input:checked + .slider::before {
+            transform: translateX(18px);
+            background: #fff;
+        }
+
+        .skill-info {
+            flex: 1;
+        }
+
+        .skill-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .skill-desc {
+            font-size: 12px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        .skill-integration-tag {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            background: #78350f;
+            color: #fbbf24;
+        }
+
+        /* --- Limits / form fields --- */
+        .settings-field {
+            margin-bottom: 16px;
+        }
+
+        .settings-field label {
+            display: block;
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 6px;
+        }
+
+        .settings-field input[type="number"],
+        .settings-field textarea {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            color: #e0e0e0;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .settings-field input[type="number"] {
+            max-width: 200px;
+        }
+
+        .settings-field textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .settings-field input:focus,
+        .settings-field textarea:focus {
+            border-color: #3b82f6;
+        }
+
+        .save-btn {
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .save-btn:hover {
+            background: #2563eb;
+        }
+
+        .save-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
         .toast {
             position: fixed;
             bottom: 24px;
@@ -256,6 +402,35 @@
         <div id="model-list" class="model-list">
             <!-- Populated by JS -->
         </div>
+
+        <div class="section-title" style="margin-top: 32px;">Skills</div>
+        <div id="skill-list" class="skill-list">
+            <!-- Populated by JS -->
+        </div>
+
+        <div class="section-title" style="margin-top: 32px;">Agent Settings</div>
+
+        <div class="settings-field">
+            <label for="system-prompt">System Prompt Override</label>
+            <textarea id="system-prompt" placeholder="Leave blank to use the default system prompt..."></textarea>
+        </div>
+
+        <div class="settings-field">
+            <label for="max-tokens">Max Tokens per Message</label>
+            <input type="number" id="max-tokens" min="256" max="16384" step="256">
+        </div>
+
+        <div class="settings-field">
+            <label for="messages-per-day">Messages per Day Limit</label>
+            <input type="number" id="messages-per-day" min="1" max="100000" step="1">
+        </div>
+
+        <div class="settings-field">
+            <label for="max-history">Conversation History Length</label>
+            <input type="number" id="max-history" min="1" max="100" step="1">
+        </div>
+
+        <button class="save-btn" id="save-agent-btn" onclick="saveAgentSettings()">Save Agent Settings</button>
 
         <div style="margin-top: 48px; padding-top: 16px; border-top: 1px solid #2a2a2a;">
             <span style="font-size: 12px; color: #555;">Build <span id="build-number">—</span></span>
@@ -319,11 +494,13 @@
 
         let currentModel = '';
         let provider = 'anthropic';
+        let settingsData = {};
 
         async function loadSettings() {
             try {
                 const resp = await fetch('/api/settings', { headers: getAuthHeaders() });
                 const data = await resp.json();
+                settingsData = data;
                 currentModel = data.ai_model || '';
                 provider = data.provider || 'anthropic';
                 if (data.platform) {
@@ -336,8 +513,111 @@
                     document.getElementById('build-number').textContent = data.build;
                 }
                 renderModels(data.models || []);
+                renderSkills(data.available_skills || [], data.enabled_skills || []);
+
+                // Populate agent settings fields
+                document.getElementById('system-prompt').value = data.system_prompt_override || '';
+                document.getElementById('max-tokens').value = data.max_tokens_per_message || 4096;
+                document.getElementById('messages-per-day').value = data.messages_per_day || 1000;
+                document.getElementById('max-history').value = data.max_conversation_history || 20;
             } catch (err) {
                 console.error('Failed to load settings:', err);
+            }
+        }
+
+        function renderSkills(available, enabled) {
+            const list = document.getElementById('skill-list');
+            list.innerHTML = '';
+
+            if (available.length === 0) {
+                list.innerHTML = '<div style="color:#555;font-size:13px;">No skills registered</div>';
+                return;
+            }
+
+            for (const skill of available) {
+                const isEnabled = enabled.includes(skill.name);
+                const div = document.createElement('div');
+                div.className = 'skill-item';
+
+                let tagHtml = '';
+                if (skill.requires_integration) {
+                    tagHtml = `<span class="skill-integration-tag">${skill.requires_integration}</span>`;
+                }
+
+                div.innerHTML = `
+                    <label class="skill-toggle">
+                        <input type="checkbox" data-skill="${skill.name}" ${isEnabled ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                    <div class="skill-info">
+                        <div class="skill-name">${skill.name}</div>
+                        <div class="skill-desc">${skill.description}</div>
+                    </div>
+                    ${tagHtml}
+                `;
+
+                const checkbox = div.querySelector('input[type="checkbox"]');
+                checkbox.addEventListener('change', () => toggleSkill(skill.name, checkbox.checked));
+                list.appendChild(div);
+            }
+        }
+
+        async function toggleSkill(skillName, enabled) {
+            // Collect current enabled skills from all checkboxes
+            const checkboxes = document.querySelectorAll('#skill-list input[type="checkbox"]');
+            const enabledSkills = [];
+            checkboxes.forEach(cb => {
+                if (cb.checked) enabledSkills.push(cb.dataset.skill);
+            });
+
+            try {
+                const resp = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ enabled_skills: enabledSkills }),
+                });
+                if (resp.ok) {
+                    showToast(enabled ? `${skillName} enabled` : `${skillName} disabled`);
+                } else {
+                    const err = await resp.json();
+                    showToast(err.error || 'Failed to update skills');
+                    loadSettings(); // Revert UI
+                }
+            } catch (err) {
+                showToast('Failed to update skills');
+                loadSettings();
+            }
+        }
+
+        async function saveAgentSettings() {
+            const btn = document.getElementById('save-agent-btn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+
+            const payload = {
+                system_prompt_override: document.getElementById('system-prompt').value,
+                max_tokens_per_message: parseInt(document.getElementById('max-tokens').value) || 4096,
+                messages_per_day: parseInt(document.getElementById('messages-per-day').value) || 1000,
+                max_conversation_history: parseInt(document.getElementById('max-history').value) || 20,
+            };
+
+            try {
+                const resp = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify(payload),
+                });
+                if (resp.ok) {
+                    showToast('Agent settings saved');
+                } else {
+                    const err = await resp.json();
+                    showToast(err.error || 'Failed to save settings');
+                }
+            } catch (err) {
+                showToast('Failed to save settings');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Save Agent Settings';
             }
         }
 
