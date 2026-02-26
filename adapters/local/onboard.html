@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T3nets — Setup Your Team</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: var(--bs-dark-bg-subtle); min-height: 100vh; display: flex; align-items: center; }
+        .wizard-container { max-width: 640px; margin: 0 auto; padding: 2rem 1rem; width: 100%; }
+        .wizard-header { text-align: center; margin-bottom: 2rem; }
+        .wizard-header h1 { font-size: 1.75rem; font-weight: 600; }
+        .wizard-header p { color: var(--bs-secondary-color); margin-top: 0.5rem; }
+        .wizard-progress { margin-bottom: 2rem; }
+        .wizard-steps-indicator { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.8125rem; color: var(--bs-secondary-color); }
+        .wizard-steps-indicator .step-active { color: var(--bs-primary); font-weight: 600; }
+        .wizard-steps-indicator .step-done { color: var(--bs-success); }
+        .wizard-card .card-header { font-weight: 600; font-size: 1.125rem; }
+        .wizard-nav { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+        .model-card { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; border: 2px solid var(--bs-border-color) !important; }
+        .model-card:hover { border-color: var(--bs-primary) !important; }
+        .model-card.selected { border-color: var(--bs-primary) !important; box-shadow: 0 0 0 0.15rem rgba(var(--bs-primary-rgb), 0.25); }
+        .model-name { font-weight: 600; margin-bottom: 0.25rem; }
+        .model-desc { font-size: 0.8125rem; color: var(--bs-secondary-color); }
+        .summary-item { display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid var(--bs-border-color); }
+        .summary-item:last-child { border-bottom: none; }
+        .summary-label { color: var(--bs-secondary-color); }
+        .summary-value { font-weight: 600; }
+        .step-panel { display: none; }
+        .step-panel.active { display: block; }
+    </style>
+</head>
+<body>
+    <div class="wizard-container">
+        <div class="wizard-header">
+            <h1>Welcome to T3nets</h1>
+            <p>Let's set up your team in a few quick steps.</p>
+        </div>
+
+        <div class="wizard-progress">
+            <div class="wizard-steps-indicator" id="stepIndicator">
+                <span class="step-active">Create Team</span>
+                <span>Connect Jira</span>
+                <span>AI Model</span>
+                <span>Done</span>
+            </div>
+            <div class="progress">
+                <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Step 1: Create Team -->
+        <div class="step-panel active" id="step1">
+            <div class="card wizard-card">
+                <div class="card-header">Step 1: Create Your Team</div>
+                <div class="card-body">
+                    <div id="step1Error"></div>
+                    <form id="createTeamForm" novalidate>
+                        <div class="mb-3">
+                            <label for="teamName" class="form-label">Team Name</label>
+                            <input id="teamName" class="form-control" placeholder='e.g. "Acme Engineering"' required autofocus>
+                            <div class="invalid-feedback">Team name is required.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="tenantId" class="form-label">Team ID</label>
+                            <input id="tenantId" class="form-control" required minlength="3" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]">
+                            <div class="form-text">URL-safe identifier. Lowercase letters, numbers, and hyphens only.</div>
+                            <div class="invalid-feedback">Must be 3+ chars, lowercase letters/numbers/hyphens.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="adminName" class="form-label">Your Name</label>
+                            <input id="adminName" class="form-control" placeholder="Your display name" required>
+                            <div class="invalid-feedback">Your name is required.</div>
+                        </div>
+                        <div class="mb-3" id="emailRow" style="display:none">
+                            <label class="form-label">Email</label>
+                            <input id="userEmail" class="form-control" disabled readonly>
+                            <div class="form-text">From your login. You'll be the team admin.</div>
+                        </div>
+                        <div class="wizard-nav">
+                            <div></div>
+                            <button type="submit" class="btn btn-primary" id="createBtn">Create Team &amp; Continue</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Connect Jira -->
+        <div class="step-panel" id="step2">
+            <div class="card wizard-card">
+                <div class="card-header">Step 2: Connect Jira</div>
+                <div class="card-body">
+                    <div id="step2Error"></div>
+                    <p class="text-secondary mb-3">Connect your Jira instance to enable sprint status, release notes, and other project skills.</p>
+                    <div class="mb-3">
+                        <label for="jiraUrl" class="form-label">Jira URL</label>
+                        <input id="jiraUrl" class="form-control" placeholder="https://your-team.atlassian.net">
+                    </div>
+                    <div class="mb-3">
+                        <label for="jiraEmail" class="form-label">Jira Email</label>
+                        <input id="jiraEmail" type="email" class="form-control" placeholder="you@company.com">
+                    </div>
+                    <div class="mb-3">
+                        <label for="jiraToken" class="form-label">API Token</label>
+                        <input id="jiraToken" type="password" class="form-control" placeholder="Your Jira API token">
+                        <div class="form-text">Generate one at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">Atlassian API Tokens</a></div>
+                    </div>
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-outline-secondary" id="testJiraBtn" disabled>Test Connection</button>
+                        <div id="testResult" class="connection-status"></div>
+                    </div>
+                    <div id="jiraExtraFields" style="display:none">
+                        <div class="mb-3">
+                            <label for="projectKey" class="form-label">Project Key</label>
+                            <input id="projectKey" class="form-control" placeholder='e.g. "NV" or "PROJ"'>
+                            <div class="form-text">The short prefix on your Jira issues (e.g., NV-123).</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="boardId" class="form-label">Board ID (optional)</label>
+                            <input id="boardId" class="form-control" placeholder="e.g. 42">
+                            <div class="form-text">Found in your board URL: /board/42</div>
+                        </div>
+                    </div>
+                    <div class="wizard-nav">
+                        <button type="button" class="btn btn-link text-secondary" onclick="goBack()">Back</button>
+                        <div>
+                            <button type="button" class="btn btn-link me-2" onclick="skipJira()">Skip for now</button>
+                            <button type="button" class="btn btn-primary" id="saveJiraBtn" disabled>Save &amp; Continue</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Choose AI Model -->
+        <div class="step-panel" id="step3">
+            <div class="card wizard-card">
+                <div class="card-header">Step 3: Choose AI Model</div>
+                <div class="card-body">
+                    <div id="step3Error"></div>
+                    <p class="text-secondary mb-3">Choose the AI model your team will use. You can change this later in Settings.</p>
+                    <div class="row g-3 mb-3" id="modelGrid"></div>
+                    <div class="wizard-nav">
+                        <button type="button" class="btn btn-link text-secondary" onclick="goBack()">Back</button>
+                        <div>
+                            <button type="button" class="btn btn-link me-2" onclick="skipModel()">Use default</button>
+                            <button type="button" class="btn btn-primary" id="saveModelBtn">Continue</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Complete -->
+        <div class="step-panel" id="step4">
+            <div class="card wizard-card">
+                <div class="card-header">Setup Complete</div>
+                <div class="card-body" id="step4Content">
+                    <div class="text-center py-4">
+                        <div class="spinner-border" role="status"></div>
+                        <p class="mt-3 text-secondary">Finalizing your setup...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // === State ===
+    const state = {
+        currentStep: 0,
+        tenantId: '',
+        teamName: '',
+        adminName: '',
+        email: '',
+        cognitoSub: '',
+        jira: null,
+        aiModel: '',
+        defaultModel: '',
+        idEdited: false,
+    };
+
+    // === JWT helpers ===
+    function getJwtClaims() {
+        const token = localStorage.getItem('t3nets_id_token');
+        if (!token) return null;
+        try {
+            const payload = token.split('.')[1];
+            return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+        } catch { return null; }
+    }
+
+    function getAuthHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = localStorage.getItem('t3nets_id_token');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return headers;
+    }
+
+    // === API helpers ===
+    async function apiPost(url, data) {
+        const res = await fetch(url, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(data) });
+        return res.json();
+    }
+    async function apiPut(url, data) {
+        const res = await fetch(url, { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(data) });
+        return res.json();
+    }
+    async function apiPatch(url, data) {
+        const res = await fetch(url, { method: 'PATCH', headers: getAuthHeaders(), body: JSON.stringify(data || {}) });
+        return res.json();
+    }
+    async function apiGet(url) {
+        const res = await fetch(url, { headers: getAuthHeaders() });
+        return res.json();
+    }
+
+    // === Step navigation ===
+    function goToStep(n) {
+        document.querySelectorAll('.step-panel').forEach(el => el.classList.remove('active'));
+        document.getElementById(`step${n + 1}`).classList.add('active');
+        state.currentStep = n;
+        updateIndicator();
+    }
+
+    function updateIndicator() {
+        const steps = document.querySelectorAll('#stepIndicator span');
+        steps.forEach((el, i) => {
+            el.className = i === state.currentStep ? 'step-active' : i < state.currentStep ? 'step-done' : '';
+        });
+        const progress = Math.round((state.currentStep / 3) * 100);
+        document.getElementById('progressBar').style.width = `${progress}%`;
+    }
+
+    function goBack() { goToStep(state.currentStep - 1); }
+
+    function showError(stepId, msg) {
+        const el = document.getElementById(stepId);
+        el.innerHTML = msg ? `<div class="alert alert-danger alert-dismissible">${msg}<button type="button" class="btn-close" onclick="this.parentElement.remove()"></button></div>` : '';
+    }
+
+    function setLoading(btn, loading, text) {
+        if (loading) {
+            btn.disabled = true;
+            btn.dataset.origText = btn.innerHTML;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${text || 'Loading...'}`;
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = btn.dataset.origText || text;
+        }
+    }
+
+    // === Step 1: Create Team ===
+    const teamNameInput = document.getElementById('teamName');
+    const tenantIdInput = document.getElementById('tenantId');
+
+    teamNameInput.addEventListener('input', () => {
+        if (!state.idEdited) {
+            tenantIdInput.value = teamNameInput.value.toLowerCase()
+                .replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-')
+                .replace(/-+/g, '-').replace(/^-|-$/g, '');
+        }
+    });
+
+    tenantIdInput.addEventListener('input', () => { state.idEdited = true; });
+
+    document.getElementById('createTeamForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        e.target.classList.add('was-validated');
+
+        const teamName = teamNameInput.value.trim();
+        const tenantId = tenantIdInput.value.trim();
+        const adminName = document.getElementById('adminName').value.trim();
+
+        if (!teamName || !tenantId || !adminName || tenantId.length < 3) return;
+
+        const btn = document.getElementById('createBtn');
+        setLoading(btn, true, 'Creating...');
+        showError('step1Error', '');
+
+        try {
+            const result = await apiPost('/api/admin/tenants', {
+                tenant_id: tenantId,
+                name: teamName,
+                status: 'onboarding',
+                admin_user: {
+                    display_name: adminName,
+                    email: state.email,
+                    cognito_sub: state.cognitoSub,
+                },
+            });
+
+            if (result.error) {
+                showError('step1Error', result.error);
+                setLoading(btn, false, 'Create Team &amp; Continue');
+                return;
+            }
+
+            state.tenantId = tenantId;
+            state.teamName = teamName;
+            state.adminName = adminName;
+            goToStep(1);
+        } catch (err) {
+            showError('step1Error', err.message || 'Failed to create team');
+        }
+        setLoading(btn, false, 'Create Team &amp; Continue');
+    });
+
+    // === Step 2: Connect Jira ===
+    const jiraFields = ['jiraUrl', 'jiraEmail', 'jiraToken'];
+    jiraFields.forEach(id => {
+        document.getElementById(id).addEventListener('input', () => {
+            const canTest = jiraFields.every(f => document.getElementById(f).value.trim());
+            document.getElementById('testJiraBtn').disabled = !canTest;
+        });
+    });
+
+    document.getElementById('testJiraBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('testJiraBtn');
+        setLoading(btn, true, 'Testing...');
+        document.getElementById('testResult').innerHTML = '';
+
+        try {
+            const result = await apiPost('/api/integrations/jira/test', {
+                url: document.getElementById('jiraUrl').value.trim(),
+                email: document.getElementById('jiraEmail').value.trim(),
+                api_token: document.getElementById('jiraToken').value.trim(),
+                tenant_id: state.tenantId,
+            });
+
+            if (result.ok) {
+                document.getElementById('testResult').innerHTML =
+                    `<div class="alert alert-success mt-2 mb-0 py-2">Connected as ${result.display_name || result.user}</div>`;
+                document.getElementById('jiraExtraFields').style.display = 'block';
+                document.getElementById('projectKey').addEventListener('input', () => {
+                    document.getElementById('saveJiraBtn').disabled = !document.getElementById('projectKey').value.trim();
+                });
+            } else {
+                document.getElementById('testResult').innerHTML =
+                    `<div class="alert alert-danger mt-2 mb-0 py-2">${result.error || 'Connection failed'}</div>`;
+            }
+        } catch (err) {
+            document.getElementById('testResult').innerHTML =
+                `<div class="alert alert-danger mt-2 mb-0 py-2">${err.message}</div>`;
+        }
+        setLoading(btn, false, 'Test Connection');
+    });
+
+    document.getElementById('saveJiraBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('saveJiraBtn');
+        setLoading(btn, true, 'Saving...');
+        showError('step2Error', '');
+
+        const creds = {
+            url: document.getElementById('jiraUrl').value.trim().replace(/\/+$/, ''),
+            email: document.getElementById('jiraEmail').value.trim(),
+            api_token: document.getElementById('jiraToken').value.trim(),
+            project_key: document.getElementById('projectKey').value.trim(),
+            tenant_id: state.tenantId,
+        };
+        const boardId = document.getElementById('boardId').value.trim();
+        if (boardId) creds.board_id = boardId;
+
+        try {
+            const result = await apiPost('/api/integrations/jira', creds);
+            if (result.error) {
+                showError('step2Error', result.error);
+                setLoading(btn, false, 'Save &amp; Continue');
+                return;
+            }
+            state.jira = { url: creds.url, email: creds.email, projectKey: creds.project_key, boardId };
+            goToStep(2);
+            loadModels();
+        } catch (err) {
+            showError('step2Error', err.message);
+        }
+        setLoading(btn, false, 'Save &amp; Continue');
+    });
+
+    function skipJira() {
+        state.jira = null;
+        goToStep(2);
+        loadModels();
+    }
+
+    // === Step 3: Choose AI Model ===
+    const MODEL_HINTS = { claude: 'Best quality, higher cost', nova: 'Fast & affordable', llama: 'Open-source, basic tasks' };
+
+    function getModelHint(id) {
+        for (const [k, v] of Object.entries(MODEL_HINTS)) {
+            if (id.toLowerCase().includes(k)) return v;
+        }
+        return '';
+    }
+
+    async function loadModels() {
+        const grid = document.getElementById('modelGrid');
+        grid.innerHTML = '<div class="col-12 text-center py-3"><div class="spinner-border spinner-border-sm"></div> Loading models...</div>';
+
+        try {
+            const settings = await apiGet('/api/settings');
+            const models = settings.models || [];
+            state.defaultModel = settings.ai_model || '';
+            state.aiModel = settings.ai_model || '';
+
+            if (models.length === 0) {
+                grid.innerHTML = '<div class="col-12"><div class="alert alert-info">No models available. The default will be used.</div></div>';
+                return;
+            }
+
+            grid.innerHTML = models.map(m => `
+                <div class="col-12 col-sm-6">
+                    <div class="card model-card ${m.id === state.aiModel ? 'selected' : ''}" data-model-id="${m.id}" onclick="selectModel('${m.id}')">
+                        <div class="card-body p-3">
+                            <div class="model-name">
+                                ${m.display_name || m.short_name || m.id}
+                                ${m.id === state.defaultModel ? '<span class="badge bg-primary ms-2">Default</span>' : ''}
+                            </div>
+                            <div class="model-desc">${getModelHint(m.id)}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        } catch {
+            grid.innerHTML = '<div class="col-12"><div class="alert alert-warning">Could not load models.</div></div>';
+        }
+    }
+
+    function selectModel(id) {
+        state.aiModel = id;
+        document.querySelectorAll('.model-card').forEach(el => {
+            el.classList.toggle('selected', el.dataset.modelId === id);
+        });
+    }
+
+    document.getElementById('saveModelBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('saveModelBtn');
+        setLoading(btn, true, 'Saving...');
+        showError('step3Error', '');
+
+        try {
+            if (state.aiModel && state.aiModel !== state.defaultModel) {
+                const result = await apiPut(`/api/admin/tenants/${state.tenantId}`, { ai_model: state.aiModel });
+                if (result.error) {
+                    showError('step3Error', result.error);
+                    setLoading(btn, false, 'Continue');
+                    return;
+                }
+            }
+            goToStep(3);
+            finalizeSetup();
+        } catch (err) {
+            showError('step3Error', err.message);
+            setLoading(btn, false, 'Continue');
+        }
+    });
+
+    function skipModel() {
+        state.aiModel = state.defaultModel;
+        goToStep(3);
+        finalizeSetup();
+    }
+
+    // === Step 4: Finalize ===
+    async function finalizeSetup() {
+        const content = document.getElementById('step4Content');
+        try {
+            // Activate tenant
+            const activateResult = await apiPatch(`/api/admin/tenants/${state.tenantId}/activate`);
+            if (activateResult.error) {
+                content.innerHTML = `<div class="alert alert-danger">${activateResult.error}</div>
+                    <div class="text-center"><button class="btn btn-primary" onclick="goToChat()">Go to Chat anyway</button></div>`;
+                return;
+            }
+
+            // Show success — tenant is resolved from DynamoDB, no JWT refresh needed
+            content.innerHTML = `
+                <div class="text-center mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="currentColor" class="text-success" viewBox="0 0 16 16">
+                        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+                    </svg>
+                    <h4 class="mt-3">You're all set!</h4>
+                    <p class="text-secondary">Your team <strong>${state.teamName}</strong> is ready to go.</p>
+                </div>
+                <div class="mb-4">
+                    <div class="summary-item"><span class="summary-label">Team</span><span class="summary-value">${state.teamName}</span></div>
+                    <div class="summary-item"><span class="summary-label">Team ID</span><span class="summary-value">${state.tenantId}</span></div>
+                    <div class="summary-item"><span class="summary-label">Admin</span><span class="summary-value">${state.adminName} (${state.email || 'local'})</span></div>
+                    <div class="summary-item"><span class="summary-label">Jira</span><span class="summary-value">${state.jira ? 'Connected (' + state.jira.projectKey + ')' : 'Not connected'}</span></div>
+                    <div class="summary-item"><span class="summary-label">AI Model</span><span class="summary-value">${state.aiModel || 'Default'}</span></div>
+                </div>
+                <div class="text-center">
+                    <button class="btn btn-primary btn-lg" onclick="goToChat()">Go to Chat</button>
+                </div>`;
+        } catch (err) {
+            content.innerHTML = `<div class="alert alert-danger">${err.message || 'Failed to finalize setup'}</div>
+                <div class="text-center"><button class="btn btn-primary" onclick="goToChat()">Go to Chat anyway</button></div>`;
+        }
+    }
+
+    function goToChat() {
+        window.location.href = '/chat';
+    }
+
+    // === Init ===
+    (function init() {
+        const claims = getJwtClaims();
+        if (!claims || !claims.sub) {
+            // No valid token — must login first before onboarding
+            window.location.href = '/login';
+            return;
+        }
+        state.email = claims.email || '';
+        state.cognitoSub = claims.sub || '';
+        if (state.email) {
+            document.getElementById('emailRow').style.display = 'block';
+            document.getElementById('userEmail').value = state.email;
+        }
+    })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,1629 @@
+"""
+T3nets AWS Server Entrypoint
+
+Same HTTP server as local, but wired to AWS adapters:
+  - Bedrock instead of direct Anthropic API
+  - DynamoDB instead of SQLite
+  - Secrets Manager instead of .env
+  - DirectBus (still synchronous for Phase 1)
+
+Runs inside ECS Fargate container.
+
+Usage:
+    python -m adapters.aws.server
+"""
+
+import asyncio
+import json
+import logging
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from urllib.parse import urlparse
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from agent.skills.registry import SkillRegistry
+from agent.channels.base import ChannelRegistry
+from agent.channels.dashboard import DashboardAdapter
+from agent.models.message import ChannelType
+from agent.router.rule_router import RuleBasedRouter, strip_raw_flag
+from adapters.aws.bedrock_provider import BedrockProvider
+from adapters.aws.dynamodb_conversation_store import DynamoDBConversationStore
+from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
+from adapters.aws.secrets_manager import SecretsManagerProvider
+from adapters.aws.auth_middleware import extract_auth, AuthError
+from adapters.aws.admin_api import AdminAPI
+from adapters.local.direct_bus import DirectBus  # Reuse synchronous bus for Phase 1
+from agent.models.tenant import Invitation
+from agent.channels.teams import TeamsAdapter
+from agent.errors.handler import ErrorHandler
+from agent.models.ai_models import (
+    DEFAULT_MODEL_ID,
+    get_model,
+    get_model_for_provider,
+    get_models_for_provider,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+logger = logging.getLogger("t3nets.aws")
+
+# --- Global state ---
+ai: BedrockProvider
+memory: DynamoDBConversationStore
+tenants: DynamoDBTenantStore
+secrets: SecretsManagerProvider
+skills: SkillRegistry
+bus: DirectBus
+rule_router: RuleBasedRouter
+admin_api: AdminAPI
+error_handler: ErrorHandler
+started_at: float = 0.0
+
+DEFAULT_TENANT = "default"
+BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]  # full inference profile ID from Terraform
+PROVIDER = "bedrock"
+PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")  # aws, gcp, azure
+STAGE = os.environ.get("T3NETS_STAGE", "dev")  # dev, staging, prod — set by Terraform
+
+# Integration field schemas — defines the config form per integration type.
+INTEGRATION_SCHEMAS: dict = {
+    "jira": {
+        "label": "Jira",
+        "fields": [
+            {
+                "key": "url",
+                "label": "Jira URL",
+                "type": "url",
+                "required": True,
+                "placeholder": "https://yourteam.atlassian.net",
+            },
+            {
+                "key": "email",
+                "label": "Email",
+                "type": "email",
+                "required": True,
+                "placeholder": "admin@company.com",
+            },
+            {
+                "key": "api_token",
+                "label": "API Token",
+                "type": "password",
+                "required": True,
+                "placeholder": "Your Jira API token",
+            },
+            {
+                "key": "project_key",
+                "label": "Project Key",
+                "type": "text",
+                "required": True,
+                "placeholder": "PROJ",
+            },
+            {
+                "key": "board_id",
+                "label": "Board ID",
+                "type": "text",
+                "required": False,
+                "placeholder": "Optional — for sprint queries",
+            },
+        ],
+    },
+    "github": {
+        "label": "GitHub",
+        "fields": [
+            {
+                "key": "token",
+                "label": "Personal Access Token",
+                "type": "password",
+                "required": True,
+                "placeholder": "ghp_...",
+            },
+            {
+                "key": "org",
+                "label": "Organization",
+                "type": "text",
+                "required": True,
+                "placeholder": "your-org",
+            },
+        ],
+    },
+    "teams": {
+        "label": "Microsoft Teams",
+        "fields": [
+            {
+                "key": "app_id",
+                "label": "Bot App ID",
+                "type": "text",
+                "required": True,
+                "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+            },
+            {
+                "key": "app_secret",
+                "label": "Bot App Secret",
+                "type": "password",
+                "required": True,
+                "placeholder": "Your bot client secret",
+            },
+            {
+                "key": "azure_tenant_id",
+                "label": "Azure AD Tenant ID",
+                "type": "text",
+                "required": False,
+                "placeholder": "Leave blank for multi-tenant bots",
+            },
+        ],
+    },
+}
+
+# Build number — read from version.txt at startup
+_version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
+BUILD_NUMBER = _version_path.read_text().strip() if _version_path.exists() else "0"
+
+# Cognito (set by Terraform → ECS env vars)
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
+COGNITO_APP_CLIENT_ID = os.environ.get("COGNITO_APP_CLIENT_ID", "")
+COGNITO_AUTH_DOMAIN = os.environ.get("COGNITO_AUTH_DOMAIN", "")
+
+stats = {
+    "rule_routed": 0,
+    "ai_routed": 0,
+    "conversational": 0,
+    "raw": 0,
+    "errors": 0,
+    "total_tokens": 0,
+}
+
+
+def _run_async(coro):
+    return asyncio.run(coro)
+
+
+def _format_raw_json(data: dict) -> str:
+    return json.dumps(data, indent=2, default=str)
+
+
+def _bedrock_geo_prefix() -> str:
+    """Map AWS region to Bedrock geographic inference profile prefix.
+
+    Newer models (Sonnet 4.5+, Nova) require geographic prefixes (us., eu., apac.),
+    NOT region-specific ones (us-east-1.).
+    """
+    region = os.environ.get("AWS_REGION", AWS_REGION)
+    if region.startswith("us-") or region.startswith("ca-") or region.startswith("sa-"):
+        return "us"
+    elif region.startswith("eu-"):
+        return "eu"
+    elif region.startswith("ap-"):
+        return "apac"
+    return "us"
+
+
+def _resolve_model(tenant):
+    """Resolve tenant's ai_model to a Bedrock inference profile ID and short name."""
+    model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
+    model = get_model(model_id)
+    if not model:
+        # Unknown model in tenant settings — fall back to registry default
+        logger.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL_ID}")
+        model_id = DEFAULT_MODEL_ID
+        model = get_model(model_id)
+    bedrock_id = get_model_for_provider(model_id, PROVIDER)
+    if bedrock_id:
+        geo = _bedrock_geo_prefix()
+        full_id = f"{geo}.{bedrock_id}"
+        logger.info(f"Resolved model: {model_id} → {full_id}")
+        return full_id, model.short_name
+    # Fallback: use the env var model ID directly
+    return BEDROCK_MODEL_ID, model.short_name
+
+
+def _strip_metadata(messages: list[dict]) -> list[dict]:
+    """Strip metadata from conversation history before sending to the AI provider."""
+    return [{"role": m["role"], "content": m["content"]} for m in messages]
+
+
+def _get_auth_info(headers) -> tuple[str, str]:
+    """Extract (tenant_id, user_email) from JWT in Authorization header.
+
+    Resolution: DynamoDB lookup by IdP sub → DEFAULT_TENANT.
+    The email is always extracted from the JWT payload (never lost).
+    """
+    if not COGNITO_USER_POOL_ID:
+        return DEFAULT_TENANT, ""
+    try:
+        auth = extract_auth(headers)
+        email = auth.email
+
+        # Look up user in DynamoDB by IdP sub
+        try:
+            user = _run_async(tenants.get_user_by_cognito_sub(auth.user_id))
+            if user:
+                logger.info(
+                    f"Resolved tenant '{user.tenant_id}' from DynamoDB "
+                    f"for sub {auth.user_id[:8]}..."
+                )
+                return user.tenant_id, email
+        except Exception as e:
+            logger.warning(f"DynamoDB sub lookup failed: {e}")
+
+        # User not found — new user, needs onboarding
+        return DEFAULT_TENANT, email
+    except AuthError:
+        return DEFAULT_TENANT, ""
+
+
+def _uptime_human(seconds: float) -> str:
+    s = int(seconds)
+    if s < 60: return f"{s}s"
+    elif s < 3600: return f"{s // 60}m {s % 60}s"
+    elif s < 86400: return f"{s // 3600}h {(s % 3600) // 60}m"
+    else: return f"{s // 86400}d {(s % 86400) // 3600}h"
+
+
+class AWSHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for AWS deployment."""
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/" or path == "/chat":
+            self._serve_file("chat.html", "adapters/local")
+        elif path == "/health":
+            self._serve_file("health.html", "adapters/local")
+        elif path == "/settings":
+            self._serve_file("settings.html", "adapters/local")
+        elif path == "/login":
+            self._serve_file("login.html", "adapters/local")
+        elif path == "/callback":
+            self._serve_file("callback.html", "adapters/local")
+        elif path == "/onboard":
+            self._serve_file("onboard.html", "adapters/local")
+        elif path == "/api/health":
+            self._handle_health_api()
+        elif path == "/api/settings":
+            self._handle_settings_get()
+        elif path == "/api/history":
+            self._handle_history()
+        elif path == "/api/auth/config":
+            self._handle_auth_config()
+        elif path == "/api/auth/me":
+            self._handle_auth_me()
+        elif path == "/api/integrations":
+            self._handle_integrations_list()
+        elif path.startswith("/api/integrations/"):
+            self._handle_integration_get(path)
+        elif path == "/api/invitations/validate":
+            self._handle_invitation_validate()
+        elif path.startswith("/api/admin/"):
+            self._handle_admin("GET", path)
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/api/channels/teams/webhook":
+            self._handle_teams_webhook()
+        elif path == "/api/chat":
+            self._handle_chat()
+        elif path == "/api/clear":
+            self._handle_clear()
+        elif path == "/api/settings":
+            self._handle_settings_post()
+        elif path.startswith("/api/integrations/"):
+            self._handle_integrations_post(path)
+        elif path == "/api/auth/login":
+            self._handle_auth_login()
+        elif path == "/api/auth/signup":
+            self._handle_auth_signup()
+        elif path == "/api/auth/confirm":
+            self._handle_auth_confirm()
+        elif path == "/api/auth/refresh":
+            self._handle_auth_refresh()
+        elif path == "/api/auth/forgot-password":
+            self._handle_auth_forgot_password()
+        elif path == "/api/auth/confirm-reset":
+            self._handle_auth_confirm_reset()
+        elif path == "/api/invitations/accept":
+            self._handle_invitation_accept()
+        elif path.startswith("/api/admin/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_admin("POST", path, body)
+        else:
+            self.send_error(404)
+
+    def do_PUT(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_admin("PUT", path, body)
+        else:
+            self.send_error(404)
+
+    def do_DELETE(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/"):
+            self._handle_admin("DELETE", path)
+        else:
+            self.send_error(404)
+
+    def do_PATCH(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/admin/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_admin("PATCH", path, body)
+        else:
+            self.send_error(404)
+
+    def _handle_admin(self, method: str, path: str, body: dict | None = None):
+        """Delegate to admin API."""
+        data, status = admin_api.handle_request(method, path, self.headers, body)
+        self._json_response(data, status)
+
+    def _handle_health_api(self):
+        try:
+            uptime_secs = time.time() - started_at
+            tenant = _run_async(tenants.get_tenant(DEFAULT_TENANT))
+            connected = _run_async(secrets.list_integrations(DEFAULT_TENANT))
+
+            health = {
+                "status": "ok",
+                "platform": PLATFORM,
+                "stage": STAGE,
+                "started_at": datetime.fromtimestamp(started_at, tz=timezone.utc).isoformat(),
+                "uptime_seconds": round(uptime_secs, 1),
+                "uptime_human": _uptime_human(uptime_secs),
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                "tenant": {
+                    "tenant_id": tenant.tenant_id,
+                    "name": tenant.name,
+                    "status": tenant.status,
+                    "enabled_skills": tenant.settings.enabled_skills,
+                    "ai_model": tenant.settings.ai_model,
+                },
+                "ai": {
+                    "provider": "bedrock",
+                    "model": _resolve_model(tenant)[0],
+                    "api_key_preview": "IAM role (no key)",
+                    "total_tokens": stats["total_tokens"],
+                },
+                "routing": stats,
+                "integrations": {
+                    name: {"connected": name in connected}
+                    for name in ["jira", "github", "teams", "twilio"]
+                },
+                "skills": [
+                    {
+                        "name": s.name,
+                        "description": s.description.strip()[:120],
+                        "requires_integration": s.requires_integration,
+                        "supports_raw": s.supports_raw,
+                        "triggers": s.triggers[:8],
+                    }
+                    for s in skills.list_skills()
+                ],
+            }
+            self._json_response(health)
+        except Exception as e:
+            logger.exception("Health check error")
+            self._json_response({"status": "error", "error": str(e)}, 500)
+
+    def _handle_integrations_post(self, path: str):
+        """Handle POST /api/integrations/{name} and /api/integrations/{name}/test."""
+        try:
+            parts = path.rstrip("/").split("/")
+            # /api/integrations/{name}/test or /api/integrations/{name}
+            is_test = parts[-1] == "test"
+            integration_name = parts[-2] if is_test else parts[-1]
+
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+
+            # During onboarding the JWT may not yet have custom:tenant_id,
+            # so accept tenant_id from the request body as a fallback.
+            tenant_id, _ = _get_auth_info(self.headers)
+            if tenant_id == DEFAULT_TENANT and body.get("tenant_id"):
+                tenant_id = body["tenant_id"]
+
+            if is_test:
+                result = self._test_integration(integration_name, body)
+                self._json_response(result, 200 if result.get("ok") else 400)
+            else:
+                _run_async(secrets.put(tenant_id, integration_name, body))
+                logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
+                self._json_response({"ok": True})
+        except Exception as e:
+            logger.exception("Integration endpoint error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _test_integration(self, name: str, creds: dict) -> dict:
+        """Test integration credentials by making a real API call."""
+        if name == "jira":
+            return self._test_jira(creds)
+        return {"ok": False, "error": f"Testing not supported for '{name}'"}
+
+    def _test_jira(self, creds: dict) -> dict:
+        """Validate Jira credentials by calling /rest/api/3/myself."""
+        import urllib.request
+        import base64
+
+        url = creds.get("url", "").rstrip("/")
+        email = creds.get("email", "")
+        api_token = creds.get("api_token", "")
+
+        if not all([url, email, api_token]):
+            return {"ok": False, "error": "url, email, and api_token are required"}
+
+        try:
+            auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+            req = urllib.request.Request(
+                f"{url}/rest/api/3/myself",
+                headers={
+                    "Authorization": f"Basic {auth}",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                return {
+                    "ok": True,
+                    "user": data.get("emailAddress", email),
+                    "display_name": data.get("displayName", ""),
+                }
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "error": f"Jira returned {e.code}: {e.reason}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _handle_auth_login(self):
+        """Authenticate user via Cognito InitiateAuth (USER_PASSWORD_AUTH).
+
+        Replaces the Cognito Hosted UI redirect — credentials are submitted
+        directly from the login form and exchanged for tokens server-side.
+        """
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            password = body.get("password", "")
+
+            if not email or not password:
+                self._json_response({"error": "Email and password are required"}, 400)
+                return
+
+            if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            result = client.initiate_auth(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                AuthFlow="USER_PASSWORD_AUTH",
+                AuthParameters={
+                    "USERNAME": email,
+                    "PASSWORD": password,
+                },
+            )
+
+            # Handle Cognito challenges (e.g. FORCE_CHANGE_PASSWORD users)
+            challenge = result.get("ChallengeName", "")
+            if challenge:
+                logger.warning(f"Auth login challenge: {challenge} for {email}")
+                self._json_response(
+                    {"error": f"Account requires action: {challenge}", "code": challenge},
+                    403,
+                )
+                return
+
+            auth_result = result.get("AuthenticationResult", {})
+            self._json_response({
+                "id_token": auth_result.get("IdToken", ""),
+                "access_token": auth_result.get("AccessToken", ""),
+                "refresh_token": auth_result.get("RefreshToken", ""),
+            })
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "NotAuthorizedException":
+                self._json_response({"error": "Invalid email or password"}, 401)
+            elif err_code == "UserNotConfirmedException":
+                self._json_response(
+                    {"error": "Email not verified", "code": "USER_NOT_CONFIRMED"}, 403
+                )
+            elif err_code == "UserNotFoundException":
+                self._json_response({"error": "Invalid email or password"}, 401)
+            elif err_code == "PasswordResetRequiredException":
+                self._json_response(
+                    {"error": "Password reset required", "code": "PASSWORD_RESET_REQUIRED"},
+                    403,
+                )
+            else:
+                logger.exception("Auth login error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_forgot_password(self):
+        """Initiate password reset — sends a verification code to the user's email."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+
+            if not email:
+                self._json_response({"error": "Email is required"}, 400)
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            client.forgot_password(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+            )
+
+            # Always return success — don't leak whether the email exists
+            self._json_response({"message": "Reset code sent"})
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code in ("UserNotFoundException", "InvalidParameterException"):
+                # Don't leak email existence
+                self._json_response({"message": "Reset code sent"})
+            elif err_code == "LimitExceededException":
+                self._json_response(
+                    {"error": "Too many attempts. Please try again later."}, 429
+                )
+            else:
+                logger.exception("Auth forgot-password error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_confirm_reset(self):
+        """Complete password reset with verification code and new password."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            code = body.get("code", "").strip()
+            new_password = body.get("new_password", "")
+
+            if not email or not code or not new_password:
+                self._json_response(
+                    {"error": "Email, code, and new password are required"}, 400
+                )
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            client.confirm_forgot_password(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+                ConfirmationCode=code,
+                Password=new_password,
+            )
+
+            self._json_response({"message": "Password reset successful"})
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "CodeMismatchException":
+                self._json_response({"error": "Invalid verification code"}, 400)
+            elif err_code == "ExpiredCodeException":
+                self._json_response({"error": "Verification code has expired"}, 400)
+            elif err_code == "InvalidPasswordException":
+                msg = getattr(e, "response", {}).get("Error", {}).get("Message", str(e))
+                self._json_response({"error": msg}, 400)
+            else:
+                logger.exception("Auth confirm-reset error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_signup(self):
+        """Register a new user via Cognito SignUp."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            password = body.get("password", "")
+            name = body.get("name", "").strip()
+
+            if not email or not password:
+                self._json_response({"error": "Email and password are required"}, 400)
+                return
+
+            if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            user_attrs = [
+                {"Name": "email", "Value": email},
+                {"Name": "name", "Value": name or email.split("@")[0]},
+            ]
+            result = client.sign_up(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+                Password=password,
+                UserAttributes=user_attrs,
+            )
+
+            self._json_response({
+                "user_sub": result.get("UserSub", ""),
+                "confirmed": result.get("UserConfirmed", False),
+            }, 201)
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "UsernameExistsException":
+                self._json_response(
+                    {"error": "An account with this email already exists"}, 409
+                )
+            elif err_code == "InvalidPasswordException":
+                msg = getattr(e, "response", {}).get("Error", {}).get("Message", str(e))
+                self._json_response({"error": msg}, 400)
+            else:
+                logger.exception("Auth signup error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_confirm(self):
+        """Confirm a user's email with the verification code."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            email = body.get("email", "").strip()
+            code = body.get("code", "").strip()
+
+            if not email or not code:
+                self._json_response({"error": "Email and code are required"}, 400)
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            client.confirm_sign_up(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                Username=email,
+                ConfirmationCode=code,
+            )
+
+            self._json_response({"ok": True})
+
+        except Exception as e:
+            err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+            if err_code == "CodeMismatchException":
+                self._json_response({"error": "Invalid verification code"}, 400)
+            elif err_code == "ExpiredCodeException":
+                self._json_response({"error": "Verification code has expired"}, 400)
+            else:
+                logger.exception("Auth confirm error")
+                self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_refresh(self):
+        """Refresh tokens using a refresh token."""
+        try:
+            body = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+            )
+            refresh_token = body.get("refresh_token", "")
+
+            if not refresh_token:
+                self._json_response({"error": "refresh_token is required"}, 400)
+                return
+
+            if not COGNITO_APP_CLIENT_ID:
+                self._json_response({"error": "Auth not configured"}, 500)
+                return
+
+            import boto3
+            client = boto3.client("cognito-idp", region_name=AWS_REGION)
+            result = client.initiate_auth(
+                ClientId=COGNITO_APP_CLIENT_ID,
+                AuthFlow="REFRESH_TOKEN_AUTH",
+                AuthParameters={
+                    "REFRESH_TOKEN": refresh_token,
+                },
+            )
+
+            auth_result = result.get("AuthenticationResult", {})
+            self._json_response({
+                "id_token": auth_result.get("IdToken", ""),
+                "access_token": auth_result.get("AccessToken", ""),
+            })
+
+        except Exception as e:
+            logger.exception("Auth refresh error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_auth_config(self):
+        """Return Cognito config for the frontend login flow."""
+        self._json_response({
+            "enabled": bool(COGNITO_USER_POOL_ID),
+            "client_id": COGNITO_APP_CLIENT_ID,
+            "auth_domain": COGNITO_AUTH_DOMAIN,
+            "user_pool_id": COGNITO_USER_POOL_ID,
+        })
+
+    def _handle_auth_me(self):
+        """Return current authenticated user info, including tenant status.
+
+        Resolves tenant from DynamoDB by IdP sub. If no user found,
+        returns empty tenant_id so the frontend redirects to onboarding.
+        """
+        if not COGNITO_USER_POOL_ID:
+            self._json_response({
+                "authenticated": False,
+                "tenant_id": DEFAULT_TENANT,
+                "tenant_status": "active",
+            })
+            return
+        try:
+            auth = extract_auth(self.headers)
+            email = auth.email
+            tenant_id = ""
+            display_name = ""
+            avatar_url = ""
+            tenant_status = "onboarding"
+
+            # Look up user in DynamoDB by IdP sub
+            try:
+                user = _run_async(tenants.get_user_by_cognito_sub(auth.user_id))
+                if user:
+                    tenant_id = user.tenant_id
+                    email = email or user.email
+                    display_name = user.display_name
+                    avatar_url = user.avatar_url
+                    logger.info(
+                        f"auth/me: resolved tenant '{tenant_id}' from DynamoDB "
+                        f"for sub {auth.user_id[:8]}..."
+                    )
+            except Exception as e:
+                logger.warning(f"auth/me DynamoDB lookup failed: {e}")
+
+            # Determine tenant status and name
+            tenant_name = ""
+            if tenant_id:
+                try:
+                    tenant = _run_async(tenants.get_tenant(tenant_id))
+                    tenant_status = tenant.status
+                    tenant_name = tenant.name
+                except Exception:
+                    tenant_status = "active"
+
+            self._json_response({
+                "authenticated": True,
+                "user_id": auth.user_id,
+                "tenant_id": tenant_id,
+                "email": email,
+                "display_name": display_name,
+                "avatar_url": avatar_url,
+                "tenant_status": tenant_status,
+                "tenant_name": tenant_name,
+            })
+        except AuthError as e:
+            self._json_response({"error": e.message}, e.status)
+
+    def _handle_integrations_list(self):
+        """GET /api/integrations — list all integrations with status and field schemas."""
+        try:
+            tenant_id, _ = _get_auth_info(self.headers)
+            connected = _run_async(secrets.list_integrations(tenant_id))
+            result = []
+            for name, schema in INTEGRATION_SCHEMAS.items():
+                result.append({
+                    "name": name,
+                    "label": schema["label"],
+                    "connected": name in connected,
+                    "fields": schema["fields"],
+                })
+            self._json_response(result)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_integration_get(self, path: str):
+        """GET /api/integrations/{name} — return current config with sensitive fields masked."""
+        try:
+            tenant_id, _ = _get_auth_info(self.headers)
+            integration_name = path.rstrip("/").split("/")[-1]
+            if integration_name not in INTEGRATION_SCHEMAS:
+                self._json_response(
+                    {"error": f"Unknown integration: {integration_name}"}, 404
+                )
+                return
+
+            schema = INTEGRATION_SCHEMAS[integration_name]
+            connected = False
+            config = {}
+            try:
+                stored = _run_async(secrets.get(tenant_id, integration_name))
+                connected = True
+                password_keys = {
+                    f["key"] for f in schema["fields"] if f["type"] == "password"
+                }
+                for key, value in stored.items():
+                    if key in password_keys and value:
+                        config[key] = "\u2022" * 8
+                    else:
+                        config[key] = value
+            except Exception:
+                pass
+
+            self._json_response({
+                "name": integration_name,
+                "label": schema["label"],
+                "connected": connected,
+                "config": config,
+                "fields": schema["fields"],
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_settings_get(self):
+        """Return current settings and available models."""
+        try:
+            tenant_id, _ = _get_auth_info(self.headers)
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+            s = tenant.settings
+
+            # Build available skills list from registry
+            available_skills = [
+                {
+                    "name": sk.name,
+                    "description": sk.description.strip(),
+                    "requires_integration": sk.requires_integration,
+                }
+                for sk in skills.list_skills()
+            ]
+
+            # Connected integrations for the tenant
+            connected_integrations = _run_async(secrets.list_integrations(tenant_id))
+
+            self._json_response({
+                "ai_model": s.ai_model or DEFAULT_MODEL_ID,
+                "provider": PROVIDER,
+                "models": get_models_for_provider(PROVIDER),
+                "platform": PLATFORM,
+                "stage": STAGE,
+                "build": BUILD_NUMBER,
+                "enabled_skills": s.enabled_skills,
+                "available_skills": available_skills,
+                "connected_integrations": connected_integrations,
+                "enabled_channels": s.enabled_channels,
+                "system_prompt_override": s.system_prompt_override,
+                "max_tokens_per_message": s.max_tokens_per_message,
+                "messages_per_day": s.messages_per_day,
+                "max_conversation_history": s.max_conversation_history,
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_history(self):
+        """Return conversation history for the authenticated tenant."""
+        try:
+            tenant_id, _ = _get_auth_info(self.headers)
+            history = _run_async(
+                memory.get_conversation(tenant_id, "dashboard-default")
+            )
+            self._json_response({
+                "messages": history,
+                "platform": PLATFORM,
+                "stage": STAGE,
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_settings_post(self):
+        """Update tenant settings."""
+        try:
+            tenant_id, _ = _get_auth_info(self.headers)
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+            changed = False
+
+            if "ai_model" in body:
+                model_id = body["ai_model"]
+                model = get_model(model_id)
+                if not model:
+                    self._json_response({"error": f"Unknown model: {model_id}"}, 400)
+                    return
+                if PROVIDER not in model.providers:
+                    self._json_response(
+                        {"error": f"Model '{model_id}' not available for {PROVIDER}"},
+                        400,
+                    )
+                    return
+                tenant.settings.ai_model = model_id
+                changed = True
+                logger.info(f"Model changed to: {model.display_name} ({model_id})")
+
+            if "enabled_skills" in body:
+                skill_list = body["enabled_skills"]
+                if not isinstance(skill_list, list):
+                    self._json_response({"error": "enabled_skills must be a list"}, 400)
+                    return
+                known = set(skills.list_skill_names())
+                unknown = [s for s in skill_list if s not in known]
+                if unknown:
+                    self._json_response(
+                        {"error": f"Unknown skills: {', '.join(unknown)}"}, 400
+                    )
+                    return
+                tenant.settings.enabled_skills = skill_list
+                changed = True
+                logger.info(f"Enabled skills updated: {skill_list}")
+
+            if "system_prompt_override" in body:
+                tenant.settings.system_prompt_override = body["system_prompt_override"]
+                changed = True
+
+            if "max_tokens_per_message" in body:
+                val = body["max_tokens_per_message"]
+                if not isinstance(val, int) or val < 256 or val > 16384:
+                    self._json_response(
+                        {"error": "max_tokens_per_message must be 256-16384"}, 400
+                    )
+                    return
+                tenant.settings.max_tokens_per_message = val
+                changed = True
+
+            if "messages_per_day" in body:
+                val = body["messages_per_day"]
+                if not isinstance(val, int) or val < 1:
+                    self._json_response(
+                        {"error": "messages_per_day must be a positive integer"}, 400
+                    )
+                    return
+                tenant.settings.messages_per_day = val
+                changed = True
+
+            if "max_conversation_history" in body:
+                val = body["max_conversation_history"]
+                if not isinstance(val, int) or val < 1 or val > 100:
+                    self._json_response(
+                        {"error": "max_conversation_history must be 1-100"}, 400
+                    )
+                    return
+                tenant.settings.max_conversation_history = val
+                changed = True
+
+            if changed:
+                _run_async(tenants.update_tenant(tenant))
+
+            self._json_response({"ok": True})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_chat(self):
+        """Handle chat — identical logic to local, different adapters underneath."""
+        try:
+            tenant_id, user_email = _get_auth_info(self.headers)
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            text = body.get("text", "").strip()
+            if not text:
+                self._json_response({"error": "Empty message"}, 400)
+                return
+
+            conversation_id = body.get("conversation_id", "default")
+            clean_text, is_raw = strip_raw_flag(text)
+            is_raw_response = False
+
+            logger.info(f"Chat [{tenant_id}]: {text[:100]}" + (" [RAW]" if is_raw else ""))
+
+            history = _strip_metadata(
+                _run_async(memory.get_conversation(tenant_id, conversation_id))
+            )
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+            active_model, model_short_name = _resolve_model(tenant)
+
+            system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
+Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
+When you have data to present, format it clearly with structure."""
+
+            if not is_raw and rule_router.is_conversational(clean_text):
+                stats["conversational"] += 1
+                messages = history + [{"role": "user", "content": clean_text}]
+                response = _run_async(ai.chat(active_model, system, messages, []))
+                assistant_text = response.text or "Hey! How can I help?"
+                total_tokens = response.input_tokens + response.output_tokens
+                route_type = "conversational"
+            else:
+                match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+
+                if match:
+                    request_id = f"rule-{conversation_id}"
+                    _run_async(bus.publish_skill_invocation(
+                        tenant_id, match.skill_name, match.params,
+                        conversation_id, request_id, "dashboard", "user",
+                    ))
+                    skill_result = bus.get_result(request_id) or {"error": "No result"}
+
+                    if is_raw and rule_router.supports_raw(match.skill_name):
+                        stats["raw"] += 1
+                        stats["rule_routed"] += 1
+                        assistant_text = _format_raw_json(skill_result)
+                        total_tokens = 0
+                        route_type = "rule"
+                        is_raw_response = True
+                    else:
+                        stats["rule_routed"] += 1
+                        prompt = f'{system}\n\nThe user asked: "{clean_text}"\n\nTool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly.'
+                        messages = history + [{"role": "user", "content": prompt}]
+                        response = _run_async(ai.chat(active_model, system, messages, []))
+                        assistant_text = response.text or "Got data but couldn't format."
+                        total_tokens = response.input_tokens + response.output_tokens
+                        route_type = "rule"
+                else:
+                    stats["ai_routed"] += 1
+                    tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
+                    messages = history + [{"role": "user", "content": clean_text}]
+                    response = _run_async(ai.chat(active_model, system, messages, tools))
+
+                    if response.has_tool_use:
+                        tc = response.tool_calls[0]
+                        request_id = f"ai-{conversation_id}"
+                        _run_async(bus.publish_skill_invocation(
+                            tenant_id, tc.tool_name, tc.tool_params,
+                            conversation_id, request_id, "dashboard", "user",
+                        ))
+                        skill_result = bus.get_result(request_id) or {"error": "No result"}
+
+                        if is_raw and rule_router.supports_raw(tc.tool_name):
+                            stats["raw"] += 1
+                            assistant_text = _format_raw_json(skill_result)
+                            total_tokens = response.input_tokens + response.output_tokens
+                            route_type = "ai"
+                            is_raw_response = True
+                        else:
+                            messages_with_tool = messages + [{"role": "assistant", "content": [{"type": "tool_use", "id": tc.tool_use_id, "name": tc.tool_name, "input": tc.tool_params}]}]
+                            final = _run_async(ai.chat_with_tool_result(active_model, system, messages_with_tool, tools, tc.tool_use_id, skill_result))
+                            assistant_text = final.text or "Got data but couldn't format."
+                            total_tokens = response.input_tokens + response.output_tokens + final.input_tokens + final.output_tokens
+                            route_type = "ai"
+                    else:
+                        assistant_text = response.text or "Not sure how to help."
+                        total_tokens = response.input_tokens + response.output_tokens
+                        route_type = "ai"
+
+            stats["total_tokens"] += total_tokens
+            chat_metadata: dict = {
+                "route": route_type,
+                "model": model_short_name,
+                "tokens": total_tokens,
+            }
+            if user_email:
+                chat_metadata["user_email"] = user_email
+            if not is_raw_response:
+                _run_async(memory.save_turn(
+                    tenant_id, conversation_id, clean_text, assistant_text,
+                    metadata=chat_metadata,
+                ))
+
+            self._json_response({
+                "text": assistant_text,
+                "conversation_id": conversation_id,
+                "tokens": total_tokens,
+                "route": route_type,
+                "raw": is_raw_response,
+                "model": model_short_name,
+                "user_email": user_email,
+            })
+        except Exception as e:
+            logger.exception("Chat error")
+            stats["errors"] += 1
+            friendly = error_handler.handle(e, context="chat")
+            self._json_response({
+                "error": friendly.message,
+                **friendly.to_dict(),
+            }, 500)
+
+    # --- Invitation endpoints (public) ---
+
+    def _handle_invitation_validate(self):
+        """Public: validate an invite code, return tenant name + email."""
+        try:
+            from urllib.parse import parse_qs
+            query = parse_qs(urlparse(self.path).query)
+            code = query.get("code", [""])[0]
+            if not code:
+                self._json_response({"error": "Missing code parameter"}, 400)
+                return
+
+            invitation = _run_async(tenants.get_invitation(code))
+            if not invitation or not invitation.is_valid():
+                self._json_response({"error": "Invalid or expired invitation"}, 404)
+                return
+
+            try:
+                tenant = _run_async(tenants.get_tenant(invitation.tenant_id))
+                tenant_name = tenant.name
+            except Exception:
+                tenant_name = invitation.tenant_id
+
+            self._json_response({
+                "valid": True,
+                "tenant_name": tenant_name,
+                "tenant_id": invitation.tenant_id,
+                "email": invitation.email,
+                "role": invitation.role,
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_invitation_accept(self):
+        """Accept an invitation — requires JWT, links user to tenant."""
+        try:
+            auth = extract_auth(self.headers)
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            invite_code = body.get("invite_code", "")
+
+            if not invite_code:
+                self._json_response({"error": "invite_code is required"}, 400)
+                return
+
+            invitation = _run_async(tenants.get_invitation(invite_code))
+            if not invitation or not invitation.is_valid():
+                self._json_response({"error": "Invalid or expired invitation"}, 404)
+                return
+
+            # Email from JWT must match invitation email
+            if auth.email.lower() != invitation.email.lower():
+                self._json_response({"error": "Email does not match invitation"}, 403)
+                return
+
+            # Check if user is already a member
+            existing = _run_async(tenants.get_user_by_email(
+                invitation.tenant_id, invitation.email
+            ))
+            if existing:
+                invitation.status = "accepted"
+                invitation.accepted_at = datetime.now(timezone.utc).isoformat()
+                _run_async(tenants.update_invitation(invitation))
+                self._json_response({
+                    "accepted": True,
+                    "tenant_id": invitation.tenant_id,
+                    "already_member": True,
+                })
+                return
+
+            # Create TenantUser
+            from agent.models.tenant import TenantUser
+            user = TenantUser(
+                user_id=auth.user_id,  # Cognito sub
+                tenant_id=invitation.tenant_id,
+                email=invitation.email,
+                display_name=invitation.email.split("@")[0],
+                role=invitation.role,
+                cognito_sub=auth.user_id,
+            )
+            _run_async(tenants.create_user(user))
+
+            # Mark invitation as accepted
+            invitation.status = "accepted"
+            invitation.accepted_at = datetime.now(timezone.utc).isoformat()
+            _run_async(tenants.update_invitation(invitation))
+
+            self._json_response({
+                "accepted": True,
+                "tenant_id": invitation.tenant_id,
+                "user_id": auth.user_id,
+                "role": invitation.role,
+            })
+        except AuthError as e:
+            self._json_response({"error": e.message}, e.status)
+        except Exception as e:
+            logger.exception("Invitation accept error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_teams_webhook(self):
+        """Handle incoming Microsoft Teams webhook (Bot Framework Activity).
+
+        This is the main entry point for Teams messages. Microsoft sends
+        HTTP POST with a Bot Framework Activity JSON payload and a JWT
+        in the Authorization header.
+        """
+        try:
+            content_length = int(self.headers.get("Content-Length", 0) or 0)
+            body_bytes = self.rfile.read(content_length)
+            activity = json.loads(body_bytes) if body_bytes else {}
+
+            activity_type = activity.get("type", "")
+            logger.info(f"Teams webhook: type={activity_type}")
+
+            # Get Teams integration credentials to validate + respond
+            # Resolve tenant from the bot's app ID (recipient.id)
+            recipient_id = activity.get("recipient", {}).get("id", "")
+            teams_adapter = self._get_teams_adapter(recipient_id)
+
+            if not teams_adapter:
+                logger.warning(f"No Teams adapter for recipient {recipient_id}")
+                self._json_response({"error": "Bot not configured"}, 401)
+                return
+
+            # Validate webhook authenticity
+            auth_header = self.headers.get("Authorization", "")
+            if auth_header and not teams_adapter.validate_webhook(
+                dict(self.headers), body_bytes
+            ):
+                logger.warning("Teams webhook JWT validation failed")
+                self._json_response({"error": "Unauthorized"}, 401)
+                return
+
+            # Handle different activity types
+            if activity_type == "message" and TeamsAdapter.is_message_activity(activity):
+                self._handle_teams_message(teams_adapter, activity)
+            elif TeamsAdapter.is_bot_added(activity):
+                # Bot was added to a team/chat — send welcome message
+                self._handle_teams_bot_added(teams_adapter, activity)
+            else:
+                logger.debug(f"Ignoring Teams activity type: {activity_type}")
+
+            # Always return 200 OK quickly — Teams expects fast responses
+            self._json_response({"ok": True})
+
+        except Exception as e:
+            logger.exception("Teams webhook error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_teams_message(self, teams_adapter: TeamsAdapter, activity: dict):
+        """Process a Teams message through the T3nets router."""
+        from agent.models.message import OutboundMessage
+
+        message = teams_adapter.parse_inbound(activity)
+        text = message.text
+        if not text:
+            return
+
+        # Resolve tenant from channel mapping
+        recipient_id = activity.get("recipient", {}).get("id", "")
+        try:
+            tenant = _run_async(tenants.get_by_channel_id("teams", recipient_id))
+        except Exception:
+            logger.warning(f"No tenant mapped for Teams bot {recipient_id}")
+            return
+
+        tenant_id = tenant.tenant_id
+        conversation_id = f"teams-{message.conversation_id}"
+
+        logger.info(f"Teams [{tenant_id}]: {text[:100]}")
+
+        # Send typing indicator while processing
+        _run_async(teams_adapter.send_typing_indicator(message.conversation_id))
+
+        # Process through the same routing pipeline as dashboard
+        clean_text, is_raw = strip_raw_flag(text)
+        active_model, model_short_name = _resolve_model(tenant)
+
+        system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
+Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
+You are communicating via Microsoft Teams. Keep responses clear and well-formatted.
+When you have data to present, format it clearly with structure."""
+
+        history = _strip_metadata(
+            _run_async(memory.get_conversation(tenant_id, conversation_id))
+        )
+
+        if not is_raw and rule_router.is_conversational(clean_text):
+            stats["conversational"] += 1
+            messages = history + [{"role": "user", "content": clean_text}]
+            response = _run_async(ai.chat(active_model, system, messages, []))
+            assistant_text = response.text or "Hey! How can I help?"
+            total_tokens = response.input_tokens + response.output_tokens
+        else:
+            match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+
+            if match:
+                request_id = f"teams-rule-{conversation_id}"
+                _run_async(bus.publish_skill_invocation(
+                    tenant_id, match.skill_name, match.params,
+                    conversation_id, request_id, "teams", message.channel_user_id,
+                ))
+                skill_result = bus.get_result(request_id) or {"error": "No result"}
+
+                if is_raw and rule_router.supports_raw(match.skill_name):
+                    stats["raw"] += 1
+                    stats["rule_routed"] += 1
+                    assistant_text = _format_raw_json(skill_result)
+                    total_tokens = 0
+                else:
+                    stats["rule_routed"] += 1
+                    prompt = (
+                        f'{system}\n\nThe user asked: "{clean_text}"\n\n'
+                        f'Tool data:\n{json.dumps(skill_result, indent=2)}\n\n'
+                        f'Format this clearly.'
+                    )
+                    messages = history + [{"role": "user", "content": prompt}]
+                    response = _run_async(ai.chat(active_model, system, messages, []))
+                    assistant_text = response.text or "Got data but couldn't format."
+                    total_tokens = response.input_tokens + response.output_tokens
+            else:
+                stats["ai_routed"] += 1
+                tools = skills.get_tools_for_tenant(
+                    type("C", (), {"tenant": tenant})()
+                )
+                messages = history + [{"role": "user", "content": clean_text}]
+                response = _run_async(
+                    ai.chat(active_model, system, messages, tools)
+                )
+
+                if response.has_tool_use:
+                    tc = response.tool_calls[0]
+                    request_id = f"teams-ai-{conversation_id}"
+                    _run_async(bus.publish_skill_invocation(
+                        tenant_id, tc.tool_name, tc.tool_params,
+                        conversation_id, request_id, "teams",
+                        message.channel_user_id,
+                    ))
+                    skill_result = (
+                        bus.get_result(request_id) or {"error": "No result"}
+                    )
+
+                    if is_raw and rule_router.supports_raw(tc.tool_name):
+                        stats["raw"] += 1
+                        assistant_text = _format_raw_json(skill_result)
+                        total_tokens = (
+                            response.input_tokens + response.output_tokens
+                        )
+                    else:
+                        messages_with_tool = messages + [
+                            {
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "id": tc.tool_use_id,
+                                        "name": tc.tool_name,
+                                        "input": tc.tool_params,
+                                    }
+                                ],
+                            }
+                        ]
+                        final = _run_async(
+                            ai.chat_with_tool_result(
+                                active_model, system,
+                                messages_with_tool, tools,
+                                tc.tool_use_id, skill_result,
+                            )
+                        )
+                        assistant_text = (
+                            final.text or "Got data but couldn't format."
+                        )
+                        total_tokens = (
+                            response.input_tokens + response.output_tokens
+                            + final.input_tokens + final.output_tokens
+                        )
+                else:
+                    assistant_text = response.text or "Not sure how to help."
+                    total_tokens = response.input_tokens + response.output_tokens
+
+        stats["total_tokens"] += total_tokens
+
+        # Save conversation turn
+        _run_async(memory.save_turn(
+            tenant_id, conversation_id, clean_text, assistant_text,
+            metadata={
+                "route": "teams",
+                "model": model_short_name,
+                "tokens": total_tokens,
+                "channel": "teams",
+            },
+        ))
+
+        # Send response back to Teams
+        outbound = OutboundMessage(
+            channel=ChannelType.TEAMS,
+            conversation_id=message.conversation_id,
+            recipient_id=message.channel_user_id,
+            text=assistant_text,
+        )
+        _run_async(teams_adapter.send_response(outbound))
+
+    def _handle_teams_bot_added(
+        self, teams_adapter: TeamsAdapter, activity: dict
+    ):
+        """Handle bot being added to a Teams channel/chat."""
+        from agent.models.message import OutboundMessage
+
+        conversation_id = activity.get("conversation", {}).get("id", "")
+        if not conversation_id:
+            return
+
+        # Cache the serviceUrl
+        service_url = activity.get("serviceUrl", "")
+        if service_url:
+            teams_adapter._service_urls[conversation_id] = service_url.rstrip("/")
+
+        welcome = OutboundMessage(
+            channel=ChannelType.TEAMS,
+            conversation_id=conversation_id,
+            recipient_id="",
+            text=(
+                "Hi! I'm your T3nets assistant. "
+                "Ask me about sprint status, release notes, and more. "
+                "Type **help** to see what I can do."
+            ),
+        )
+        _run_async(teams_adapter.send_response(welcome))
+
+    def _get_teams_adapter(self, bot_app_id: str) -> TeamsAdapter | None:
+        """Get or create a TeamsAdapter for the given bot app ID.
+
+        Looks up Teams integration credentials from Secrets Manager.
+        """
+        # Try to resolve tenant from channel mapping
+        try:
+            tenant = _run_async(tenants.get_by_channel_id("teams", bot_app_id))
+        except Exception:
+            # No channel mapping — try all tenants for Teams integration
+            try:
+                all_tenants = _run_async(tenants.list_tenants())
+                for t in all_tenants:
+                    try:
+                        creds = _run_async(secrets.get(t.tenant_id, "teams"))
+                        if creds.get("app_id") == bot_app_id:
+                            tenant = t
+                            # Create channel mapping for faster lookup next time
+                            _run_async(tenants.set_channel_mapping(
+                                t.tenant_id, "teams", bot_app_id
+                            ))
+                            break
+                    except Exception:
+                        continue
+                else:
+                    return None
+            except Exception:
+                return None
+
+        # Load credentials and create adapter
+        try:
+            creds = _run_async(secrets.get(tenant.tenant_id, "teams"))
+            app_id = creds.get("app_id", "")
+            app_secret = creds.get("app_secret", "")
+            if not app_id or not app_secret:
+                logger.error(f"Incomplete Teams credentials for tenant {tenant.tenant_id}")
+                return None
+            return TeamsAdapter(app_id, app_secret)
+        except Exception as e:
+            logger.error(f"Failed to load Teams credentials: {e}")
+            return None
+
+    def _handle_clear(self):
+        try:
+            tenant_id, _ = _get_auth_info(self.headers)
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            cid = body.get("conversation_id", "default")
+            _run_async(memory.clear_conversation(tenant_id, cid))
+            self._json_response({"cleared": True})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _serve_file(self, filename: str, search_dir: str = None):
+        """Serve HTML — check local adapter dir (shared UI files)."""
+        base = Path(__file__).parent.parent.parent
+        if search_dir:
+            path = base / search_dir / filename
+        else:
+            path = base / filename
+
+        if path.exists():
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(path.read_bytes())
+        else:
+            self.send_error(404, f"{filename} not found")
+
+    def _json_response(self, data: dict, status: int = 200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+
+# Single region for all AWS calls (data residency / IAM scope)
+AWS_REGION = "us-east-1"
+
+
+def init():
+    global ai, memory, tenants, secrets, skills, bus, rule_router, admin_api, error_handler, started_at
+
+    started_at = time.time()
+
+    region = AWS_REGION
+    conversations_table = os.getenv("DYNAMODB_CONVERSATIONS_TABLE")
+    tenants_table = os.getenv("DYNAMODB_TENANTS_TABLE")
+    secrets_prefix = os.getenv("SECRETS_PREFIX")
+
+    if not all([conversations_table, tenants_table, secrets_prefix]):
+        logger.error("Missing required env vars: DYNAMODB_CONVERSATIONS_TABLE, DYNAMODB_TENANTS_TABLE, SECRETS_PREFIX")
+        sys.exit(1)
+
+    ai = BedrockProvider(region=region, model_id=BEDROCK_MODEL_ID)
+    memory = DynamoDBConversationStore(conversations_table, region=region)
+    tenants = DynamoDBTenantStore(tenants_table, region=region)
+    secrets = SecretsManagerProvider(secrets_prefix, region=region)
+
+    skills_obj = SkillRegistry()
+    skills_dir = Path(__file__).parent.parent.parent / "agent" / "skills"
+    skills_obj.load_from_directory(skills_dir)
+    skills = skills_obj
+    logger.info(f"Loaded skills: {skills.list_skill_names()}")
+
+    rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
+    bus = DirectBus(skills, secrets)
+    admin_api = AdminAPI(tenants, secrets, skills)
+    error_handler = ErrorHandler()
+
+    channels = ChannelRegistry()
+    channels.register(DashboardAdapter())
+
+    # Seed default tenant if it doesn't exist
+    try:
+        _run_async(tenants.get_tenant(DEFAULT_TENANT))
+        logger.info(f"Tenant '{DEFAULT_TENANT}' exists")
+    except Exception:
+        from agent.models.tenant import Tenant, TenantSettings
+        now = datetime.now(timezone.utc).isoformat()
+        tenant = Tenant(
+            tenant_id=DEFAULT_TENANT,
+            name="T3nets Default",
+            status="active",
+            created_at=now,
+            settings=TenantSettings(enabled_skills=skills.list_skill_names()),
+        )
+        _run_async(tenants.create_tenant(tenant))
+        logger.info(f"Seeded tenant '{DEFAULT_TENANT}'")
+
+    connected = _run_async(secrets.list_integrations(DEFAULT_TENANT))
+    logger.info(f"Connected integrations: {connected}")
+
+
+def main():
+    init()
+    port = int(os.getenv("PORT", "8080"))
+    server = HTTPServer(("0.0.0.0", port), AWSHandler)
+
+    logger.info("")
+    logger.info("  ╔══════════════════════════════════════╗")
+    logger.info("  ║  T3nets AWS Server                   ║")
+    logger.info(f"  ║  http://0.0.0.0:{port}               ║")
+    logger.info(f"  ║  Model: {BEDROCK_MODEL_ID[:30]}  ║")
+    logger.info("  ╚══════════════════════════════════════╝")
+    logger.info("")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info(f"Stats: {json.dumps(stats)}")
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

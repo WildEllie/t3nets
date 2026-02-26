@@ -1,0 +1,146 @@
+###############################################################################
+# T3nets — AWS Infrastructure (Phase 1)
+#
+# Deploys:
+#   - VPC with public/private subnets
+#   - ECS Fargate cluster + router service
+#   - API Gateway (HTTP API)
+#   - DynamoDB tables (conversations, tenants)
+#   - Secrets Manager (tenant integration credentials)
+#   - ECR repository (router container image)
+#   - Cognito user pool + app client (authentication)
+#   - CloudWatch log groups
+#   - IAM roles and policies
+#
+# Usage:
+#   cd infra/aws
+#   terraform init
+#   terraform plan -var-file=environments/dev.tfvars
+#   terraform apply -var-file=environments/dev.tfvars
+###############################################################################
+
+terraform {
+  required_version = ">= 1.5"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+locals {
+  # Map AWS region to Bedrock geographic inference profile prefix.
+  # Newer models (Sonnet 4.5+, Nova) require geographic prefixes, not region-specific ones.
+  bedrock_geo_prefix = (
+    startswith(var.aws_region, "us-") ? "us" :
+    startswith(var.aws_region, "eu-") ? "eu" :
+    startswith(var.aws_region, "ap-") ? "apac" :
+    startswith(var.aws_region, "ca-") ? "us" :
+    startswith(var.aws_region, "sa-") ? "us" :
+    "us"
+  )
+}
+
+provider "aws" {
+  region = var.aws_region
+
+  default_tags {
+    tags = {
+      Project     = "t3nets"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
+# --- Networking ---
+module "networking" {
+  source = "./modules/networking"
+
+  project     = var.project
+  environment = var.environment
+  aws_region  = var.aws_region
+}
+
+# --- Data stores ---
+module "data" {
+  source = "./modules/data"
+
+  project     = var.project
+  environment = var.environment
+}
+
+# --- Secrets ---
+module "secrets" {
+  source = "./modules/secrets"
+
+  project     = var.project
+  environment = var.environment
+}
+
+# --- Container registry ---
+module "ecr" {
+  source = "./modules/ecr"
+
+  project     = var.project
+  environment = var.environment
+}
+
+# --- Authentication (Cognito) ---
+module "cognito" {
+  source = "./modules/cognito"
+
+  project     = var.project
+  environment = var.environment
+
+  callback_urls = var.cognito_callback_urls
+  logout_urls   = var.cognito_logout_urls
+}
+
+# --- Compute (ECS Fargate) ---
+module "compute" {
+  source = "./modules/compute"
+
+  project     = var.project
+  environment = var.environment
+  aws_region  = var.aws_region
+
+  vpc_id             = module.networking.vpc_id
+  private_subnet_ids = module.networking.private_subnet_ids
+  public_subnet_ids  = module.networking.public_subnet_ids
+
+  ecr_repository_url = module.ecr.repository_url
+  router_image_tag   = var.router_image_tag
+
+  dynamodb_table_arns = module.data.table_arns
+  secrets_base_arn    = module.secrets.base_arn
+
+  router_cpu    = var.router_cpu
+  router_memory = var.router_memory
+
+  # Geographic prefix for Bedrock inference profiles: us., eu., apac.
+  # Single-region prefixes (e.g. us-east-1.) are NOT valid for newer models.
+  bedrock_model_id = "${local.bedrock_geo_prefix}.${var.bedrock_model_id}"
+
+  # Cognito (for login URLs in the application)
+  cognito_user_pool_id  = module.cognito.user_pool_id
+  cognito_app_client_id = module.cognito.app_client_id
+  cognito_auth_domain   = module.cognito.auth_domain
+}
+
+# --- API Gateway ---
+module "api" {
+  source = "./modules/api"
+
+  project     = var.project
+  environment = var.environment
+
+  alb_listener_arn = module.compute.alb_listener_arn
+  alb_dns_name     = module.compute.alb_dns_name
+  vpc_link_id      = module.compute.vpc_link_id
+
+  cognito_user_pool_endpoint = module.cognito.user_pool_endpoint
+  cognito_app_client_id      = module.cognito.app_client_id
+}

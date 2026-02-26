@@ -1,0 +1,22 @@
+name: ping
+description: >
+  Quick health check and model test. Returns system info including
+  current time, Python version, and a simple prompt for the AI model
+  to confirm it's working. Useful for verifying model connectivity
+  without requiring any integrations.
+triggers:
+  - "ping"
+  - "test model"
+  - "are you alive"
+  - "hello"
+  - "model test"
+  - "health check"
+requires_integration: null
+supports_raw: true
+parameters:
+  type: object
+  properties:
+    echo:
+      type: string
+      description: "Optional message to echo back. If provided, the model will include it in its response."
+  required: []

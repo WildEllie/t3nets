@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 820" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#60a5fa"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4ade80"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#fb923c"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1100" height="820" fill="#0f0f0f" rx="12"/>
+
+  <!-- Title -->
+  <text x="550" y="42" text-anchor="middle" fill="#fff" font-size="22" font-weight="700">T3nets — Software Architecture</text>
+  <text x="550" y="64" text-anchor="middle" fill="#666" font-size="13">Multi-tenant AI Agent Platform</text>
+
+  <!-- ===== CLIENTS (left) ===== -->
+  <rect x="30" y="240" width="130" height="50" rx="10" fill="#1e3a5f" stroke="#2563eb" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="95" y="262" text-anchor="middle" fill="#93c5fd" font-size="11" font-weight="600">DASHBOARD</text>
+  <text x="95" y="277" text-anchor="middle" fill="#60a5fa" font-size="10">Browser UI</text>
+
+  <rect x="30" y="310" width="130" height="50" rx="10" fill="#1a1a1a" stroke="#333" stroke-width="1" opacity="0.5"/>
+  <text x="95" y="332" text-anchor="middle" fill="#555" font-size="11" font-weight="600">TEAMS</text>
+  <text x="95" y="347" text-anchor="middle" fill="#444" font-size="10">Future</text>
+
+  <rect x="30" y="380" width="130" height="50" rx="10" fill="#1a1a1a" stroke="#333" stroke-width="1" opacity="0.5"/>
+  <text x="95" y="402" text-anchor="middle" fill="#555" font-size="11" font-weight="600">SLACK</text>
+  <text x="95" y="417" text-anchor="middle" fill="#444" font-size="10">Future</text>
+
+  <!-- Arrow: Clients → Channel Adapter -->
+  <line x1="160" y1="265" x2="218" y2="265" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="190" y="255" text-anchor="middle" fill="#444" font-size="9">HTTP</text>
+
+  <!-- ===== CHANNEL ADAPTER ===== -->
+  <rect x="220" y="225" width="140" height="80" rx="10" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="290" y="255" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">Channel</text>
+  <text x="290" y="272" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">Adapter</text>
+  <text x="290" y="293" text-anchor="middle" fill="#555" font-size="9">parse → route → respond</text>
+
+  <!-- Arrow: Channel Adapter → Router -->
+  <line x1="360" y1="265" x2="418" y2="265" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="389" y="255" text-anchor="middle" fill="#444" font-size="9">InboundMsg</text>
+
+  <!-- ===== HYBRID ROUTER (main box) ===== -->
+  <rect x="420" y="100" width="280" height="390" rx="14" fill="#111" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <text x="560" y="130" text-anchor="middle" fill="#3b82f6" font-size="14" font-weight="700">HYBRID ROUTER</text>
+  <text x="560" y="148" text-anchor="middle" fill="#555" font-size="10">agent/router/rule_router.py</text>
+
+  <!-- Tier 1 -->
+  <rect x="445" y="168" width="230" height="62" rx="8" fill="#14532d" stroke="#166534" stroke-width="1"/>
+  <text x="560" y="188" text-anchor="middle" fill="#4ade80" font-size="12" font-weight="700">Tier 1 — Regex</text>
+  <text x="560" y="204" text-anchor="middle" fill="#6ee7b7" font-size="10">Conversational patterns</text>
+  <text x="560" y="220" text-anchor="middle" fill="#166534" font-size="9">$0 · &lt;1ms</text>
+
+  <!-- Tier 2 -->
+  <rect x="445" y="242" width="230" height="62" rx="8" fill="#78350f" stroke="#92400e" stroke-width="1"/>
+  <text x="560" y="262" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="700">Tier 2 — Rule Match</text>
+  <text x="560" y="278" text-anchor="middle" fill="#fcd34d" font-size="10">Skill triggers (no AI call)</text>
+  <text x="560" y="294" text-anchor="middle" fill="#92400e" font-size="9">~$0.01 · 1 API call</text>
+
+  <!-- Tier 3 -->
+  <rect x="445" y="316" width="230" height="62" rx="8" fill="#312e81" stroke="#4338ca" stroke-width="1"/>
+  <text x="560" y="336" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="700">Tier 3 — Full AI</text>
+  <text x="560" y="352" text-anchor="middle" fill="#c7d2fe" font-size="10">Claude with tool definitions</text>
+  <text x="560" y="368" text-anchor="middle" fill="#4338ca" font-size="9">~$0.02–0.05 · 2 API calls</text>
+
+  <!-- Resolve context label -->
+  <rect x="445" y="395" width="230" height="45" rx="8" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1"/>
+  <text x="560" y="414" text-anchor="middle" fill="#888" font-size="10" font-weight="600">Resolve Tenant → User → Context</text>
+  <text x="560" y="428" text-anchor="middle" fill="#555" font-size="9">Load conversation history</text>
+
+  <!-- Flow arrows inside router -->
+  <line x1="560" y1="230" x2="560" y2="240" stroke="#4ade80" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="560" y1="304" x2="560" y2="314" stroke="#fbbf24" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- ===== SKILLS (right side) ===== -->
+  <rect x="760" y="165" width="155" height="305" rx="12" fill="#111" stroke="#22c55e" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="837" y="192" text-anchor="middle" fill="#4ade80" font-size="13" font-weight="700">SKILLS</text>
+  <text x="837" y="207" text-anchor="middle" fill="#555" font-size="9">agent/skills/</text>
+
+  <!-- Skill cards -->
+  <rect x="778" y="220" width="120" height="36" rx="6" fill="#14532d" stroke="#166534" stroke-width="1"/>
+  <text x="838" y="237" text-anchor="middle" fill="#6ee7b7" font-size="10" font-weight="600">sprint_status</text>
+  <text x="838" y="249" text-anchor="middle" fill="#166534" font-size="8">Jira</text>
+
+  <rect x="778" y="264" width="120" height="36" rx="6" fill="#14532d" stroke="#166534" stroke-width="1"/>
+  <text x="838" y="281" text-anchor="middle" fill="#6ee7b7" font-size="10" font-weight="600">github_issues</text>
+  <text x="838" y="293" text-anchor="middle" fill="#166534" font-size="8">GitHub</text>
+
+  <rect x="778" y="308" width="120" height="36" rx="6" fill="#14532d" stroke="#166534" stroke-width="1"/>
+  <text x="838" y="325" text-anchor="middle" fill="#6ee7b7" font-size="10" font-weight="600">ping</text>
+  <text x="838" y="337" text-anchor="middle" fill="#166534" font-size="8">Built-in</text>
+
+  <rect x="778" y="352" width="120" height="36" rx="6" fill="#1a1a1a" stroke="#333" stroke-width="1" opacity="0.6"/>
+  <text x="838" y="369" text-anchor="middle" fill="#666" font-size="10" font-weight="600">custom_skill</text>
+  <text x="838" y="381" text-anchor="middle" fill="#444" font-size="8">Tenant-defined</text>
+
+  <!-- Skill detail -->
+  <text x="837" y="410" text-anchor="middle" fill="#444" font-size="9">skill.yaml + worker.py</text>
+  <text x="837" y="424" text-anchor="middle" fill="#444" font-size="9">↳ registry.py loads all</text>
+  <text x="837" y="452" text-anchor="middle" fill="#555" font-size="9" font-weight="600">EventBus</text>
+
+  <!-- Arrow: Router → Skills -->
+  <line x1="675" y1="275" x2="775" y2="275" stroke="#4ade80" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <text x="725" y="265" text-anchor="middle" fill="#4ade80" font-size="9">invoke</text>
+
+  <!-- Arrow: Router → AI Provider -->
+  <line x1="560" y1="490" x2="560" y2="530" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <text x="590" y="515" text-anchor="middle" fill="#fb923c" font-size="9">Tier 2/3</text>
+
+  <!-- ===== AI PROVIDER ===== -->
+  <rect x="460" y="535" width="200" height="65" rx="10" fill="#1a1a1a" stroke="#fb923c" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="560" y="560" text-anchor="middle" fill="#fb923c" font-size="12" font-weight="700">AI Provider</text>
+  <text x="560" y="577" text-anchor="middle" fill="#888" font-size="10">Anthropic (local) / Bedrock (AWS)</text>
+  <text x="560" y="592" text-anchor="middle" fill="#555" font-size="9">Claude 3.5 / 3 Haiku / Sonnet</text>
+
+  <!-- ===== DATA STORES (bottom) ===== -->
+  <!-- Conversation Store -->
+  <rect x="100" y="535" width="150" height="65" rx="10" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="175" y="560" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Conversations</text>
+  <text x="175" y="577" text-anchor="middle" fill="#666" font-size="9">SQLite / DynamoDB</text>
+  <text x="175" y="592" text-anchor="middle" fill="#555" font-size="8">Turn history per user</text>
+
+  <!-- Tenant Store -->
+  <rect x="270" y="535" width="150" height="65" rx="10" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="345" y="560" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Tenants &amp; Users</text>
+  <text x="345" y="577" text-anchor="middle" fill="#666" font-size="9">SQLite / DynamoDB</text>
+  <text x="345" y="592" text-anchor="middle" fill="#555" font-size="8">Settings, invitations</text>
+
+  <!-- Secrets Store -->
+  <rect x="765" y="535" width="150" height="65" rx="10" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="840" y="560" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Secrets</text>
+  <text x="840" y="577" text-anchor="middle" fill="#666" font-size="9">.env / Secrets Manager</text>
+  <text x="840" y="592" text-anchor="middle" fill="#555" font-size="8">Integration credentials</text>
+
+  <!-- Arrow: Router → Stores -->
+  <line x1="480" y1="490" x2="345" y2="530" stroke="#666" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
+  <line x1="520" y1="490" x2="175" y2="530" stroke="#666" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
+
+  <!-- Arrow: Skills → Secrets -->
+  <line x1="837" y1="470" x2="837" y2="530" stroke="#666" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-gray)"/>
+
+  <!-- ===== ADAPTERS LAYER (bottom) ===== -->
+  <rect x="60" y="640" width="980" height="70" rx="10" fill="#0a0a0a" stroke="#2a2a2a" stroke-width="1"/>
+  <text x="550" y="662" text-anchor="middle" fill="#888" font-size="12" font-weight="700">ADAPTERS LAYER</text>
+  <text x="550" y="680" text-anchor="middle" fill="#555" font-size="10">Cloud-agnostic core (agent/) → adapters wire interfaces to environment</text>
+
+  <!-- Adapter boxes -->
+  <rect x="120" y="695" width="140" height="24" rx="5" fill="#14532d" stroke="#166534" stroke-width="1"/>
+  <text x="190" y="711" text-anchor="middle" fill="#6ee7b7" font-size="10" font-weight="600">adapters/local/</text>
+
+  <rect x="290" y="695" width="140" height="24" rx="5" fill="#1e3a5f" stroke="#2563eb" stroke-width="1"/>
+  <text x="360" y="711" text-anchor="middle" fill="#93c5fd" font-size="10" font-weight="600">adapters/aws/</text>
+
+  <rect x="460" y="695" width="140" height="24" rx="5" fill="#1a1a1a" stroke="#333" stroke-width="1" opacity="0.4"/>
+  <text x="530" y="711" text-anchor="middle" fill="#555" font-size="10">adapters/azure/</text>
+
+  <rect x="630" y="695" width="140" height="24" rx="5" fill="#1a1a1a" stroke="#333" stroke-width="1" opacity="0.4"/>
+  <text x="700" y="711" text-anchor="middle" fill="#555" font-size="10">adapters/gcp/</text>
+
+  <!-- Local detail -->
+  <text x="190" y="680" text-anchor="middle" fill="#166534" font-size="8">Anthropic, SQLite, .env</text>
+  <!-- AWS detail -->
+  <text x="360" y="680" text-anchor="middle" fill="#1e40af" font-size="8">Bedrock, DynamoDB, SM</text>
+
+  <!-- ===== AUTH FLOW (top right) ===== -->
+  <rect x="820" y="90" width="250" height="60" rx="10" fill="#1a1a1a" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="945" y="113" text-anchor="middle" fill="#f59e0b" font-size="12" font-weight="700">Auth (Cognito)</text>
+  <text x="945" y="130" text-anchor="middle" fill="#888" font-size="10">JWT → API Gateway → Server</text>
+  <text x="945" y="143" text-anchor="middle" fill="#555" font-size="9">Signup · Login · Invitation flow</text>
+
+  <!-- ===== INFRA (top left) ===== -->
+  <rect x="30" y="90" width="180" height="60" rx="10" fill="#1a1a1a" stroke="#8b5cf6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="120" y="113" text-anchor="middle" fill="#8b5cf6" font-size="12" font-weight="700">Infrastructure</text>
+  <text x="120" y="130" text-anchor="middle" fill="#888" font-size="10">Terraform (infra/aws/)</text>
+  <text x="120" y="143" text-anchor="middle" fill="#555" font-size="9">VPC · ECS Fargate · API GW</text>
+
+  <!-- ===== LEGEND ===== -->
+  <rect x="60" y="745" width="980" height="55" rx="8" fill="#0a0a0a" stroke="#1a1a1a" stroke-width="1"/>
+  <text x="90" y="768" fill="#888" font-size="10" font-weight="600">COST TIERS:</text>
+  <rect x="180" y="757" width="10" height="10" rx="2" fill="#14532d"/>
+  <text x="196" y="767" fill="#6ee7b7" font-size="10">Tier 1: $0</text>
+  <rect x="280" y="757" width="10" height="10" rx="2" fill="#78350f"/>
+  <text x="296" y="767" fill="#fbbf24" font-size="10">Tier 2: ~$0.01</text>
+  <rect x="400" y="757" width="10" height="10" rx="2" fill="#312e81"/>
+  <text x="416" y="767" fill="#a5b4fc" font-size="10">Tier 3: ~$0.02–0.05</text>
+
+  <text x="580" y="768" fill="#888" font-size="10" font-weight="600">FLOW:</text>
+  <line x1="620" y1="764" x2="650" y2="764" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="660" y="768" fill="#60a5fa" font-size="10">Message</text>
+  <line x1="710" y1="764" x2="740" y2="764" stroke="#4ade80" stroke-width="1.5"/>
+  <text x="750" y="768" fill="#4ade80" font-size="10">Skill</text>
+  <line x1="790" y1="764" x2="820" y2="764" stroke="#fb923c" stroke-width="1.5"/>
+  <text x="830" y="768" fill="#fb923c" font-size="10">AI</text>
+  <line x1="860" y1="764" x2="890" y2="764" stroke="#666" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="900" y="768" fill="#666" font-size="10">Data</text>
+
+  <text x="90" y="788" fill="#555" font-size="9">Hybrid routing cuts AI costs 50–60% vs routing everything through Claude</text>
+</svg>

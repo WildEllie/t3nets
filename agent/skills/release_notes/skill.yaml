@@ -1,0 +1,43 @@
+name: release_notes
+description: >
+  Summarize Jira releases for release notes, changelogs, and stakeholder
+  updates. Can list all project releases (released and unreleased) and
+  pull the full issue breakdown for a specific release — grouped by type,
+  with status, assignee, priority, and story points. Use when the user
+  asks about releases, release notes, changelogs, what shipped, what's
+  in a version, or release summaries.
+
+triggers:
+  - "release notes"
+  - "what shipped"
+  - "what's in the release"
+  - "changelog"
+  - "release summary"
+  - "list releases"
+  - "what versions"
+  - "what did we release"
+  - "generate release notes"
+  - "summarize release"
+
+requires_integration: jira
+supports_raw: true
+
+parameters:
+  type: object
+  properties:
+    action:
+      type: string
+      enum:
+        - list_releases
+        - summarize
+      description: >
+        list_releases = show all fix versions (released and unreleased)
+        for the project, summarize = pull all issues for a specific
+        release and return structured data for release notes generation
+    release_name:
+      type: string
+      description: >
+        Name of the release / fix version to summarize (e.g. "v2.5.0").
+        Required when action is 'summarize'.
+  required:
+    - action
