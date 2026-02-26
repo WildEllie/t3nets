@@ -69,6 +69,70 @@ DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
 PROVIDER = "anthropic"
 
+# Integration field schemas — defines the config form per integration type.
+# Used by GET /api/integrations to tell the frontend which fields to render.
+INTEGRATION_SCHEMAS: dict = {
+    "jira": {
+        "label": "Jira",
+        "fields": [
+            {
+                "key": "url",
+                "label": "Jira URL",
+                "type": "url",
+                "required": True,
+                "placeholder": "https://yourteam.atlassian.net",
+            },
+            {
+                "key": "email",
+                "label": "Email",
+                "type": "email",
+                "required": True,
+                "placeholder": "admin@company.com",
+            },
+            {
+                "key": "api_token",
+                "label": "API Token",
+                "type": "password",
+                "required": True,
+                "placeholder": "Your Jira API token",
+            },
+            {
+                "key": "project_key",
+                "label": "Project Key",
+                "type": "text",
+                "required": True,
+                "placeholder": "PROJ",
+            },
+            {
+                "key": "board_id",
+                "label": "Board ID",
+                "type": "text",
+                "required": False,
+                "placeholder": "Optional — for sprint queries",
+            },
+        ],
+    },
+    "github": {
+        "label": "GitHub",
+        "fields": [
+            {
+                "key": "token",
+                "label": "Personal Access Token",
+                "type": "password",
+                "required": True,
+                "placeholder": "ghp_...",
+            },
+            {
+                "key": "org",
+                "label": "Organization",
+                "type": "text",
+                "required": True,
+                "placeholder": "your-org",
+            },
+        ],
+    },
+}
+
 # Build number — read from version.txt at startup
 _version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
 BUILD_NUMBER = _version_path.read_text().strip() if _version_path.exists() else "0"
@@ -153,6 +217,10 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_auth_config()
         elif path == "/api/auth/me":
             self._handle_auth_me()
+        elif path == "/api/integrations":
+            self._handle_integrations_list()
+        elif path.startswith("/api/integrations/"):
+            self._handle_integration_get(path)
         else:
             self.send_error(404)
 
@@ -280,6 +348,58 @@ class DevHandler(BaseHTTPRequestHandler):
             "tenant_status": tenant.status,
             "tenant_name": tenant.name,
         })
+
+    def _handle_integrations_list(self):
+        """GET /api/integrations — list all integrations with status and field schemas."""
+        try:
+            connected = _run_async(secrets.list_integrations(DEFAULT_TENANT))
+            result = []
+            for name, schema in INTEGRATION_SCHEMAS.items():
+                result.append({
+                    "name": name,
+                    "label": schema["label"],
+                    "connected": name in connected,
+                    "fields": schema["fields"],
+                })
+            self._json_response(result)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_integration_get(self, path: str):
+        """GET /api/integrations/{name} — return current config with sensitive fields masked."""
+        try:
+            integration_name = path.rstrip("/").split("/")[-1]
+            if integration_name not in INTEGRATION_SCHEMAS:
+                self._json_response({"error": f"Unknown integration: {integration_name}"}, 404)
+                return
+
+            schema = INTEGRATION_SCHEMAS[integration_name]
+            connected = False
+            config = {}
+            try:
+                stored = _run_async(secrets.get(DEFAULT_TENANT, integration_name))
+                connected = True
+                # Mask password-type fields
+                password_keys = {
+                    f["key"] for f in schema["fields"] if f["type"] == "password"
+                }
+                for key, value in stored.items():
+                    if key in password_keys and value:
+                        config[key] = "\u2022" * 8  # ••••••••
+                    else:
+                        config[key] = value
+            except Exception:
+                pass  # Not connected — return empty config
+
+            self._json_response({
+                "name": integration_name,
+                "label": schema["label"],
+                "connected": connected,
+                "config": config,
+                "fields": schema["fields"],
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
 
     def _handle_integrations_post(self, path: str):
         """Handle POST /api/integrations/{name} and /api/integrations/{name}/test."""
@@ -432,6 +552,9 @@ class DevHandler(BaseHTTPRequestHandler):
                 for sk in skills.list_skills()
             ]
 
+            # Connected integrations for the tenant
+            connected_integrations = _run_async(secrets.list_integrations(DEFAULT_TENANT))
+
             self._json_response({
                 "ai_model": s.ai_model or DEFAULT_MODEL_ID,
                 "provider": PROVIDER,
@@ -441,6 +564,7 @@ class DevHandler(BaseHTTPRequestHandler):
                 "build": BUILD_NUMBER,
                 "enabled_skills": s.enabled_skills,
                 "available_skills": available_skills,
+                "connected_integrations": connected_integrations,
                 "enabled_channels": s.enabled_channels,
                 "system_prompt_override": s.system_prompt_override,
                 "max_tokens_per_message": s.max_tokens_per_message,
