@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T3nets Phase 3b — Architecture</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            padding: 32px;
+        }
+        h1 { font-size: 22px; margin-bottom: 8px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+
+        .diagram {
+            position: relative;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .layer {
+            margin-bottom: 24px;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #2a2a2a;
+        }
+
+        .layer-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .boxes {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .box {
+            padding: 16px 20px;
+            border-radius: 10px;
+            text-align: center;
+            min-width: 160px;
+            flex: 1;
+            max-width: 280px;
+        }
+
+        .box .title {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        .box .detail {
+            font-size: 11px;
+            opacity: 0.8;
+            line-height: 1.5;
+        }
+
+        .channel { background: #0e3a5e; border: 1px solid #0088cc; }
+        .channel .title { color: #4dc9f6; }
+
+        .gateway { background: #3d2800; border: 1px solid #FF9900; }
+        .gateway .title { color: #ffb84d; }
+
+        .compute { background: #1e2154; border: 1px solid #464EB8; }
+        .compute .title { color: #8b8ff0; }
+
+        .event { background: #3d2800; border: 1px solid #e68a00; }
+        .event .title { color: #ffcc66; }
+
+        .lambda { background: #2a1a00; border: 1px solid #d97706; }
+        .lambda .title { color: #fbbf24; }
+
+        .queue { background: #3d2800; border: 1px solid #FF9900; }
+        .queue .title { color: #ffb84d; }
+
+        .storage { background: #141e4a; border: 1px solid #3B48CC; }
+        .storage .title { color: #7b8af0; }
+
+        .ai { background: #3d2200; border: 1px solid #d97706; }
+        .ai .title { color: #fbbf24; }
+
+        /* Flow arrows */
+        .flow-section {
+            max-width: 1200px;
+            margin: 40px auto 0;
+        }
+
+        .flow {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .flow h3 {
+            font-size: 14px;
+            color: #fff;
+            margin-bottom: 12px;
+        }
+
+        .flow-steps {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .step {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .step .node {
+            background: #2a2a2a;
+            padding: 6px 12px;
+            border-radius: 6px;
+            color: #ccc;
+            white-space: nowrap;
+        }
+
+        .step .arrow {
+            color: #555;
+            font-size: 16px;
+        }
+
+        .step .node.highlight { background: #464EB8; color: #fff; }
+        .step .node.new { background: #d97706; color: #000; font-weight: 600; }
+        .step .node.channel-node { background: #0088cc; color: #fff; }
+
+        .legend {
+            max-width: 1200px;
+            margin: 32px auto 0;
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        .router-detail {
+            max-width: 1200px;
+            margin: 32px auto 0;
+        }
+
+        .router-detail .layer {
+            background: #111;
+        }
+
+        .tier-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 10px 0;
+            border-bottom: 1px solid #1f1f1f;
+        }
+
+        .tier-row:last-child { border-bottom: none; }
+
+        .tier-label {
+            min-width: 80px;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .tier-label.t1 { color: #22c55e; }
+        .tier-label.t2 { color: #3b82f6; }
+        .tier-label.t3 { color: #a855f7; }
+
+        .tier-desc {
+            font-size: 13px;
+            color: #aaa;
+            flex: 1;
+        }
+
+        .tier-path {
+            font-size: 12px;
+            color: #666;
+            font-family: "SF Mono", monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>T3nets Phase 3b — Async Skill Execution</h1>
+    <p class="subtitle">EventBridge + Lambda + SQS — High-Level Design</p>
+
+    <div class="diagram">
+        <!-- Layer 1: Channels -->
+        <div class="layer">
+            <div class="layer-title">External Channels</div>
+            <div class="boxes">
+                <div class="box channel">
+                    <div class="title">Telegram</div>
+                    <div class="detail">Bot API webhooks<br/>Commands + natural language</div>
+                </div>
+                <div class="box channel">
+                    <div class="title">Microsoft Teams</div>
+                    <div class="detail">Bot Framework webhooks<br/>Personal + group chat</div>
+                </div>
+                <div class="box channel">
+                    <div class="title">Dashboard</div>
+                    <div class="detail">Browser AJAX<br/>Primary dev interface</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Layer 2: API Gateway -->
+        <div class="layer">
+            <div class="layer-title">Ingress</div>
+            <div class="boxes">
+                <div class="box gateway" style="max-width: 100%; flex: unset; width: 100%;">
+                    <div class="title">API Gateway (HTTP v2)</div>
+                    <div class="detail">JWT authorizer for dashboard &nbsp;|&nbsp; Public routes for channel webhooks &nbsp;|&nbsp; VPC Link → ALB</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Layer 3: ECS Router -->
+        <div class="layer" style="border-color: #464EB8;">
+            <div class="layer-title">ECS Fargate — Router Container (stateless, scales horizontally)</div>
+            <div class="boxes">
+                <div class="box compute">
+                    <div class="title">Webhook Handlers</div>
+                    <div class="detail">Parse inbound from<br/>Telegram / Teams / Dashboard</div>
+                </div>
+                <div class="box compute">
+                    <div class="title">Hybrid Router</div>
+                    <div class="detail">Tier 1: Regex → conversational<br/>Tier 2: Rule match → skill<br/>Tier 3: Claude → tool call</div>
+                </div>
+                <div class="box compute" style="border-color: #d97706;">
+                    <div class="title" style="color: #fbbf24;">EventBridge Publisher</div>
+                    <div class="detail">Publishes skill.invoke events<br/>Stores pending request in DynamoDB</div>
+                </div>
+                <div class="box compute" style="border-color: #d97706;">
+                    <div class="title" style="color: #fbbf24;">SQS Poller (bg thread)</div>
+                    <div class="detail">Polls results queue<br/>Routes response via adapter</div>
+                </div>
+                <div class="box compute">
+                    <div class="title">Channel Adapters</div>
+                    <div class="detail">Send responses to<br/>Telegram / Teams / Dashboard</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Layer 4: Event Bus + Lambda -->
+        <div class="layer" style="border-color: #d97706;">
+            <div class="layer-title" style="color: #d97706;">New — Async Skill Execution</div>
+            <div class="boxes">
+                <div class="box event">
+                    <div class="title">EventBridge</div>
+                    <div class="detail">Event bus: agent.router<br/>Rule: skill.invoke → Lambda</div>
+                </div>
+                <div class="box lambda">
+                    <div class="title">Lambda Skill Executor</div>
+                    <div class="detail">Single function, routes by skill_name<br/>Loads registry, fetches secrets<br/>execute(params, secrets) → dict</div>
+                </div>
+                <div class="box queue">
+                    <div class="title">SQS Results Queue</div>
+                    <div class="detail">Skill results + request context<br/>DLQ for failed executions</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Layer 5: Data -->
+        <div class="layer">
+            <div class="layer-title">Data & Services</div>
+            <div class="boxes">
+                <div class="box storage">
+                    <div class="title">DynamoDB — Tenants</div>
+                    <div class="detail">Tenant settings, users<br/>Channel mappings (GSI)</div>
+                </div>
+                <div class="box storage">
+                    <div class="title">DynamoDB — Conversations</div>
+                    <div class="detail">Chat history per tenant<br/>TTL auto-cleanup</div>
+                </div>
+                <div class="box storage" style="border-color: #d97706;">
+                    <div class="title" style="color: #fbbf24;">DynamoDB — Pending Requests</div>
+                    <div class="detail">In-flight skill invocations<br/>Channel + conversation context<br/>TTL: 5 min</div>
+                </div>
+                <div class="box ai">
+                    <div class="title">Bedrock (Multi-Model)</div>
+                    <div class="detail">Claude, Nova, Llama<br/>Tier 1 & 3 routing<br/>Response formatting</div>
+                </div>
+                <div class="box gateway">
+                    <div class="title">Secrets Manager</div>
+                    <div class="detail">Jira, GitHub, Telegram<br/>tokens per tenant</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request Flows -->
+    <div class="flow-section">
+        <h2 style="font-size: 16px; margin-bottom: 16px;">Request Flows</h2>
+
+        <div class="flow">
+            <h3>Tier 1 — Conversational (sync, no skill)</h3>
+            <div class="flow-steps">
+                <span class="step"><span class="node channel-node">Channel</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node">API Gateway</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node highlight">Router (regex match)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node">Bedrock AI</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node highlight">Router</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node channel-node">Channel</span></span>
+            </div>
+        </div>
+
+        <div class="flow">
+            <h3>Tier 2 — Rule-Matched Skill (async via Lambda)</h3>
+            <div class="flow-steps">
+                <span class="step"><span class="node channel-node">Channel</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node highlight">Router (rule match)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node new">EventBridge</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node new">Lambda (skill)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node new">SQS</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node highlight">Router (poller)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node">Bedrock AI (format)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node channel-node">Channel</span></span>
+            </div>
+        </div>
+
+        <div class="flow">
+            <h3>Tier 3 — AI-Routed Skill (async via Lambda)</h3>
+            <div class="flow-steps">
+                <span class="step"><span class="node channel-node">Channel</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node highlight">Router</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node">Bedrock (tool choice)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node new">EventBridge</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node new">Lambda (skill)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node new">SQS</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node highlight">Router (poller)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node">Bedrock AI (format)</span><span class="arrow">→</span></span>
+                <span class="step"><span class="node channel-node">Channel</span></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #464EB8;"></div>
+            Existing (ECS Router)
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #d97706;"></div>
+            New in Phase 3b
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #0088cc;"></div>
+            External Channels
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #FF9900;"></div>
+            AWS Services
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #3B48CC;"></div>
+            Data Stores
+        </div>
+    </div>
+</body>
+</html>

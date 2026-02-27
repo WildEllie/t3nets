@@ -93,7 +93,7 @@
       ↳ ✅ Completed — see [handoff notes](../handoffs/012-telegram-channel-adapter.md)
 - [x] Settings UI — Channels tab with setup guides and connection testing
       ↳ ✅ Completed — see [handoff notes](../handoffs/012-telegram-channel-adapter.md)
-- [ ] **Milestone:** Team member asks sprint status in Teams or Telegram, gets answer
+- [x] **Milestone:** Team member asks sprint status in Teams or Telegram, gets answer
 
 ### Phase 3b: Async Skill Execution (EventBridge + Lambda + SQS)
 

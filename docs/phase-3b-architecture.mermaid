@@ -1,0 +1,102 @@
+graph TB
+    subgraph Channels["External Channels"]
+        TG["Telegram Bot API"]
+        TM["Microsoft Teams"]
+        DB["Dashboard Browser"]
+    end
+
+    subgraph AWS_APIGW["API Gateway (HTTP v2)"]
+        APIGW["Routes + JWT Authorizer"]
+    end
+
+    subgraph ECS["ECS Fargate — Router Container (Stateless, Horizontally Scalable)"]
+        direction TB
+        WH["Webhook Handlers<br/>Telegram / Teams / Dashboard"]
+        ROUTER["Hybrid Router<br/>Tier 1: Regex (conversational)<br/>Tier 2: Rule-matched skills<br/>Tier 3: AI-routed (Claude)"]
+        EB_PUB["EventBridge Publisher<br/>(EventBridgeBus)"]
+        SQS_POLL["SQS Poller<br/>(Background Thread)"]
+        CA["Channel Adapters<br/>Telegram / Teams / Dashboard"]
+
+        WH --> ROUTER
+        ROUTER -->|"Tier 1: direct response"| CA
+        ROUTER -->|"Tier 2 & 3: skill invocation"| EB_PUB
+        SQS_POLL -->|"result + context"| CA
+    end
+
+    subgraph EventBridge["Amazon EventBridge"]
+        EB["Event Bus<br/>source: agent.router<br/>detail-type: skill.invoke"]
+        RULE["Rule: skill.invoke → Lambda"]
+    end
+
+    subgraph Lambda["AWS Lambda — Skill Executor"]
+        LH["Lambda Handler<br/>(Single function, routes by skill_name)"]
+        SR["Skill Registry<br/>(loads skill.yaml + worker.py)"]
+        SW["Skill Workers<br/>execute(params, secrets) → dict"]
+
+        LH --> SR --> SW
+    end
+
+    subgraph SQS["Amazon SQS"]
+        RQ["Results Queue<br/>t3nets-skill-results"]
+        DLQ["Dead Letter Queue<br/>t3nets-skill-results-dlq"]
+    end
+
+    subgraph DynamoDB["Amazon DynamoDB"]
+        TENANTS["Tenants Table<br/>pk: TENANT#{id}<br/>GSI: channel-mapping, cognito-sub"]
+        CONVOS["Conversations Table<br/>pk: {tenant}#{channel}#{user}<br/>TTL enabled"]
+        PENDING["Pending Requests Table<br/>pk: {request_id}<br/>channel, conversation_id, tenant<br/>TTL: 5 min"]
+    end
+
+    subgraph Secrets["AWS Secrets Manager"]
+        SEC["Integration Credentials<br/>/t3nets/dev/tenants/{id}/{integration}"]
+    end
+
+    subgraph Bedrock["Amazon Bedrock"]
+        AI["Bedrock Converse API<br/>Claude, Nova, Llama<br/>Tier 1: conversational<br/>Tier 3: tool selection<br/>Response formatting"]
+    end
+
+    %% Inbound flow
+    TG -->|"webhook POST"| APIGW
+    TM -->|"webhook POST"| APIGW
+    DB -->|"AJAX"| APIGW
+    APIGW --> WH
+
+    %% Skill dispatch
+    EB_PUB -->|"put_events()"| EB
+    EB --> RULE
+    RULE -->|"async invoke"| LH
+
+    %% Skill execution dependencies
+    SW -->|"fetch creds"| SEC
+    LH -->|"store pending request"| PENDING
+
+    %% Result flow
+    SW -->|"send_message()"| RQ
+    RQ -.->|"failed after 3 retries"| DLQ
+    SQS_POLL -->|"receive_message()"| RQ
+    SQS_POLL -->|"resolve context"| PENDING
+
+    %% Router dependencies
+    ROUTER -->|"Tier 3: chat()"| AI
+    ROUTER -->|"load history"| CONVOS
+    ROUTER -->|"resolve tenant"| TENANTS
+    ROUTER -->|"save turn"| CONVOS
+    CA -->|"save pending"| PENDING
+
+    %% Outbound
+    CA -->|"sendMessage"| TG
+    CA -->|"reply to activity"| TM
+    CA -->|"SSE/JSON"| DB
+
+    %% Styling
+    classDef channel fill:#0088cc,color:#fff,stroke:none
+    classDef aws fill:#FF9900,color:#000,stroke:none
+    classDef compute fill:#464EB8,color:#fff,stroke:none
+    classDef storage fill:#3B48CC,color:#fff,stroke:none
+    classDef ai fill:#D97706,color:#fff,stroke:none
+
+    class TG,TM,DB channel
+    class APIGW,EB,RULE,RQ,DLQ,SEC aws
+    class WH,ROUTER,EB_PUB,SQS_POLL,CA,LH,SR,SW compute
+    class TENANTS,CONVOS,PENDING storage
+    class AI ai
