@@ -96,38 +96,29 @@
 - [x] **Milestone:** Team member asks sprint status in Teams or Telegram, gets answer
 
 ### Phase 3b: Async Skill Execution (EventBridge + Lambda + SQS)
+      ↳ 📋 Design reviewed and revised — see [handoff notes](../handoffs/013-phase-3b-design-review.md)
+      ↳ 📐 Full implementation plan: [plan-phase-3b-async-skills.md](plan-phase-3b-async-skills.md)
 
-Replace the synchronous DirectBus with an event-driven architecture. The router container stays stateless and horizontally scalable; skills run as Lambda functions.
+Replace the synchronous DirectBus with an event-driven architecture. The router container stays stateless and horizontally scalable; skills run as Lambda functions. Dashboard receives async results via SSE.
 
 **Architecture:**
 - Router container (ECS Fargate) handles webhooks, runs Tier 1/2/3 routing, owns all channel adapters
-- Skills execute as Lambda functions, invoked via EventBridge events
-- Responses flow back through SQS → router container → channel adapter → user
+- Skills execute as a single Lambda function, invoked via EventBridge events
+- Responses flow back through SQS → router container → channel adapter (SSE for dashboard, API push for Teams/Telegram)
 - All state lives in DynamoDB — router containers are fully stateless and can scale horizontally
-
-**Request flow:**
-1. Webhook → router container → routing decision (Tier 1/2/3)
-2. Router publishes `skill.execute.{name}` event to EventBridge with `RequestContext` (tenant, user, conversation, channel, message)
-3. EventBridge rule triggers the skill's Lambda function
-4. Lambda runs the skill worker (calls external APIs, optionally calls Bedrock for formatting)
-5. Lambda publishes `skill.response` event to EventBridge
-6. EventBridge routes response to SQS (response queue)
-7. Router container polls SQS in a background thread, picks up the response
-8. Router resolves the channel adapter from the `RequestContext` and calls `send_response()`
+- Lambda idempotency via DynamoDB status check (safe for EventBridge retries)
+- Lazy-loaded skill dependencies (no provisioned concurrency needed)
 
 **Implementation tasks:**
-- [ ] Define EventBridge event schemas (`skill.execute.*`, `skill.response`)
-- [ ] Create `EventBridgeBus` adapter implementing the `EventBus` interface
-- [ ] Create SQS response queue (Terraform module)
-- [ ] Add background SQS poller thread to router container
-- [ ] Store pending request context in DynamoDB (`PENDING#{request_id}` → channel info, conversation ID, tenant)
-- [ ] Package each skill as a Lambda function (shared base layer for common deps)
-- [ ] Terraform modules: EventBridge bus + rules, Lambda functions, IAM roles, SQS queue
-- [ ] Update router to publish events instead of calling DirectBus for skill execution
-- [ ] Keep DirectBus as fallback for local development (no Lambda locally)
-- [ ] Migrate Tier 1/2 conversational responses to stay synchronous (no Lambda needed — only skill executions go async)
-- [ ] Remove in-memory state from router container (service URL caches, any request-scoped state → DynamoDB)
-- [ ] Verify horizontal scaling: run 2+ ECS tasks behind ALB, confirm no message loss or duplicate responses
+- [ ] SSE endpoint (`GET /api/events`) for dashboard async results — AWS + local servers + dashboard JS
+- [ ] `EventBridgeBus` adapter implementing the `EventBus` interface
+- [ ] Lambda skill handler with idempotency check and lazy-loading
+- [ ] SQS poller background thread in router (WaitTimeSeconds=20)
+- [ ] Pending requests DynamoDB table (includes Teams service_url, status for idempotency)
+- [ ] Router code changes: feature flag, async result handling, remove in-memory state
+- [ ] Terraform modules: Lambda + IAM, EventBridge bus + rule + DLQ, SQS queue + DLQ, pending-requests table, SSE API Gateway route
+- [ ] Local development parity (DirectBus stays, SSE works locally)
+- [ ] Verify horizontal scaling: run 2+ ECS tasks, confirm no message loss or duplicate responses
 - [ ] **Milestone:** Skills run on Lambda, router is stateless, container scales horizontally
 
 ### Phase 4: Expand Skills
