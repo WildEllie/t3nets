@@ -22,12 +22,12 @@ resource "aws_dynamodb_table" "conversations" {
   range_key    = "sk"
 
   attribute {
-    name = "pk"   # {tenant_id}#channel#{user_id}
+    name = "pk" # {tenant_id}#channel#{user_id}
     type = "S"
   }
 
   attribute {
-    name = "sk"   # {session_id}
+    name = "sk" # {session_id}
     type = "S"
   }
 
@@ -48,18 +48,18 @@ resource "aws_dynamodb_table" "tenants" {
   range_key    = "sk"
 
   attribute {
-    name = "pk"   # TENANT#{tenant_id} or USER#{tenant_id}
+    name = "pk" # TENANT#{tenant_id} or USER#{tenant_id}
     type = "S"
   }
 
   attribute {
-    name = "sk"   # META, USER#{user_id}, SKILL#{skill_name}
+    name = "sk" # META, USER#{user_id}, SKILL#{skill_name}
     type = "S"
   }
 
   # GSI for channel-to-tenant resolution
   attribute {
-    name = "gsi1pk"   # CHANNEL#{channel_type}#{channel_specific_id}
+    name = "gsi1pk" # CHANNEL#{channel_type}#{channel_specific_id}
     type = "S"
   }
 
@@ -71,7 +71,7 @@ resource "aws_dynamodb_table" "tenants" {
 
   # GSI for cognito_sub → user lookup (cross-tenant)
   attribute {
-    name = "gsi2pk"   # COGNITO#{cognito_sub}
+    name = "gsi2pk" # COGNITO#{cognito_sub}
     type = "S"
   }
 

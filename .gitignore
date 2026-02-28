@@ -25,6 +25,9 @@ infra/**/*.tfstate
 infra/**/*.tfstate.backup
 infra/**/*.tfplan
 
+# Lambda build artifacts
+lambda_base.zip
+
 # Local data
 /data/
 *.sqlite

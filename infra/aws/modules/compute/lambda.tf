@@ -1,24 +1,23 @@
 ###############################################################################
-# Lambda — Skill Executor
+# Lambda — Ping Skill
 #
-# Single Lambda function that executes all skills. Dispatches by skill_name
-# from the EventBridge event payload. Checks DynamoDB for idempotency
-# before executing, then publishes results to SQS.
+# Terraform-managed Lambda for the ping skill. Built from real source code
+# via build_lambda_base.sh (not a placeholder). Domain-specific skills
+# (sprint_status, release_notes) are deployed by scripts/deploy.sh.
 #
-# Packaging: ZIP from the project root (agent/ + adapters/aws/ dirs).
-# Dependencies are lazy-loaded per skill to minimize cold start.
+# The shared IAM role is reused by deploy.sh for domain skill Lambdas.
 ###############################################################################
 
 # --- CloudWatch Log Group ---
 
-resource "aws_cloudwatch_log_group" "skill_executor" {
-  name              = "/aws/lambda/${local.name_prefix}-skill-executor"
+resource "aws_cloudwatch_log_group" "skill_ping" {
+  name              = "/aws/lambda/${local.name_prefix}-skill-ping"
   retention_in_days = 14
 
-  tags = { Name = "${local.name_prefix}-skill-executor-logs" }
+  tags = { Name = "${local.name_prefix}-skill-ping-logs" }
 }
 
-# --- IAM Role for Lambda ---
+# --- Shared IAM Role for all skill Lambdas ---
 
 resource "aws_iam_role" "lambda_skill_executor" {
   name = "${local.name_prefix}-lambda-skill-executor"
@@ -27,8 +26,8 @@ resource "aws_iam_role" "lambda_skill_executor" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
+        Action    = "sts:AssumeRole"
+        Effect    = "Allow"
         Principal = { Service = "lambda.amazonaws.com" }
       }
     ]
@@ -52,7 +51,9 @@ resource "aws_iam_role_policy" "lambda_skill_executor" {
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ]
-        Resource = "${aws_cloudwatch_log_group.skill_executor.arn}:*"
+        # Allow logging from any skill Lambda (deploy.sh creates log groups
+        # named /aws/lambda/${name_prefix}-skill-*)
+        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-skill-*:*"
       },
       {
         Sid    = "SecretsManagerRead"
@@ -77,39 +78,54 @@ resource "aws_iam_role_policy" "lambda_skill_executor" {
         Action = [
           "sqs:SendMessage",
         ]
-        # SQS queue is in sqs.tf within the same module
         Resource = aws_sqs_queue.skill_results.arn
       },
     ]
   })
 }
 
-# --- Lambda Function ---
+# --- Build the ping Lambda ZIP from source ---
 
-# Placeholder: the actual deployment package is built by scripts/deploy.sh
-# and uploaded via `aws lambda update-function-code`. The initial creation
-# uses a dummy ZIP so Terraform can create the resource.
+locals {
+  project_root = "${path.module}/../../../.."
 
-data "archive_file" "lambda_placeholder" {
-  type        = "zip"
-  output_path = "${path.module}/lambda_placeholder.zip"
+  # Source files that trigger a rebuild when changed
+  lambda_source_files = [
+    "${local.project_root}/adapters/aws/lambda_handler.py",
+    "${local.project_root}/adapters/aws/pending_requests.py",
+    "${local.project_root}/adapters/aws/secrets_manager.py",
+    "${local.project_root}/agent/skills/registry.py",
+    "${local.project_root}/agent/skills/ping/worker.py",
+    "${local.project_root}/agent/skills/ping/skill.yaml",
+  ]
 
-  source {
-    content  = "# Placeholder — real code deployed via scripts/deploy.sh"
-    filename = "lambda_handler.py"
+  # Hash of all source files — triggers rebuild when any change
+  lambda_source_hash = sha256(join(",", [
+    for f in local.lambda_source_files : filesha256(f)
+  ]))
+}
+
+resource "terraform_data" "build_lambda_base" {
+  triggers_replace = [local.lambda_source_hash]
+
+  provisioner "local-exec" {
+    command     = "bash ${local.project_root}/scripts/build_lambda_base.sh ${path.module}/lambda_base.zip"
+    working_dir = local.project_root
   }
 }
 
-resource "aws_lambda_function" "skill_executor" {
-  function_name = "${local.name_prefix}-skill-executor"
+# --- Ping Lambda Function ---
+
+resource "aws_lambda_function" "skill_ping" {
+  function_name = "${local.name_prefix}-skill-ping"
   role          = aws_iam_role.lambda_skill_executor.arn
   handler       = "adapters.aws.lambda_handler.handler"
   runtime       = "python3.12"
   timeout       = 30
   memory_size   = var.lambda_memory_size
 
-  filename         = data.archive_file.lambda_placeholder.output_path
-  source_code_hash = data.archive_file.lambda_placeholder.output_base64sha256
+  filename         = "${path.module}/lambda_base.zip"
+  source_code_hash = local.lambda_source_hash
 
   environment {
     variables = {
@@ -122,7 +138,10 @@ resource "aws_lambda_function" "skill_executor" {
     }
   }
 
-  tags = { Name = "${local.name_prefix}-skill-executor" }
+  tags = { Name = "${local.name_prefix}-skill-ping" }
 
-  depends_on = [aws_cloudwatch_log_group.skill_executor]
+  depends_on = [
+    aws_cloudwatch_log_group.skill_ping,
+    terraform_data.build_lambda_base,
+  ]
 }

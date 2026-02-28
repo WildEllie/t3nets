@@ -172,8 +172,8 @@ resource "aws_iam_role" "ecs_task_execution" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
+        Action    = "sts:AssumeRole"
+        Effect    = "Allow"
         Principal = { Service = "ecs-tasks.amazonaws.com" }
       }
     ]
@@ -193,8 +193,8 @@ resource "aws_iam_role" "ecs_task" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
+        Action    = "sts:AssumeRole"
+        Effect    = "Allow"
         Principal = { Service = "ecs-tasks.amazonaws.com" }
       }
     ]
@@ -309,7 +309,7 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "disabled"  # Enable in prod
+    value = "disabled" # Enable in prod
   }
 
   tags = { Name = "${local.name_prefix}-cluster" }
@@ -436,16 +436,29 @@ output "router_security_group_id" {
 }
 
 # Phase 3b outputs
-output "skill_executor_function_name" {
-  value = aws_lambda_function.skill_executor.function_name
+output "skill_ping_function_name" {
+  value = aws_lambda_function.skill_ping.function_name
 }
 
-output "skill_executor_function_arn" {
-  value = aws_lambda_function.skill_executor.arn
+output "skill_ping_function_arn" {
+  value = aws_lambda_function.skill_ping.arn
+}
+
+output "lambda_role_arn" {
+  description = "Shared IAM role ARN for all skill Lambdas (used by deploy.sh)"
+  value       = aws_iam_role.lambda_skill_executor.arn
 }
 
 output "eventbridge_bus_name" {
   value = aws_cloudwatch_event_bus.skills.name
+}
+
+output "eventbridge_bus_arn" {
+  value = aws_cloudwatch_event_bus.skills.arn
+}
+
+output "eventbridge_dlq_arn" {
+  value = aws_sqs_queue.eventbridge_dlq.arn
 }
 
 output "sqs_results_queue_url" {
@@ -454,4 +467,12 @@ output "sqs_results_queue_url" {
 
 output "sqs_results_queue_arn" {
   value = aws_sqs_queue.skill_results.arn
+}
+
+output "pending_requests_table_name" {
+  value = var.pending_requests_table_name
+}
+
+output "secrets_prefix" {
+  value = var.secrets_prefix
 }

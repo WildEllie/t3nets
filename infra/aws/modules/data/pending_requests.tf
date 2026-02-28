@@ -22,7 +22,7 @@ resource "aws_dynamodb_table" "pending_requests" {
   hash_key     = "pk"
 
   attribute {
-    name = "pk"   # {request_id}
+    name = "pk" # {request_id}
     type = "S"
   }
 

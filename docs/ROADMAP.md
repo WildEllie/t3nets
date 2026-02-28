@@ -148,6 +148,11 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
 - [ ] Custom practices — allow tenants to create their own practice by selecting skills to add or remove
 - [ ] Practice management UI in dashboard (browse, select, customize, save)
 - [ ] Persist custom practices in DynamoDB / SQLite tenant settings
+- [ ] `POST /api/skills/upload` — accept a skill ZIP (worker.py + skill.yaml), validate, create Lambda + EventBridge rule
+- [ ] `POST /api/practices/upload` — accept a practice bundle ZIP (multiple skill ZIPs), deploy all skills
+- [ ] S3-backed skill storage for uploaded ZIPs
+- [ ] Lambda hot-reload — pull skills from S3 on cold start
+- [ ] Skill versioning and rollback
 - [ ] **Milestone:** Tenants can pick a practice or build a custom one from the skill catalog
 
 ### Phase 6: Dashboard & UX

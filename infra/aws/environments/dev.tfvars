@@ -3,8 +3,8 @@ project          = "t3nets"
 environment      = "dev"
 aws_region       = "us-east-1"
 router_image_tag = "latest"
-router_cpu       = 256    # 0.25 vCPU (minimum, cheap)
-router_memory    = 512    # 512 MB
+router_cpu       = 256 # 0.25 vCPU (minimum, cheap)
+router_memory    = 512 # 512 MB
 bedrock_model_id = "anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 # Cognito callback URLs — localhost for local dev, API Gateway for deployed app
