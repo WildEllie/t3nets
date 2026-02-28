@@ -44,6 +44,9 @@ class PendingRequest:
     is_raw: bool = False            # --raw flag
     user_message: str = ""          # original user message (for conversation saving)
     created_at: float = 0.0        # Unix timestamp
+    model_id: str = ""              # Bedrock model ID (with geo prefix) for AI formatting
+    model_short_name: str = ""      # Short display name (e.g. "Nova Micro")
+    route_type: str = ""            # "rule" or "ai" — original routing decision
 
 
 class PendingRequestsStore:
@@ -71,6 +74,9 @@ class PendingRequestsStore:
             "service_url": request.service_url,
             "is_raw": request.is_raw,
             "user_message": request.user_message,
+            "model_id": request.model_id,
+            "model_short_name": request.model_short_name,
+            "route_type": request.route_type,
             "created_at": str(now),
             "ttl": int(now + PENDING_TTL_SECONDS),
         })
@@ -105,6 +111,9 @@ class PendingRequestsStore:
             is_raw=item.get("is_raw", False),
             user_message=item.get("user_message", ""),
             created_at=float(item.get("created_at", 0)),
+            model_id=item.get("model_id", ""),
+            model_short_name=item.get("model_short_name", ""),
+            route_type=item.get("route_type", ""),
         )
 
     def mark_completed(self, request_id: str) -> bool:

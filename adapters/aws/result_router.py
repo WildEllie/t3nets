@@ -59,11 +59,13 @@ class AsyncResultRouter:
         pending_store: PendingRequestsStore,
         ai_provider=None,
         conversation_store=None,
+        bedrock_model_id: str = "",
     ):
         self.sse = push_client
         self.pending = pending_store
         self.ai = ai_provider
         self.memory = conversation_store
+        self._bedrock_model_id = bedrock_model_id
 
     def handle_result(self, message: dict) -> None:
         """
@@ -105,9 +107,10 @@ class AsyncResultRouter:
             logger.warning(f"AsyncResultRouter: unknown channel '{reply_channel}'")
 
     def _route_dashboard(self, request_id, result, skill_name, pending_req):
-        """Push result to dashboard via SSE."""
+        """Push result to dashboard via push client (SSE or WebSocket)."""
         user_key = pending_req.user_key if pending_req else ""
         is_raw = pending_req.is_raw if pending_req else False
+        route_type = (pending_req.route_type if pending_req else "") or "rule"
 
         if not user_key:
             logger.warning(
@@ -122,34 +125,55 @@ class AsyncResultRouter:
                 "text": json.dumps(result, indent=2),
                 "raw": True,
                 "skill": skill_name,
+                "route": route_type,
+                "tokens": 0,
+                "model": "",
             })
         else:
             # Format with AI if available, otherwise send raw
-            formatted_text = self._format_result(result, skill_name, pending_req)
+            formatted_text, fmt_tokens, fmt_model = self._format_result(
+                result, skill_name, pending_req,
+            )
             delivered = self.sse.send_event(user_key, "message", {
                 "request_id": request_id,
                 "text": formatted_text,
                 "raw": False,
                 "skill": skill_name,
+                "route": route_type,
+                "tokens": fmt_tokens,
+                "model": fmt_model,
             })
 
-        # Save conversation turn if we have the context
-        if pending_req and self.memory and not is_raw:
+        # Save conversation turn with full metadata (survives page reload)
+        if pending_req and self.memory:
             try:
+                text = formatted_text if not is_raw else json.dumps(result, indent=2)
+                save_tokens = fmt_tokens if not is_raw else 0
+                save_model = fmt_model if not is_raw else ""
+                import time as _time
+                roundtrip_sec = round(_time.time() - pending_req.created_at, 1) if pending_req.created_at else 0
                 _run_async(
                     self.memory.save_turn(
                         pending_req.tenant_id,
                         pending_req.conversation_id,
                         pending_req.user_message,
-                        formatted_text if not is_raw else json.dumps(result, indent=2),
-                        metadata={"route": "async", "skill": skill_name},
+                        text,
+                        metadata={
+                            "route": route_type,
+                            "skill": skill_name,
+                            "tokens": save_tokens,
+                            "model": save_model,
+                            "user_email": pending_req.user_key,
+                            "timestamp": int(pending_req.created_at * 1000) if pending_req.created_at else 0,
+                            "roundtrip_sec": roundtrip_sec,
+                        },
                     )
                 )
             except Exception as e:
                 logger.error(f"AsyncResultRouter: failed to save turn: {e}")
 
         logger.info(
-            f"AsyncResultRouter: SSE delivered to {delivered} connection(s) "
+            f"AsyncResultRouter: delivered to {delivered} connection(s) "
             f"for user {user_key[:20]}"
         )
 
@@ -171,7 +195,7 @@ class AsyncResultRouter:
         try:
             from agent.channels.teams import TeamsAdapter
 
-            formatted_text = self._format_result(result, skill_name, pending_req)
+            formatted_text, _, _ = self._format_result(result, skill_name, pending_req)
             # TeamsAdapter.send_proactive_message() would go here
             # For now, log that we'd send to Teams
             logger.info(
@@ -193,7 +217,7 @@ class AsyncResultRouter:
         try:
             from agent.channels.telegram import TelegramAdapter
 
-            formatted_text = self._format_result(result, skill_name, pending_req)
+            formatted_text, _, _ = self._format_result(result, skill_name, pending_req)
             # TelegramAdapter.send_message() would go here
             logger.info(
                 f"AsyncResultRouter: would send Telegram reply to "
@@ -203,17 +227,31 @@ class AsyncResultRouter:
         except Exception as e:
             logger.exception(f"AsyncResultRouter: Telegram routing failed: {e}")
 
-    def _format_result(self, result: dict, skill_name: str, pending_req) -> str:
+    def _format_result(
+        self, result: dict, skill_name: str, pending_req,
+    ) -> tuple[str, int, str]:
         """
         Format a skill result into human-readable text.
 
+        Returns (formatted_text, total_tokens, model_short_name).
         If AI provider is available, uses Claude to format the result.
-        Otherwise, returns a simple JSON dump.
+        Otherwise, returns a simple JSON dump with 0 tokens.
         """
         if "error" in result:
-            return f"Sorry, the {skill_name} skill encountered an error: {result['error']}"
+            return (
+                f"Sorry, the {skill_name} skill encountered an error: {result['error']}",
+                0,
+                "",
+            )
 
-        if self.ai:
+        # Use tenant's model from the pending request, fall back to server default
+        active_model = (
+            (pending_req.model_id if pending_req else "")
+            or self._bedrock_model_id
+        )
+        model_short = (pending_req.model_short_name if pending_req else "") or ""
+
+        if self.ai and active_model:
             try:
                 user_msg = pending_req.user_message if pending_req else ""
                 prompt = (
@@ -222,20 +260,26 @@ class AsyncResultRouter:
                     f"{json.dumps(result, indent=2)}\n\n"
                     "Format this clearly and concisely for the user."
                 )
-                # Use a lightweight model call for formatting
-                from agent.models.ai_models import DEFAULT_MODEL_ID, get_model_for_provider
-                model = get_model_for_provider("bedrock", DEFAULT_MODEL_ID)
                 response = _run_async(
                     self.ai.chat(
-                        model.model_id,
+                        active_model,
                         "You are a helpful assistant. Format the data clearly.",
                         [{"role": "user", "content": prompt}],
                         [],
                     )
                 )
-                return response.text or json.dumps(result, indent=2)
+                tokens = response.input_tokens + response.output_tokens
+                return (
+                    response.text or json.dumps(result, indent=2),
+                    tokens,
+                    model_short,
+                )
             except Exception as e:
                 logger.warning(f"AsyncResultRouter: AI formatting failed: {e}")
 
         # Fallback: simple text format
-        return f"**{skill_name}** result:\n```json\n{json.dumps(result, indent=2)}\n```"
+        return (
+            f"**{skill_name}** result:\n```json\n{json.dumps(result, indent=2)}\n```",
+            0,
+            "",
+        )

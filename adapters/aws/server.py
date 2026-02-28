@@ -1284,6 +1284,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             conversation_id = body.get("conversation_id", "default")
             clean_text, is_raw = strip_raw_flag(text)
             is_raw_response = False
+            request_start = time.time()
 
             logger.info(f"Chat [{tenant_id}]: {text[:100]}" + (" [RAW]" if is_raw else ""))
 
@@ -1314,6 +1315,7 @@ When you have data to present, format it clearly with structure."""
                         return self._handle_async_skill(
                             tenant_id, user_email, match.skill_name, match.params,
                             conversation_id, clean_text, is_raw, "rule",
+                            active_model, model_short_name,
                         )
 
                     # --- Sync fallback: DirectBus ---
@@ -1353,6 +1355,7 @@ When you have data to present, format it clearly with structure."""
                             return self._handle_async_skill(
                                 tenant_id, user_email, tc.tool_name, tc.tool_params,
                                 conversation_id, clean_text, is_raw, "ai",
+                                active_model, model_short_name,
                             )
 
                         # --- Sync fallback ---
@@ -1381,10 +1384,13 @@ When you have data to present, format it clearly with structure."""
                         route_type = "ai"
 
             stats["total_tokens"] += total_tokens
+            roundtrip_sec = round(time.time() - request_start, 1)
             chat_metadata: dict = {
                 "route": route_type,
                 "model": model_short_name,
                 "tokens": total_tokens,
+                "timestamp": int(request_start * 1000),
+                "roundtrip_sec": roundtrip_sec,
             }
             if user_email:
                 chat_metadata["user_email"] = user_email
@@ -1415,10 +1421,11 @@ When you have data to present, format it clearly with structure."""
     def _handle_async_skill(
         self, tenant_id, user_email, skill_name, params,
         conversation_id, user_message, is_raw, route_type,
+        model_id="", model_short_name="",
     ):
         """
         Publish a skill invocation to EventBridge and return immediately.
-        The result will arrive later via SQS → SSE.
+        The result will arrive later via WebSocket (or SSE).
         """
         import uuid
 
@@ -1436,6 +1443,9 @@ When you have data to present, format it clearly with structure."""
             user_key=user_key,
             is_raw=is_raw,
             user_message=user_message,
+            model_id=model_id,
+            model_short_name=model_short_name,
+            route_type=route_type,
         )
         pending_store.create(pending_req)
 
@@ -1451,7 +1461,7 @@ When you have data to present, format it clearly with structure."""
             f"request={request_id[:8]}, user={user_key}"
         )
 
-        # Return immediately — client will receive result via SSE
+        # Return immediately — client will receive result via WebSocket/SSE
         self._json_response({
             "status": "processing",
             "request_id": request_id,
@@ -2114,6 +2124,7 @@ def init():
                 pending_store=pending_store,
                 ai_provider=ai,
                 conversation_store=memory,
+                bedrock_model_id=BEDROCK_MODEL_ID,
             )
             sqs_poller = SQSResultPoller(
                 queue_url=sqs_queue_url,
