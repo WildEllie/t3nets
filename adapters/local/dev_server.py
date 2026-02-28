@@ -20,11 +20,13 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -45,6 +47,7 @@ from agent.models.tenant import Invitation
 from agent.channels.teams import TeamsAdapter
 from agent.channels.telegram import TelegramAdapter
 from agent.models.message import ChannelType
+from agent.sse import SSEConnectionManager, start_keepalive_thread
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
@@ -197,6 +200,10 @@ stats = {
 }
 
 
+# --- SSE Connection Manager (shared module) ---
+sse_manager = SSEConnectionManager()
+
+
 def _run_async(coro):
     """Run async code from sync context."""
     return asyncio.run(coro)
@@ -246,7 +253,8 @@ class DevHandler(BaseHTTPRequestHandler):
     """HTTP request handler for local development."""
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
 
         if path == "/" or path == "/chat":
             self._serve_file("chat.html")
@@ -256,6 +264,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._serve_file("settings.html")
         elif path == "/onboard":
             self._serve_file("onboard.html")
+        elif path == "/api/events":
+            self._handle_sse()
         elif path == "/api/health":
             self._handle_health_api()
         elif path == "/api/settings":
@@ -388,6 +398,7 @@ class DevHandler(BaseHTTPRequestHandler):
                 },
                 "integrations": all_integrations,
                 "skills": skills_info,
+                "sse_connections": sse_manager.connection_count,
             }
 
             self._json_response(health)
@@ -782,6 +793,75 @@ class DevHandler(BaseHTTPRequestHandler):
             self._json_response({"ok": True})
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
+
+    def _handle_sse(self):
+        """Server-Sent Events endpoint for async skill results.
+
+        The dashboard opens GET /api/events to receive push notifications
+        when async skill execution completes. Connection stays open until
+        the client disconnects.
+
+        Auth: JWT passed via query param (SSE doesn't support custom headers).
+        Keepalive comments sent every 15s to prevent timeout.
+        """
+        try:
+            # Extract user identity from query param or Authorization header
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            user_key = DEFAULT_TENANT  # fallback for local dev
+
+            # Try JWT from query param (primary for SSE)
+            token = params.get("token", [None])[0]
+            if not token:
+                # Fall back to Authorization header (useful for testing)
+                auth_header = self.headers.get("Authorization", "")
+                if auth_header.startswith("Bearer "):
+                    token = auth_header[7:]
+
+            if token:
+                try:
+                    import base64
+                    payload_b64 = token.split(".")[1]
+                    padding = 4 - len(payload_b64) % 4
+                    if padding != 4:
+                        payload_b64 += "=" * padding
+                    claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+                    user_key = claims.get("email", "") or claims.get("sub", "") or user_key
+                except Exception:
+                    pass
+
+            # Open SSE stream
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("X-Accel-Buffering", "no")  # Disable nginx buffering
+            self.end_headers()
+
+            # Send initial connection confirmation
+            self.wfile.write(b"event: connected\ndata: {\"status\": \"ok\"}\n\n")
+            self.wfile.flush()
+
+            # Register this connection
+            sse_manager.register(user_key, self.wfile)
+            logger.info(f"SSE: client connected (user={user_key})")
+
+            try:
+                # Keep connection alive — block until client disconnects.
+                # Keepalive is handled by the background thread.
+                while True:
+                    time.sleep(1)
+                    # Check if connection is still alive by catching write errors
+                    # (the keepalive thread handles actual keepalive writes)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                sse_manager.unregister(user_key, self.wfile)
+                logger.info(f"SSE: client disconnected (user={user_key})")
+
+        except Exception as e:
+            logger.exception("SSE connection error")
 
     def _handle_chat(self):
         """Handle a chat message with hybrid routing."""
@@ -1678,11 +1758,24 @@ def init():
     logger.info(f"Connected integrations: {connected}")
 
 
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """HTTP server that handles each request in a new thread.
+
+    Required for SSE: long-lived SSE connections would block a single-threaded
+    server from handling other requests. Each SSE client and each chat POST
+    gets its own thread.
+    """
+    daemon_threads = True
+
+
 def main():
     init()
 
+    # Start SSE keepalive background thread
+    start_keepalive_thread(sse_manager)
+
     port = int(os.getenv("PORT", "8080"))
-    server = HTTPServer(("0.0.0.0", port), DevHandler)
+    server = ThreadedHTTPServer(("0.0.0.0", port), DevHandler)
 
     logger.info(f"")
     logger.info(f"  ╔══════════════════════════════════════╗")
@@ -1693,6 +1786,7 @@ def main():
     logger.info(f"  ║                                      ║")
     logger.info(f"  ║  Routing: Rules → Claude (hybrid)    ║")
     logger.info(f"  ║  Debug:   append --raw to messages   ║")
+    logger.info(f"  ║  SSE:     /api/events (async push)   ║")
     logger.info(f"  ╚══════════════════════════════════════╝")
     logger.info(f"")
 

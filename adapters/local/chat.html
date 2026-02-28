@@ -561,6 +561,95 @@
         const sendBtn = document.getElementById('send-btn');
         let conversationId = 'dashboard-default';
 
+        // --- SSE Connection for async skill results ---
+        // Tracks pending async requests so SSE results can update the correct UI element.
+        const pendingRequests = {};  // request_id → {thinkingEl, conversationId}
+        let sseConnection = null;
+
+        function connectSSE() {
+            if (sseConnection) return;
+
+            const token = localStorage.getItem('t3nets_id_token') || '';
+            const url = '/api/events' + (token ? '?token=' + encodeURIComponent(token) : '');
+
+            sseConnection = new EventSource(url);
+
+            sseConnection.addEventListener('connected', function(e) {
+                console.log('SSE: connected', JSON.parse(e.data));
+            });
+
+            sseConnection.addEventListener('message', function(e) {
+                // Async skill result arrived
+                const data = JSON.parse(e.data);
+                const requestId = data.request_id;
+
+                if (requestId && pendingRequests[requestId]) {
+                    const pending = pendingRequests[requestId];
+
+                    // Remove thinking indicator
+                    if (pending.thinkingEl && pending.thinkingEl.parentNode) {
+                        pending.thinkingEl.remove();
+                    }
+
+                    // Render the response
+                    if (data.error) {
+                        addErrorMessage({
+                            message: data.error,
+                            severity: data.severity || 'info',
+                        });
+                    } else {
+                        addMessage(
+                            data.text || 'No response',
+                            'assistant',
+                            data.tokens,
+                            data.route,
+                            data.raw,
+                            data.model
+                        );
+                    }
+
+                    // Re-enable input
+                    sendBtn.disabled = false;
+                    input.disabled = false;
+                    input.focus();
+
+                    delete pendingRequests[requestId];
+                }
+            });
+
+            sseConnection.addEventListener('error', function(e) {
+                // Async skill error
+                const data = JSON.parse(e.data);
+                const requestId = data.request_id;
+
+                if (requestId && pendingRequests[requestId]) {
+                    const pending = pendingRequests[requestId];
+                    if (pending.thinkingEl && pending.thinkingEl.parentNode) {
+                        pending.thinkingEl.remove();
+                    }
+                    addErrorMessage({
+                        message: data.message || 'Skill execution failed',
+                        severity: data.severity || 'info',
+                    });
+                    sendBtn.disabled = false;
+                    input.disabled = false;
+                    input.focus();
+                    delete pendingRequests[requestId];
+                }
+            });
+
+            sseConnection.onerror = function() {
+                console.log('SSE: connection lost, will auto-reconnect');
+                sseConnection = null;
+                // EventSource auto-reconnects. Reset our reference so connectSSE()
+                // can be called again if needed.
+                setTimeout(connectSSE, 2000);
+            };
+        }
+
+        // Start SSE connection on page load
+        connectSSE();
+
         input.addEventListener('input', function() {
             this.style.height = 'auto';
             this.style.height = Math.min(this.scrollHeight, 120) + 'px';
@@ -641,14 +730,27 @@
                 });
 
                 const data = await response.json();
-                thinking.remove();
 
                 if (response.status === 401) {
-                    // Token expired or invalid — redirect to login
+                    thinking.remove();
                     localStorage.removeItem('t3nets_id_token');
                     window.location.href = '/login';
                     return;
                 }
+
+                // Async processing — result will arrive via SSE
+                if (data.status === 'processing' && data.request_id) {
+                    pendingRequests[data.request_id] = {
+                        thinkingEl: thinking,
+                        conversationId: data.conversation_id || conversationId,
+                    };
+                    // Keep thinking indicator visible, input disabled.
+                    // SSE 'message' event will handle cleanup.
+                    return;
+                }
+
+                // Synchronous response (conversational, or async not enabled)
+                thinking.remove();
 
                 if (data.error || data.message) {
                     addErrorMessage(data.error ? data : { message: data.message, severity: 'config' });

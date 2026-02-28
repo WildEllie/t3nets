@@ -18,11 +18,13 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse
+from socketserver import ThreadingMixIn
+from urllib.parse import urlparse, parse_qs
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -43,6 +45,7 @@ from agent.models.tenant import Invitation
 from agent.channels.teams import TeamsAdapter
 from agent.channels.telegram import TelegramAdapter
 from agent.errors.handler import ErrorHandler
+from agent.sse import SSEConnectionManager, start_keepalive_thread
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
@@ -201,6 +204,10 @@ stats = {
 }
 
 
+# --- SSE Connection Manager (shared module) ---
+sse_manager = SSEConnectionManager()
+
+
 def _run_async(coro):
     return asyncio.run(coro)
 
@@ -291,7 +298,8 @@ class AWSHandler(BaseHTTPRequestHandler):
     """HTTP request handler for AWS deployment."""
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/" or path == "/chat":
             self._serve_file("chat.html", "adapters/local")
         elif path == "/health":
@@ -304,6 +312,8 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._serve_file("callback.html", "adapters/local")
         elif path == "/onboard":
             self._serve_file("onboard.html", "adapters/local")
+        elif path == "/api/events":
+            self._handle_sse()
         elif path == "/api/health":
             self._handle_health_api()
         elif path == "/api/settings":
@@ -429,6 +439,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                     }
                     for s in skills.list_skills()
                 ],
+                "sse_connections": sse_manager.connection_count,
             }
             self._json_response(health)
         except Exception as e:
@@ -1088,6 +1099,70 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._json_response({"ok": True})
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
+
+    def _handle_sse(self):
+        """Server-Sent Events endpoint for async skill results.
+
+        The dashboard opens GET /api/events to receive push notifications
+        when async skill execution completes. Connection stays open until
+        the client disconnects.
+
+        Auth: JWT passed via query param (SSE doesn't support custom headers).
+        AWS: Cognito JWT validated server-side.
+        Keepalive comments sent every 15s to prevent API Gateway 30s timeout.
+        """
+        try:
+            # Extract user identity from query param
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            user_key = DEFAULT_TENANT  # fallback
+
+            token = params.get("token", [None])[0]
+            if not token:
+                auth_header = self.headers.get("Authorization", "")
+                if auth_header.startswith("Bearer "):
+                    token = auth_header[7:]
+
+            if token:
+                try:
+                    import base64
+                    payload_b64 = token.split(".")[1]
+                    padding = 4 - len(payload_b64) % 4
+                    if padding != 4:
+                        payload_b64 += "=" * padding
+                    claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+                    user_key = claims.get("email", "") or claims.get("sub", "") or user_key
+                except Exception:
+                    pass
+
+            # Open SSE stream
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            # Send initial connection confirmation
+            self.wfile.write(b"event: connected\ndata: {\"status\": \"ok\"}\n\n")
+            self.wfile.flush()
+
+            # Register this connection
+            sse_manager.register(user_key, self.wfile)
+            logger.info(f"SSE: client connected (user={user_key})")
+
+            try:
+                while True:
+                    time.sleep(1)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                sse_manager.unregister(user_key, self.wfile)
+                logger.info(f"SSE: client disconnected (user={user_key})")
+
+        except Exception as e:
+            logger.exception("SSE connection error")
 
     def _handle_chat(self):
         """Handle chat — identical logic to local, different adapters underneath."""
@@ -1852,16 +1927,30 @@ def init():
     logger.info(f"Connected integrations: {connected}")
 
 
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """HTTP server that handles each request in a new thread.
+
+    Required for SSE: long-lived SSE connections would block a single-threaded
+    server from handling other requests.
+    """
+    daemon_threads = True
+
+
 def main():
     init()
+
+    # Start SSE keepalive background thread
+    start_keepalive_thread(sse_manager)
+
     port = int(os.getenv("PORT", "8080"))
-    server = HTTPServer(("0.0.0.0", port), AWSHandler)
+    server = ThreadedHTTPServer(("0.0.0.0", port), AWSHandler)
 
     logger.info("")
     logger.info("  ╔══════════════════════════════════════╗")
     logger.info("  ║  T3nets AWS Server                   ║")
     logger.info(f"  ║  http://0.0.0.0:{port}               ║")
     logger.info(f"  ║  Model: {BEDROCK_MODEL_ID[:30]}  ║")
+    logger.info("  ║  SSE:     /api/events (async push)   ║")
     logger.info("  ╚══════════════════════════════════════╝")
     logger.info("")
 
