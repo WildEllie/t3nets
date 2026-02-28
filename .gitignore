@@ -27,6 +27,7 @@ infra/**/*.tfplan
 
 # Lambda build artifacts
 lambda_base.zip
+ws_handler.zip
 
 # Local data
 /data/
