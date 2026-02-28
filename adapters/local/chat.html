@@ -572,12 +572,17 @@
 
             const pending = pendingRequests[requestId];
 
+            // Clear async timers
+            if (pending.slowTimer) clearTimeout(pending.slowTimer);
+            if (pending.timeoutTimer) clearTimeout(pending.timeoutTimer);
+
             // Remove thinking indicator
             if (pending.thinkingEl && pending.thinkingEl.parentNode) {
                 pending.thinkingEl.remove();
             }
 
             // Render the response
+            const roundtrip = pending.sendTime ? (Date.now() - pending.sendTime) / 1000 : 0;
             if (data.error) {
                 addErrorMessage({
                     message: data.error,
@@ -590,7 +595,10 @@
                     data.tokens,
                     data.route,
                     data.raw,
-                    data.model
+                    data.model,
+                    '',
+                    0,
+                    roundtrip
                 );
             }
 
@@ -607,6 +615,11 @@
             if (!requestId || !pendingRequests[requestId]) return;
 
             const pending = pendingRequests[requestId];
+
+            // Clear async timers
+            if (pending.slowTimer) clearTimeout(pending.slowTimer);
+            if (pending.timeoutTimer) clearTimeout(pending.timeoutTimer);
+
             if (pending.thinkingEl && pending.thinkingEl.parentNode) {
                 pending.thinkingEl.remove();
             }
@@ -756,7 +769,8 @@
             if (welcome) welcome.remove();
 
             const currentEmail = parseJwtEmail(localStorage.getItem('t3nets_id_token') || '') || '';
-            addMessage(text, 'user', undefined, undefined, false, undefined, currentEmail);
+            const sendTime = Date.now();
+            addMessage(text, 'user', 0, '', false, '', currentEmail, sendTime);
             input.value = '';
             input.style.height = 'auto';
 
@@ -788,14 +802,34 @@
                     return;
                 }
 
-                // Async processing — result will arrive via SSE
+                // Async processing — result will arrive via WebSocket/SSE
                 if (data.status === 'processing' && data.request_id) {
-                    pendingRequests[data.request_id] = {
+                    var reqId = data.request_id;
+                    var slowTimer = setTimeout(function() {
+                        if (pendingRequests[reqId]) {
+                            thinking.innerHTML = 'Still working — taking longer than usual<span class="dots"></span>';
+                        }
+                    }, 24000);
+                    var timeoutTimer = setTimeout(function() {
+                        if (pendingRequests[reqId]) {
+                            thinking.remove();
+                            addErrorMessage({
+                                message: 'Request timed out — the skill did not respond within 60 seconds. Try again or check the integration settings.',
+                                severity: 'info',
+                            });
+                            sendBtn.disabled = false;
+                            input.disabled = false;
+                            input.focus();
+                            delete pendingRequests[reqId];
+                        }
+                    }, 60000);
+                    pendingRequests[reqId] = {
                         thinkingEl: thinking,
                         conversationId: data.conversation_id || conversationId,
+                        slowTimer: slowTimer,
+                        timeoutTimer: timeoutTimer,
+                        sendTime: sendTime,
                     };
-                    // Keep thinking indicator visible, input disabled.
-                    // SSE 'message' event will handle cleanup.
                     return;
                 }
 
@@ -805,7 +839,8 @@
                 if (data.error || data.message) {
                     addErrorMessage(data.error ? data : { message: data.message, severity: 'config' });
                 } else {
-                    addMessage(data.text || 'No response', 'assistant', data.tokens, data.route, data.raw, data.model);
+                    const roundtrip = (Date.now() - sendTime) / 1000;
+                    addMessage(data.text || 'No response', 'assistant', data.tokens, data.route, data.raw, data.model, '', 0, roundtrip);
                 }
             } catch (err) {
                 thinking.remove();
@@ -817,14 +852,20 @@
             input.focus();
         }
 
-        function addMessage(text, type, tokens, route, isRaw, modelName, senderEmail) {
+        function addMessage(text, type, tokens, route, isRaw, modelName, senderEmail, timestamp, roundtripSec) {
             const div = document.createElement('div');
             div.className = 'message ' + type;
 
-            if (senderEmail && type === 'user') {
+            if (type === 'user' && (senderEmail || timestamp)) {
                 const sender = document.createElement('div');
                 sender.className = 'message-sender';
-                sender.textContent = senderEmail;
+                const parts = [];
+                if (senderEmail) parts.push(senderEmail);
+                if (timestamp) {
+                    const d = new Date(timestamp);
+                    parts.push(d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}));
+                }
+                sender.textContent = parts.join(' · ');
                 div.appendChild(sender);
             }
 
@@ -882,6 +923,15 @@
                     const tok = document.createElement('span');
                     tok.textContent = '0 tokens (no AI)';
                     meta.appendChild(tok);
+                }
+
+                if (roundtripSec !== undefined && roundtripSec > 0) {
+                    const rt = document.createElement('span');
+                    rt.className = 'route-badge';
+                    rt.style.background = '#1e3a5f';
+                    rt.style.color = '#93c5fd';
+                    rt.textContent = roundtripSec.toFixed(1) + 's';
+                    meta.appendChild(rt);
                 }
 
                 div.appendChild(meta);
@@ -943,6 +993,8 @@
                             false,
                             meta.model,
                             meta.user_email || '',
+                            meta.timestamp || '',
+                            meta.roundtrip_sec,
                         );
                     }
                 }
