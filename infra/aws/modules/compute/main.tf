@@ -445,6 +445,10 @@ output "router_security_group_id" {
   value = aws_security_group.router.id
 }
 
+output "alb_security_group_id" {
+  value = aws_security_group.alb.id
+}
+
 # Phase 3b outputs
 output "skill_ping_function_name" {
   value = aws_lambda_function.skill_ping.function_name

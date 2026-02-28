@@ -148,8 +148,10 @@ module "websocket" {
   environment = var.environment
   aws_region  = var.aws_region
 
-  vpc_link_id      = module.compute.vpc_link_id
-  alb_listener_arn = module.compute.alb_listener_arn
+  vpc_id                = module.networking.vpc_id
+  private_subnet_ids    = module.networking.private_subnet_ids
+  alb_dns_name          = module.compute.alb_dns_name
+  alb_security_group_id = module.compute.alb_security_group_id
 }
 
 # IAM: allow ECS task to push via WebSocket Management API
