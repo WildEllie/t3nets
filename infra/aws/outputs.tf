@@ -59,3 +59,10 @@ output "secrets_prefix" {
   description = "Secrets Manager path prefix for tenant secrets"
   value       = module.compute.secrets_prefix
 }
+
+# --- WebSocket API ---
+
+output "ws_endpoint" {
+  description = "WebSocket endpoint (wss://) for browser connections"
+  value       = var.use_async_skills ? module.websocket[0].ws_api_endpoint : ""
+}

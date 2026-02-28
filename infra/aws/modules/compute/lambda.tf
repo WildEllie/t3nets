@@ -87,7 +87,7 @@ resource "aws_iam_role_policy" "lambda_skill_executor" {
 # --- Build the ping Lambda ZIP from source ---
 
 locals {
-  project_root = "${path.module}/../../../.."
+  project_root = abspath("${path.module}/../../../..")
 
   # Source files that trigger a rebuild when changed
   lambda_source_files = [
@@ -109,7 +109,7 @@ resource "terraform_data" "build_lambda_base" {
   triggers_replace = [local.lambda_source_hash]
 
   provisioner "local-exec" {
-    command     = "bash ${local.project_root}/scripts/build_lambda_base.sh ${path.module}/lambda_base.zip"
+    command     = "bash ${local.project_root}/scripts/build_lambda_base.sh ${abspath(path.module)}/lambda_base.zip"
     working_dir = local.project_root
   }
 }

@@ -50,6 +50,7 @@ from agent.channels.teams import TeamsAdapter
 from agent.channels.telegram import TelegramAdapter
 from agent.errors.handler import ErrorHandler
 from agent.sse import SSEConnectionManager, start_keepalive_thread
+from adapters.aws.ws_connections import WebSocketConnectionManager
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
@@ -85,6 +86,12 @@ BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]  # full inference profile ID f
 PROVIDER = "bedrock"
 PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")  # aws, gcp, azure
 STAGE = os.environ.get("T3NETS_STAGE", "dev")  # dev, staging, prod — set by Terraform
+WS_API_ENDPOINT = os.environ.get("WS_API_ENDPOINT", "")
+# Derive management endpoint from WS API endpoint: wss://xxx → https://xxx
+WS_MANAGEMENT_ENDPOINT = os.environ.get(
+    "WS_MANAGEMENT_ENDPOINT",
+    WS_API_ENDPOINT.replace("wss://", "https://") if WS_API_ENDPOINT else "",
+)
 
 # Integration field schemas — defines the config form per integration type.
 INTEGRATION_SCHEMAS: dict = {
@@ -213,8 +220,19 @@ stats = {
 }
 
 
-# --- SSE Connection Manager (shared module) ---
-sse_manager = SSEConnectionManager()
+# --- Push client: WebSocket (API Gateway) or SSE fallback ---
+if WS_MANAGEMENT_ENDPOINT:
+    push_client: SSEConnectionManager | WebSocketConnectionManager = (
+        WebSocketConnectionManager(WS_MANAGEMENT_ENDPOINT)
+    )
+    ws_manager: WebSocketConnectionManager | None = push_client  # type: ignore[assignment]
+    sse_manager: SSEConnectionManager | None = None  # type: ignore[assignment]
+    logger.info(f"Push transport: WebSocket (endpoint={WS_MANAGEMENT_ENDPOINT[:40]}...)")
+else:
+    push_client = SSEConnectionManager()
+    ws_manager = None
+    sse_manager = push_client  # type: ignore[assignment]
+    logger.info("Push transport: SSE (no WS_MANAGEMENT_ENDPOINT configured)")
 
 
 def _run_async(coro):
@@ -346,6 +364,18 @@ class AWSHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+
+        # WebSocket API Gateway routes — identified by X-WS-Route header
+        ws_route = self.headers.get("X-WS-Route", "")
+        if ws_route:
+            if ws_route == "$connect":
+                self._handle_ws_connect()
+            elif ws_route == "$disconnect":
+                self._handle_ws_disconnect()
+            else:
+                self._handle_ws_default()
+            return
+
         if path == "/api/channels/teams/webhook":
             self._handle_teams_webhook()
         elif path.startswith("/api/channels/telegram/webhook"):
@@ -448,7 +478,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                     }
                     for s in skills.list_skills()
                 ],
-                "sse_connections": sse_manager.connection_count,
+                "push_connections": push_client.connection_count,
             }
             self._json_response(health)
         except Exception as e:
@@ -1109,6 +1139,71 @@ class AWSHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
+    # --- WebSocket route handlers (API Gateway → HTTP POST → ECS) ---
+
+    def _extract_ws_context(self) -> tuple[str, str]:
+        """Extract connection ID and route key from API Gateway WebSocket request.
+
+        API Gateway sends these as headers when using HTTP_PROXY integration
+        with request parameter mappings.
+        """
+        connection_id = self.headers.get("X-WS-Connection-Id", "")
+        route_key = self.headers.get("X-WS-Route", "")
+        return connection_id, route_key
+
+    def _extract_user_key_from_token(self) -> str:
+        """Extract user identity from JWT query param (same as SSE)."""
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        token = params.get("token", [None])[0]
+
+        if not token:
+            # Also check body for token
+            content_length = int(self.headers.get("Content-Length", 0) or 0)
+            if content_length > 0:
+                body = json.loads(self.rfile.read(content_length))
+                token = body.get("token", "")
+
+        if token:
+            try:
+                import base64
+                payload_b64 = token.split(".")[1]
+                padding = 4 - len(payload_b64) % 4
+                if padding != 4:
+                    payload_b64 += "=" * padding
+                claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+                return claims.get("email", "") or claims.get("sub", "") or DEFAULT_TENANT
+            except Exception:
+                pass
+        return DEFAULT_TENANT
+
+    def _handle_ws_connect(self):
+        """Handle WebSocket $connect — register connection in memory."""
+        connection_id, _ = self._extract_ws_context()
+        if not connection_id or not ws_manager:
+            self._json_response({"error": "WebSocket not configured"}, 400)
+            return
+
+        user_key = self._extract_user_key_from_token()
+        ws_manager.register(user_key, connection_id)
+        logger.info(f"WS $connect: {connection_id[:12]} user={user_key}")
+        self._json_response({"status": "connected"})
+
+    def _handle_ws_disconnect(self):
+        """Handle WebSocket $disconnect — remove connection from memory."""
+        connection_id, _ = self._extract_ws_context()
+        if not connection_id or not ws_manager:
+            self._json_response({"status": "ok"})
+            return
+
+        ws_manager.unregister_by_connection_id(connection_id)
+        logger.info(f"WS $disconnect: {connection_id[:12]}")
+        self._json_response({"status": "disconnected"})
+
+    def _handle_ws_default(self):
+        """Handle WebSocket $default — no-op, just acknowledge."""
+        self._json_response({"status": "ok"})
+
     def _handle_sse(self):
         """Server-Sent Events endpoint for async skill results.
 
@@ -1157,7 +1252,10 @@ class AWSHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"event: connected\ndata: {\"status\": \"ok\"}\n\n")
             self.wfile.flush()
 
-            # Register this connection
+            # Register this connection (SSE manager must be active)
+            if sse_manager is None:
+                logger.warning("SSE: endpoint called but WebSocket transport is active")
+                return
             sse_manager.register(user_key, self.wfile)
             logger.info(f"SSE: client connected (user={user_key})")
 
@@ -1913,7 +2011,11 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
             self._json_response({"error": str(e)}, 500)
 
     def _serve_file(self, filename: str, search_dir: str = None):
-        """Serve HTML — check local adapter dir (shared UI files)."""
+        """Serve HTML — check local adapter dir (shared UI files).
+
+        For chat.html, injects window.__CONFIG__ with WebSocket endpoint
+        so the frontend can use WebSocket transport when available.
+        """
         base = Path(__file__).parent.parent.parent
         if search_dir:
             path = base / search_dir / filename
@@ -1921,10 +2023,21 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
             path = base / filename
 
         if path.exists():
+            content = path.read_bytes()
+
+            # Inject WebSocket config into chat page
+            if filename == "chat.html" and WS_API_ENDPOINT:
+                config_script = (
+                    f'<script>window.__CONFIG__ = '
+                    f'{{"ws_endpoint": "{WS_API_ENDPOINT}"}};'
+                    f'</script>'
+                ).encode()
+                content = content.replace(b"</head>", config_script + b"\n</head>")
+
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(path.read_bytes())
+            self.wfile.write(content)
         else:
             self.send_error(404, f"{filename} not found")
 
@@ -1997,7 +2110,7 @@ def init():
             event_bus = EventBridgeBus(eb_bus_name, region=region)
             pending_store = PendingRequestsStore(pending_table, region=region)
             result_router = AsyncResultRouter(
-                sse_manager=sse_manager,
+                push_client=push_client,
                 pending_store=pending_store,
                 ai_provider=ai,
                 conversation_store=memory,
@@ -2051,19 +2164,21 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 def main():
     init()
 
-    # Start SSE keepalive background thread
-    start_keepalive_thread(sse_manager)
+    # Start SSE keepalive only when using SSE transport (not WebSocket)
+    if sse_manager is not None:
+        start_keepalive_thread(sse_manager)
 
     port = int(os.getenv("PORT", "8080"))
     server = ThreadedHTTPServer(("0.0.0.0", port), AWSHandler)
 
     async_status = "ON (EventBridge→Lambda→SQS)" if event_bus else "OFF (DirectBus)"
+    push_transport = "WebSocket" if ws_manager else "SSE"
     logger.info("")
     logger.info("  ╔══════════════════════════════════════════════╗")
     logger.info("  ║  T3nets AWS Server                           ║")
     logger.info(f"  ║  http://0.0.0.0:{port}                       ║")
     logger.info(f"  ║  Model: {BEDROCK_MODEL_ID[:30]}      ║")
-    logger.info("  ║  SSE:     /api/events (async push)           ║")
+    logger.info(f"  ║  Push:    {push_transport:<35}║")
     logger.info(f"  ║  Async:   {async_status:<35}║")
     logger.info("  ╚══════════════════════════════════════════════╝")
     logger.info("")

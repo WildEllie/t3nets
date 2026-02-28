@@ -199,11 +199,13 @@ def _send_result(request_id: str, detail: dict, result: dict) -> None:
     }
 
     try:
-        sqs.send_message(
-            QueueUrl=SQS_QUEUE_URL,
-            MessageBody=json.dumps(message),
-            MessageGroupId=request_id if ".fifo" in SQS_QUEUE_URL else None,
-        )
+        send_kwargs: dict = {
+            "QueueUrl": SQS_QUEUE_URL,
+            "MessageBody": json.dumps(message),
+        }
+        if ".fifo" in SQS_QUEUE_URL:
+            send_kwargs["MessageGroupId"] = request_id
+        sqs.send_message(**send_kwargs)
         logger.info(f"Lambda: result sent to SQS for request {request_id[:8]}")
     except Exception as e:
         logger.exception(f"Lambda: failed to send result to SQS: {e}")

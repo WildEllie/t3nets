@@ -6,7 +6,7 @@ a skill and publishes the result to SQS, this module:
 
 1. Reads the pending request from DynamoDB (for channel context)
 2. Routes the result to the correct channel:
-   - Dashboard: SSE push to browser via SSEConnectionManager
+   - Dashboard: push to browser via SSEConnectionManager or WebSocketConnectionManager
    - Teams: Bot Framework reply using stored service_url
    - Telegram: Telegram Bot API message
 
@@ -14,33 +14,53 @@ The AI formatting step (converting raw skill output into a human-friendly
 message) is optional — handled here if the pending request wasn't --raw.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
+from typing import Protocol
 
-from agent.sse import SSEConnectionManager
 from adapters.aws.pending_requests import PendingRequestsStore
 
 logger = logging.getLogger(__name__)
+
+
+class PushClient(Protocol):
+    """Common interface for SSEConnectionManager and WebSocketConnectionManager."""
+
+    def send_event(self, user_key: str, event_type: str, data: dict) -> int: ...
+
+    @property
+    def connection_count(self) -> int: ...
+
+
+def _run_async(coro):
+    """Run an async coroutine from a synchronous background thread."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class AsyncResultRouter:
     """
     Routes async skill results to the correct channel.
 
-    Initialized with references to shared server state (SSE manager,
+    Initialized with references to shared server state (push client,
     AI provider, conversation store, etc.) so it can format and deliver
     responses.
     """
 
     def __init__(
         self,
-        sse_manager: SSEConnectionManager,
+        push_client: PushClient,
         pending_store: PendingRequestsStore,
         ai_provider=None,
         conversation_store=None,
     ):
-        self.sse = sse_manager
+        self.sse = push_client
         self.pending = pending_store
         self.ai = ai_provider
         self.memory = conversation_store
@@ -116,7 +136,7 @@ class AsyncResultRouter:
         # Save conversation turn if we have the context
         if pending_req and self.memory and not is_raw:
             try:
-                asyncio.get_event_loop().run_until_complete(
+                _run_async(
                     self.memory.save_turn(
                         pending_req.tenant_id,
                         pending_req.conversation_id,
@@ -205,7 +225,7 @@ class AsyncResultRouter:
                 # Use a lightweight model call for formatting
                 from agent.models.ai_models import DEFAULT_MODEL_ID, get_model_for_provider
                 model = get_model_for_provider("bedrock", DEFAULT_MODEL_ID)
-                response = asyncio.get_event_loop().run_until_complete(
+                response = _run_async(
                     self.ai.chat(
                         model.model_id,
                         "You are a helpful assistant. Format the data clearly.",

@@ -561,94 +561,144 @@
         const sendBtn = document.getElementById('send-btn');
         let conversationId = 'dashboard-default';
 
-        // --- SSE Connection for async skill results ---
-        // Tracks pending async requests so SSE results can update the correct UI element.
+        // --- Real-time push: WebSocket (AWS) or SSE fallback (local dev) ---
+        // Tracks pending async requests so push results can update the correct UI element.
         const pendingRequests = {};  // request_id → {thinkingEl, conversationId}
-        let sseConnection = null;
+        let realtimeConnection = null;
+
+        function handleIncomingMessage(data) {
+            const requestId = data.request_id;
+            if (!requestId || !pendingRequests[requestId]) return;
+
+            const pending = pendingRequests[requestId];
+
+            // Remove thinking indicator
+            if (pending.thinkingEl && pending.thinkingEl.parentNode) {
+                pending.thinkingEl.remove();
+            }
+
+            // Render the response
+            if (data.error) {
+                addErrorMessage({
+                    message: data.error,
+                    severity: data.severity || 'info',
+                });
+            } else {
+                addMessage(
+                    data.text || 'No response',
+                    'assistant',
+                    data.tokens,
+                    data.route,
+                    data.raw,
+                    data.model
+                );
+            }
+
+            // Re-enable input
+            sendBtn.disabled = false;
+            input.disabled = false;
+            input.focus();
+
+            delete pendingRequests[requestId];
+        }
+
+        function handleIncomingError(data) {
+            const requestId = data.request_id;
+            if (!requestId || !pendingRequests[requestId]) return;
+
+            const pending = pendingRequests[requestId];
+            if (pending.thinkingEl && pending.thinkingEl.parentNode) {
+                pending.thinkingEl.remove();
+            }
+            addErrorMessage({
+                message: data.message || 'Skill execution failed',
+                severity: data.severity || 'info',
+            });
+            sendBtn.disabled = false;
+            input.disabled = false;
+            input.focus();
+            delete pendingRequests[requestId];
+        }
+
+        function connectWebSocket(endpoint, token) {
+            const url = endpoint + (token ? '?token=' + encodeURIComponent(token) : '');
+            const ws = new WebSocket(url);
+
+            ws.onopen = function() {
+                console.log('WebSocket: connected');
+                realtimeConnection = ws;
+            };
+
+            ws.onmessage = function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.event === 'error') {
+                        handleIncomingError(data);
+                    } else {
+                        handleIncomingMessage(data);
+                    }
+                } catch (err) {
+                    console.error('WebSocket: failed to parse message', err);
+                }
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket: disconnected, reconnecting in 2s');
+                realtimeConnection = null;
+                setTimeout(function() {
+                    connectWebSocket(endpoint, token);
+                }, 2000);
+            };
+
+            ws.onerror = function(err) {
+                console.error('WebSocket: error', err);
+            };
+        }
 
         function connectSSE() {
-            if (sseConnection) return;
+            if (realtimeConnection) return;
 
             const token = localStorage.getItem('t3nets_id_token') || '';
             const url = '/api/events' + (token ? '?token=' + encodeURIComponent(token) : '');
 
-            sseConnection = new EventSource(url);
+            const sse = new EventSource(url);
+            realtimeConnection = sse;
 
-            sseConnection.addEventListener('connected', function(e) {
+            sse.addEventListener('connected', function(e) {
                 console.log('SSE: connected', JSON.parse(e.data));
             });
 
-            sseConnection.addEventListener('message', function(e) {
-                // Async skill result arrived
-                const data = JSON.parse(e.data);
-                const requestId = data.request_id;
+            sse.addEventListener('message', function(e) {
+                handleIncomingMessage(JSON.parse(e.data));
+            });
 
-                if (requestId && pendingRequests[requestId]) {
-                    const pending = pendingRequests[requestId];
-
-                    // Remove thinking indicator
-                    if (pending.thinkingEl && pending.thinkingEl.parentNode) {
-                        pending.thinkingEl.remove();
-                    }
-
-                    // Render the response
-                    if (data.error) {
-                        addErrorMessage({
-                            message: data.error,
-                            severity: data.severity || 'info',
-                        });
-                    } else {
-                        addMessage(
-                            data.text || 'No response',
-                            'assistant',
-                            data.tokens,
-                            data.route,
-                            data.raw,
-                            data.model
-                        );
-                    }
-
-                    // Re-enable input
-                    sendBtn.disabled = false;
-                    input.disabled = false;
-                    input.focus();
-
-                    delete pendingRequests[requestId];
+            sse.addEventListener('error', function(e) {
+                try {
+                    handleIncomingError(JSON.parse(e.data));
+                } catch (err) {
+                    // Not a parseable error event — ignore
                 }
             });
 
-            sseConnection.addEventListener('error', function(e) {
-                // Async skill error
-                const data = JSON.parse(e.data);
-                const requestId = data.request_id;
-
-                if (requestId && pendingRequests[requestId]) {
-                    const pending = pendingRequests[requestId];
-                    if (pending.thinkingEl && pending.thinkingEl.parentNode) {
-                        pending.thinkingEl.remove();
-                    }
-                    addErrorMessage({
-                        message: data.message || 'Skill execution failed',
-                        severity: data.severity || 'info',
-                    });
-                    sendBtn.disabled = false;
-                    input.disabled = false;
-                    input.focus();
-                    delete pendingRequests[requestId];
-                }
-            });
-
-            sseConnection.onerror = function() {
+            sse.onerror = function() {
                 console.log('SSE: connection lost, will auto-reconnect');
-                sseConnection = null;
-                // EventSource auto-reconnects. Reset our reference so connectSSE()
-                // can be called again if needed.
+                realtimeConnection = null;
                 setTimeout(connectSSE, 2000);
             };
         }
 
-        // Start SSE connection on page load
-        connectSSE();
+        function connectRealtime() {
+            const wsEndpoint = (window.__CONFIG__ || {}).ws_endpoint;
+            const token = localStorage.getItem('t3nets_id_token') || '';
+            if (wsEndpoint) {
+                connectWebSocket(wsEndpoint, token);
+            } else {
+                connectSSE();
+            }
+        }
+
+        // Start real-time connection on page load
+        connectRealtime();
 
         input.addEventListener('input', function() {
             this.style.height = 'auto';

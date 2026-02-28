@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** February 25, 2026
+**Last Updated:** February 28, 2026
 
 ---
 
@@ -126,11 +126,14 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
       ↳ ✅ Completed — all modules in `infra/aws/modules/`
 - [x] Local development parity (DirectBus stays, SSE works locally)
       ↳ ✅ Completed — `adapters/local/dev_server.py` updated with SSE
+- [x] API Gateway WebSocket API for real-time push (replaces SSE on AWS)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/015-websocket-api-gateway.md)
 - [ ] Deploy and verify end-to-end (`terraform apply` + `deploy.sh` with `USE_ASYNC_SKILLS=true`)
 - [ ] Verify horizontal scaling: run 2+ ECS tasks, confirm no message loss or duplicate responses
 - [ ] **Milestone:** Skills run on Lambda, router is stateless, container scales horizontally
 
       ↳ 📋 Implementation — see [handoff notes](../handoffs/014-phase-3b-implementation.md)
+      ↳ 📋 WebSocket push — see [handoff notes](../handoffs/015-websocket-api-gateway.md)
 
 ### Phase 4: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
@@ -189,7 +192,7 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
 - [ ] Per-tier model configuration (conversational / formatting / routing models)
 - [ ] Bedrock Intelligent Prompt Routing evaluation
 - [ ] Token usage tracking per tenant
-- [ ] Streaming responses (SSE or WebSocket)
+- [ ] Streaming responses (WebSocket transport ready — needs Bedrock streaming integration)
 
 ### Developer Experience
 - [ ] Auto-reload dev server (watchdog / uvicorn)

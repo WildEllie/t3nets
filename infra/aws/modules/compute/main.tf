@@ -46,6 +46,14 @@ variable "use_async_skills" {
   default     = false
 }
 
+# WebSocket API (real-time push)
+variable "ws_api_endpoint" {
+  description = "wss:// endpoint for browser WebSocket connections"
+  type        = string
+  default     = ""
+}
+
+
 locals {
   name_prefix = "${var.project}-${var.environment}"
 }
@@ -355,6 +363,8 @@ resource "aws_ecs_task_definition" "router" {
         { name = "EVENTBRIDGE_BUS_NAME", value = aws_cloudwatch_event_bus.skills.name },
         { name = "SQS_RESULTS_QUEUE_URL", value = aws_sqs_queue.skill_results.id },
         { name = "PENDING_REQUESTS_TABLE", value = var.pending_requests_table_name },
+        # WebSocket API (real-time push — derived from wss:// endpoint at runtime)
+        { name = "WS_API_ENDPOINT", value = var.ws_api_endpoint },
       ]
 
       logConfiguration = {
@@ -475,4 +485,14 @@ output "pending_requests_table_name" {
 
 output "secrets_prefix" {
   value = var.secrets_prefix
+}
+
+output "ecs_task_role_id" {
+  description = "ECS task IAM role ID — for attaching additional policies from root module"
+  value       = aws_iam_role.ecs_task.id
+}
+
+output "ecs_task_definition_family" {
+  description = "ECS task definition family name"
+  value       = aws_ecs_task_definition.router.family
 }

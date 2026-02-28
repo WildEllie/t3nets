@@ -134,6 +134,41 @@ module "compute" {
   pending_requests_table_name = module.data.pending_requests_table_name
   secrets_prefix              = module.secrets.secrets_prefix
   use_async_skills            = var.use_async_skills
+
+  # WebSocket API endpoint (wss://) — injected as ECS env var
+  ws_api_endpoint = var.use_async_skills ? module.websocket[0].ws_api_endpoint : ""
+}
+
+# --- WebSocket API (real-time push, replaces SSE for AWS) ---
+module "websocket" {
+  count  = var.use_async_skills ? 1 : 0
+  source = "./modules/websocket"
+
+  project     = var.project
+  environment = var.environment
+  aws_region  = var.aws_region
+
+  vpc_link_id      = module.compute.vpc_link_id
+  alb_listener_arn = module.compute.alb_listener_arn
+}
+
+# IAM: allow ECS task to push via WebSocket Management API
+resource "aws_iam_role_policy" "ecs_ws_manage_connections" {
+  count = var.use_async_skills ? 1 : 0
+  name  = "${var.project}-${var.environment}-ecs-ws-manage"
+  role  = module.compute.ecs_task_role_id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "WebSocketManageConnections"
+        Effect   = "Allow"
+        Action   = ["execute-api:ManageConnections"]
+        Resource = "${module.websocket[0].ws_api_arn}/prod/POST/@connections/*"
+      }
+    ]
+  })
 }
 
 # --- API Gateway ---
