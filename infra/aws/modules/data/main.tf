@@ -94,8 +94,9 @@ resource "aws_dynamodb_table" "tenants" {
 
 output "table_names" {
   value = {
-    conversations = aws_dynamodb_table.conversations.name
-    tenants       = aws_dynamodb_table.tenants.name
+    conversations    = aws_dynamodb_table.conversations.name
+    tenants          = aws_dynamodb_table.tenants.name
+    pending_requests = aws_dynamodb_table.pending_requests.name
   }
 }
 
@@ -105,4 +106,12 @@ output "table_arns" {
     aws_dynamodb_table.tenants.arn,
     "${aws_dynamodb_table.tenants.arn}/index/*",
   ]
+}
+
+output "pending_requests_table_arn" {
+  value = aws_dynamodb_table.pending_requests.arn
+}
+
+output "pending_requests_table_name" {
+  value = aws_dynamodb_table.pending_requests.name
 }

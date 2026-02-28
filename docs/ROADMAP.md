@@ -110,16 +110,27 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
 - Lazy-loaded skill dependencies (no provisioned concurrency needed)
 
 **Implementation tasks:**
-- [ ] SSE endpoint (`GET /api/events`) for dashboard async results — AWS + local servers + dashboard JS
-- [ ] `EventBridgeBus` adapter implementing the `EventBus` interface
-- [ ] Lambda skill handler with idempotency check and lazy-loading
-- [ ] SQS poller background thread in router (WaitTimeSeconds=20)
-- [ ] Pending requests DynamoDB table (includes Teams service_url, status for idempotency)
-- [ ] Router code changes: feature flag, async result handling, remove in-memory state
-- [ ] Terraform modules: Lambda + IAM, EventBridge bus + rule + DLQ, SQS queue + DLQ, pending-requests table, SSE API Gateway route
-- [ ] Local development parity (DirectBus stays, SSE works locally)
+- [x] SSE endpoint (`GET /api/events`) for dashboard async results — AWS + local servers + dashboard JS
+      ↳ ✅ Completed — `agent/sse.py`, both servers, dashboard JS updated
+- [x] `EventBridgeBus` adapter implementing the `EventBus` interface
+      ↳ ✅ Completed — `adapters/aws/event_bridge_bus.py`
+- [x] Lambda skill handler with idempotency check and lazy-loading
+      ↳ ✅ Completed — `adapters/aws/lambda_handler.py`
+- [x] SQS poller background thread in router (WaitTimeSeconds=20)
+      ↳ ✅ Completed — `adapters/aws/sqs_poller.py`
+- [x] Pending requests DynamoDB table (includes Teams service_url, status for idempotency)
+      ↳ ✅ Completed — `adapters/aws/pending_requests.py` + Terraform
+- [x] Router code changes: feature flag, async result handling, remove in-memory state
+      ↳ ✅ Completed — `adapters/aws/server.py` + `adapters/aws/result_router.py`
+- [x] Terraform modules: Lambda + IAM, EventBridge bus + rule + DLQ, SQS queue + DLQ, pending-requests table, SSE API Gateway route
+      ↳ ✅ Completed — all modules in `infra/aws/modules/`
+- [x] Local development parity (DirectBus stays, SSE works locally)
+      ↳ ✅ Completed — `adapters/local/dev_server.py` updated with SSE
+- [ ] Deploy and verify end-to-end (`terraform apply` + `deploy.sh` with `USE_ASYNC_SKILLS=true`)
 - [ ] Verify horizontal scaling: run 2+ ECS tasks, confirm no message loss or duplicate responses
 - [ ] **Milestone:** Skills run on Lambda, router is stateless, container scales horizontally
+
+      ↳ 📋 Implementation — see [handoff notes](../handoffs/014-phase-3b-implementation.md)
 
 ### Phase 4: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration

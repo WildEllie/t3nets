@@ -5,7 +5,7 @@ Same HTTP server as local, but wired to AWS adapters:
   - Bedrock instead of direct Anthropic API
   - DynamoDB instead of SQLite
   - Secrets Manager instead of .env
-  - DirectBus (still synchronous for Phase 1)
+  - DirectBus (sync) or EventBridge→Lambda→SQS (async, Phase 3b)
 
 Runs inside ECS Fargate container.
 
@@ -40,7 +40,11 @@ from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
 from adapters.aws.secrets_manager import SecretsManagerProvider
 from adapters.aws.auth_middleware import extract_auth, AuthError
 from adapters.aws.admin_api import AdminAPI
-from adapters.local.direct_bus import DirectBus  # Reuse synchronous bus for Phase 1
+from adapters.local.direct_bus import DirectBus
+from adapters.aws.event_bridge_bus import EventBridgeBus
+from adapters.aws.pending_requests import PendingRequestsStore, PendingRequest
+from adapters.aws.sqs_poller import SQSResultPoller
+from adapters.aws.result_router import AsyncResultRouter
 from agent.models.tenant import Invitation
 from agent.channels.teams import TeamsAdapter
 from agent.channels.telegram import TelegramAdapter
@@ -65,11 +69,16 @@ memory: DynamoDBConversationStore
 tenants: DynamoDBTenantStore
 secrets: SecretsManagerProvider
 skills: SkillRegistry
-bus: DirectBus
+bus: DirectBus  # Sync fallback — replaced by EventBridgeBus when async is enabled
+event_bus: EventBridgeBus | None = None  # Async bus (Phase 3b)
+pending_store: PendingRequestsStore | None = None
+sqs_poller: SQSResultPoller | None = None
+result_router: AsyncResultRouter | None = None
 rule_router: RuleBasedRouter
 admin_api: AdminAPI
 error_handler: ErrorHandler
 started_at: float = 0.0
+USE_ASYNC_SKILLS = os.environ.get("USE_ASYNC_SKILLS", "false").lower() == "true"
 
 DEFAULT_TENANT = "default"
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]  # full inference profile ID from Terraform
@@ -1165,7 +1174,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             logger.exception("SSE connection error")
 
     def _handle_chat(self):
-        """Handle chat — identical logic to local, different adapters underneath."""
+        """Handle chat — supports both sync (DirectBus) and async (EventBridge) paths."""
         try:
             tenant_id, user_email = _get_auth_info(self.headers)
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -1190,6 +1199,7 @@ class AWSHandler(BaseHTTPRequestHandler):
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 When you have data to present, format it clearly with structure."""
 
+            # --- Conversational messages: always sync (no skill needed) ---
             if not is_raw and rule_router.is_conversational(clean_text):
                 stats["conversational"] += 1
                 messages = history + [{"role": "user", "content": clean_text}]
@@ -1201,6 +1211,14 @@ When you have data to present, format it clearly with structure."""
                 match = rule_router.match(clean_text, tenant.settings.enabled_skills)
 
                 if match:
+                    # --- Async path: publish to EventBridge, return immediately ---
+                    if USE_ASYNC_SKILLS and event_bus and pending_store:
+                        return self._handle_async_skill(
+                            tenant_id, user_email, match.skill_name, match.params,
+                            conversation_id, clean_text, is_raw, "rule",
+                        )
+
+                    # --- Sync fallback: DirectBus ---
                     request_id = f"rule-{conversation_id}"
                     _run_async(bus.publish_skill_invocation(
                         tenant_id, match.skill_name, match.params,
@@ -1231,6 +1249,15 @@ When you have data to present, format it clearly with structure."""
 
                     if response.has_tool_use:
                         tc = response.tool_calls[0]
+
+                        # --- Async path for AI-routed skills ---
+                        if USE_ASYNC_SKILLS and event_bus and pending_store:
+                            return self._handle_async_skill(
+                                tenant_id, user_email, tc.tool_name, tc.tool_params,
+                                conversation_id, clean_text, is_raw, "ai",
+                            )
+
+                        # --- Sync fallback ---
                         request_id = f"ai-{conversation_id}"
                         _run_async(bus.publish_skill_invocation(
                             tenant_id, tc.tool_name, tc.tool_params,
@@ -1286,6 +1313,56 @@ When you have data to present, format it clearly with structure."""
                 "error": friendly.message,
                 **friendly.to_dict(),
             }, 500)
+
+    def _handle_async_skill(
+        self, tenant_id, user_email, skill_name, params,
+        conversation_id, user_message, is_raw, route_type,
+    ):
+        """
+        Publish a skill invocation to EventBridge and return immediately.
+        The result will arrive later via SQS → SSE.
+        """
+        import uuid
+
+        request_id = f"async-{uuid.uuid4().hex[:12]}"
+        user_key = user_email or "anonymous"
+
+        # Create pending request in DynamoDB
+        pending_req = PendingRequest(
+            request_id=request_id,
+            tenant_id=tenant_id,
+            skill_name=skill_name,
+            channel="dashboard",
+            conversation_id=conversation_id,
+            reply_target=user_key,
+            user_key=user_key,
+            is_raw=is_raw,
+            user_message=user_message,
+        )
+        pending_store.create(pending_req)
+
+        # Publish to EventBridge (returns immediately)
+        _run_async(event_bus.publish_skill_invocation(
+            tenant_id, skill_name, params,
+            conversation_id, request_id, "dashboard", user_key,
+        ))
+
+        stats[f"{route_type}_routed"] += 1
+        logger.info(
+            f"Chat: async skill '{skill_name}' dispatched, "
+            f"request={request_id[:8]}, user={user_key}"
+        )
+
+        # Return immediately — client will receive result via SSE
+        self._json_response({
+            "status": "processing",
+            "request_id": request_id,
+            "conversation_id": conversation_id,
+            "skill": skill_name,
+            "route": route_type,
+            "model": "",
+            "user_email": user_email,
+        })
 
     # --- Invitation endpoints (public) ---
 
@@ -1874,7 +1951,8 @@ AWS_REGION = "us-east-1"
 
 
 def init():
-    global ai, memory, tenants, secrets, skills, bus, rule_router, admin_api, error_handler, started_at
+    global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
+    global sqs_poller, result_router, rule_router, admin_api, error_handler, started_at
 
     started_at = time.time()
 
@@ -1899,9 +1977,43 @@ def init():
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
     rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
-    bus = DirectBus(skills, secrets)
+    bus = DirectBus(skills, secrets)  # Sync fallback, always initialized
     admin_api = AdminAPI(tenants, secrets, skills)
     error_handler = ErrorHandler()
+
+    # --- Phase 3b: Async skill execution ---
+    if USE_ASYNC_SKILLS:
+        eb_bus_name = os.environ.get("EVENTBRIDGE_BUS_NAME", "")
+        sqs_queue_url = os.environ.get("SQS_RESULTS_QUEUE_URL", "")
+        pending_table = os.environ.get("PENDING_REQUESTS_TABLE", "")
+
+        if not all([eb_bus_name, sqs_queue_url, pending_table]):
+            logger.error(
+                "USE_ASYNC_SKILLS=true but missing required env vars: "
+                "EVENTBRIDGE_BUS_NAME, SQS_RESULTS_QUEUE_URL, PENDING_REQUESTS_TABLE"
+            )
+            logger.warning("Falling back to synchronous DirectBus")
+        else:
+            event_bus = EventBridgeBus(eb_bus_name, region=region)
+            pending_store = PendingRequestsStore(pending_table, region=region)
+            result_router = AsyncResultRouter(
+                sse_manager=sse_manager,
+                pending_store=pending_store,
+                ai_provider=ai,
+                conversation_store=memory,
+            )
+            sqs_poller = SQSResultPoller(
+                queue_url=sqs_queue_url,
+                callback=result_router.handle_result,
+                region=region,
+            )
+            sqs_poller.start()
+            logger.info(
+                f"Async skills ENABLED: EventBridge={eb_bus_name}, "
+                f"SQS={sqs_queue_url[-30:]}, Pending={pending_table}"
+            )
+    else:
+        logger.info("Async skills DISABLED (USE_ASYNC_SKILLS=false), using DirectBus")
 
     channels = ChannelRegistry()
     channels.register(DashboardAdapter())
@@ -1945,13 +2057,15 @@ def main():
     port = int(os.getenv("PORT", "8080"))
     server = ThreadedHTTPServer(("0.0.0.0", port), AWSHandler)
 
+    async_status = "ON (EventBridge→Lambda→SQS)" if event_bus else "OFF (DirectBus)"
     logger.info("")
-    logger.info("  ╔══════════════════════════════════════╗")
-    logger.info("  ║  T3nets AWS Server                   ║")
-    logger.info(f"  ║  http://0.0.0.0:{port}               ║")
-    logger.info(f"  ║  Model: {BEDROCK_MODEL_ID[:30]}  ║")
-    logger.info("  ║  SSE:     /api/events (async push)   ║")
-    logger.info("  ╚══════════════════════════════════════╝")
+    logger.info("  ╔══════════════════════════════════════════════╗")
+    logger.info("  ║  T3nets AWS Server                           ║")
+    logger.info(f"  ║  http://0.0.0.0:{port}                       ║")
+    logger.info(f"  ║  Model: {BEDROCK_MODEL_ID[:30]}      ║")
+    logger.info("  ║  SSE:     /api/events (async push)           ║")
+    logger.info(f"  ║  Async:   {async_status:<35}║")
+    logger.info("  ╚══════════════════════════════════════════════╝")
     logger.info("")
 
     try:

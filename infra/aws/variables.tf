@@ -52,3 +52,10 @@ variable "cognito_logout_urls" {
   type        = list(string)
   default     = ["http://localhost:8080/login"]
 }
+
+# Phase 3b: Async skills
+variable "use_async_skills" {
+  description = "Feature flag: enable async skill execution via EventBridge+Lambda+SQS"
+  type        = bool
+  default     = false
+}

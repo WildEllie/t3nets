@@ -55,6 +55,53 @@ docker tag "${ECR_REPO}:${TAG}" "${ECR_URI}:${TAG}"
 docker push "${ECR_URI}:${TAG}"
 echo ""
 
+# --- Package & deploy Lambda (if async skills enabled) ---
+USE_ASYNC="${USE_ASYNC_SKILLS:-false}"
+if [ "$USE_ASYNC" = "true" ]; then
+    echo "→ Packaging Lambda skill executor..."
+    LAMBDA_DIR=$(mktemp -d)
+    LAMBDA_FUNC="${NAME_PREFIX}-skill-executor"
+
+    # Copy agent code (skills, interfaces, models) + AWS adapters needed by Lambda
+    mkdir -p "${LAMBDA_DIR}/agent" "${LAMBDA_DIR}/adapters/aws"
+    cp -r agent/skills agent/interfaces agent/models "${LAMBDA_DIR}/agent/"
+    touch "${LAMBDA_DIR}/agent/__init__.py"
+    touch "${LAMBDA_DIR}/adapters/__init__.py"
+    touch "${LAMBDA_DIR}/adapters/aws/__init__.py"
+    cp adapters/aws/lambda_handler.py "${LAMBDA_DIR}/adapters/aws/"
+    cp adapters/aws/pending_requests.py "${LAMBDA_DIR}/adapters/aws/"
+    cp adapters/aws/secrets_manager.py "${LAMBDA_DIR}/adapters/aws/"
+
+    # Install dependencies into package (only PyYAML — boto3 is in Lambda runtime)
+    pip install pyyaml -t "${LAMBDA_DIR}" --quiet
+
+    # Create ZIP
+    LAMBDA_ZIP="/tmp/${LAMBDA_FUNC}.zip"
+    (cd "${LAMBDA_DIR}" && zip -r "${LAMBDA_ZIP}" . -x '*.pyc' '__pycache__/*' > /dev/null)
+    echo "  Lambda package: $(du -h "${LAMBDA_ZIP}" | cut -f1)"
+
+    # Deploy Lambda
+    echo "→ Updating Lambda function code..."
+    aws lambda update-function-code \
+        --function-name "${LAMBDA_FUNC}" \
+        --zip-file "fileb://${LAMBDA_ZIP}" \
+        --region "${REGION}" \
+        --no-cli-pager > /dev/null
+
+    # Wait for update to complete
+    aws lambda wait function-updated \
+        --function-name "${LAMBDA_FUNC}" \
+        --region "${REGION}"
+
+    # Cleanup
+    rm -rf "${LAMBDA_DIR}" "${LAMBDA_ZIP}"
+    echo "  ✅ Lambda updated"
+    echo ""
+else
+    echo "→ Skipping Lambda deploy (USE_ASYNC_SKILLS=${USE_ASYNC})"
+    echo ""
+fi
+
 # --- Update ECS service (force new deployment) ---
 echo "→ Updating ECS service..."
 aws ecs update-service \

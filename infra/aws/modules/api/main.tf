@@ -198,6 +198,14 @@ resource "aws_apigatewayv2_route" "public_invitation_accept" {
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
+# SSE endpoint — dashboard opens long-lived EventSource connection.
+# JWT passed via query param (SSE doesn't support custom headers), validated server-side.
+resource "aws_apigatewayv2_route" "public_sse_events" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /api/events"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
 # Teams channel webhook — Microsoft Bot Framework sends messages here.
 # No JWT authorizer — Microsoft uses its own JWT auth (validated server-side).
 resource "aws_apigatewayv2_route" "public_teams_webhook" {

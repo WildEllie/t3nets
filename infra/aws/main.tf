@@ -128,6 +128,12 @@ module "compute" {
   cognito_user_pool_id  = module.cognito.user_pool_id
   cognito_app_client_id = module.cognito.app_client_id
   cognito_auth_domain   = module.cognito.auth_domain
+
+  # Phase 3b: Async skills
+  pending_requests_table_arn  = module.data.pending_requests_table_arn
+  pending_requests_table_name = module.data.pending_requests_table_name
+  secrets_prefix              = module.secrets.secrets_prefix
+  use_async_skills            = var.use_async_skills
 }
 
 # --- API Gateway ---

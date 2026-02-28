@@ -22,6 +22,30 @@ variable "cognito_user_pool_id" { type = string }
 variable "cognito_app_client_id" { type = string }
 variable "cognito_auth_domain" { type = string }
 
+# --- Phase 3b: Async Skills ---
+variable "pending_requests_table_arn" {
+  description = "ARN of the pending-requests DynamoDB table"
+  type        = string
+}
+variable "pending_requests_table_name" {
+  description = "Name of the pending-requests DynamoDB table"
+  type        = string
+}
+variable "secrets_prefix" {
+  description = "Secrets Manager path prefix for tenant secrets"
+  type        = string
+}
+variable "lambda_memory_size" {
+  description = "Memory (MB) for the skill executor Lambda"
+  type        = number
+  default     = 512
+}
+variable "use_async_skills" {
+  description = "Feature flag: enable async skill execution via EventBridge+Lambda+SQS"
+  type        = bool
+  default     = false
+}
+
 locals {
   name_prefix = "${var.project}-${var.environment}"
 }
@@ -244,6 +268,36 @@ resource "aws_iam_role_policy" "ecs_task" {
         ]
         Resource = "${aws_cloudwatch_log_group.router.arn}:*"
       },
+      # Phase 3b: Async skill execution
+      {
+        Sid    = "EventBridgePublish"
+        Effect = "Allow"
+        Action = [
+          "events:PutEvents",
+        ]
+        Resource = aws_cloudwatch_event_bus.skills.arn
+      },
+      {
+        Sid    = "SQSReceiveResults"
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+        ]
+        Resource = aws_sqs_queue.skill_results.arn
+      },
+      {
+        Sid    = "DynamoDBPendingRequests"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+        ]
+        Resource = var.pending_requests_table_arn
+      },
     ]
   })
 }
@@ -296,6 +350,11 @@ resource "aws_ecs_task_definition" "router" {
         { name = "COGNITO_USER_POOL_ID", value = var.cognito_user_pool_id },
         { name = "COGNITO_APP_CLIENT_ID", value = var.cognito_app_client_id },
         { name = "COGNITO_AUTH_DOMAIN", value = var.cognito_auth_domain },
+        # Phase 3b: Async skills
+        { name = "USE_ASYNC_SKILLS", value = tostring(var.use_async_skills) },
+        { name = "EVENTBRIDGE_BUS_NAME", value = aws_cloudwatch_event_bus.skills.name },
+        { name = "SQS_RESULTS_QUEUE_URL", value = aws_sqs_queue.skill_results.id },
+        { name = "PENDING_REQUESTS_TABLE", value = var.pending_requests_table_name },
       ]
 
       logConfiguration = {
@@ -374,4 +433,25 @@ output "vpc_link_id" {
 
 output "router_security_group_id" {
   value = aws_security_group.router.id
+}
+
+# Phase 3b outputs
+output "skill_executor_function_name" {
+  value = aws_lambda_function.skill_executor.function_name
+}
+
+output "skill_executor_function_arn" {
+  value = aws_lambda_function.skill_executor.arn
+}
+
+output "eventbridge_bus_name" {
+  value = aws_cloudwatch_event_bus.skills.name
+}
+
+output "sqs_results_queue_url" {
+  value = aws_sqs_queue.skill_results.id
+}
+
+output "sqs_results_queue_arn" {
+  value = aws_sqs_queue.skill_results.arn
 }
