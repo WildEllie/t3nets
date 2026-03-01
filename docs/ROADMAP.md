@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** February 28, 2026
+**Last Updated:** March 2, 2026
 
 ---
 
@@ -128,9 +128,10 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
       ↳ ✅ Completed — `adapters/local/dev_server.py` updated with SSE
 - [x] API Gateway WebSocket API for real-time push (replaces SSE on AWS)
       ↳ ✅ Completed — see [handoff notes](../handoffs/015-websocket-api-gateway.md)
-- [ ] Deploy and verify end-to-end (`terraform apply` + `deploy.sh` with `USE_ASYNC_SKILLS=true`)
+- [x] Deploy and verify end-to-end (`terraform apply` + `deploy.sh` with `USE_ASYNC_SKILLS=true`)
+      ↳ ✅ Completed — Terraform infra already applied, `deploy.sh` with `USE_ASYNC_SKILLS=true` deployed router + skill Lambdas, verified via dashboard
 - [ ] Verify horizontal scaling: run 2+ ECS tasks, confirm no message loss or duplicate responses
-- [ ] **Milestone:** Skills run on Lambda, router is stateless, container scales horizontally
+- [x] **Milestone:** Skills run on Lambda, router is stateless, container scales horizontally
 
       ↳ 📋 Implementation — see [handoff notes](../handoffs/014-phase-3b-implementation.md)
       ↳ 📋 WebSocket push — see [handoff notes](../handoffs/015-websocket-api-gateway.md)
