@@ -153,7 +153,17 @@ class TelegramAdapter(ChannelAdapter):
                     return False
 
         except Exception as e:
-            logger.error(f"Failed to send Telegram message: {e}")
+            # Read the response body from Telegram for detailed error info
+            error_detail = ""
+            if hasattr(e, "read"):
+                try:
+                    error_detail = e.read().decode()
+                except Exception:
+                    pass
+            logger.error(
+                f"Failed to send Telegram message: {e}"
+                + (f" — {error_detail}" if error_detail else "")
+            )
             # Retry without Markdown in case of parse errors
             if "parse_mode" in payload:
                 return await self._send_plain(message)
@@ -177,7 +187,15 @@ class TelegramAdapter(ChannelAdapter):
                 result = json.loads(resp.read().decode())
                 return result.get("ok", False)
         except Exception as e:
-            logger.error(f"Plain send also failed: {e}")
+            error_detail = ""
+            if hasattr(e, "read"):
+                try:
+                    error_detail = e.read().decode()
+                except Exception:
+                    pass
+            logger.error(
+                f"Plain send also failed: {e}" + (f" — {error_detail}" if error_detail else "")
+            )
             return False
 
     def validate_webhook(self, headers: dict, body: bytes) -> bool:
@@ -191,9 +209,8 @@ class TelegramAdapter(ChannelAdapter):
             # No secret configured — accept all (common for dev)
             return True
 
-        header_secret = (
-            headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-            or headers.get("x-telegram-bot-api-secret-token", "")
+        header_secret = headers.get("X-Telegram-Bot-Api-Secret-Token", "") or headers.get(
+            "x-telegram-bot-api-secret-token", ""
         )
         return hmac.compare_digest(header_secret, self.webhook_secret)
 

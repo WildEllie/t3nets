@@ -308,6 +308,10 @@ class AsyncResultRouter:
                     pending_req,
                 )
 
+            # Truncate for Telegram's 4096 char limit
+            if len(formatted_text) > 4096:
+                formatted_text = formatted_text[:4090] + "\n..."
+
             # Send response
             outbound = OutboundMessage(
                 channel=ChannelType.TELEGRAM,
@@ -315,7 +319,11 @@ class AsyncResultRouter:
                 recipient_id="",
                 text=formatted_text,
             )
-            _run_async(adapter.send_response(outbound))
+            sent = _run_async(adapter.send_response(outbound))
+            if not sent:
+                logger.error(
+                    f"AsyncResultRouter: Telegram send_response returned False for {request_id[:8]}"
+                )
 
             # Save conversation turn
             if self.memory:
