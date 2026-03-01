@@ -222,8 +222,8 @@ stats = {
 
 # --- Push client: WebSocket (API Gateway) or SSE fallback ---
 if WS_MANAGEMENT_ENDPOINT:
-    push_client: SSEConnectionManager | WebSocketConnectionManager = (
-        WebSocketConnectionManager(WS_MANAGEMENT_ENDPOINT)
+    push_client: SSEConnectionManager | WebSocketConnectionManager = WebSocketConnectionManager(
+        WS_MANAGEMENT_ENDPOINT
     )
     ws_manager: WebSocketConnectionManager | None = push_client  # type: ignore[assignment]
     sse_manager: SSEConnectionManager | None = None  # type: ignore[assignment]
@@ -315,10 +315,14 @@ def _get_auth_info(headers) -> tuple[str, str]:
 
 def _uptime_human(seconds: float) -> str:
     s = int(seconds)
-    if s < 60: return f"{s}s"
-    elif s < 3600: return f"{s // 60}m {s % 60}s"
-    elif s < 86400: return f"{s // 3600}h {(s % 3600) // 60}m"
-    else: return f"{s // 86400}d {(s % 86400) // 3600}h"
+    if s < 60:
+        return f"{s}s"
+    elif s < 3600:
+        return f"{s // 60}m {s % 60}s"
+    elif s < 86400:
+        return f"{s // 3600}h {(s % 3600) // 60}m"
+    else:
+        return f"{s // 86400}d {(s % 86400) // 3600}h"
 
 
 class AWSHandler(BaseHTTPRequestHandler):
@@ -513,12 +517,11 @@ class AWSHandler(BaseHTTPRequestHandler):
                     self._register_telegram_webhook(body)
                     # Save channel mapping for fast GSI lookup on incoming webhooks
                     import hashlib
+
                     bot_token = body.get("bot_token", "")
                     if bot_token:
                         t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
-                        _run_async(tenants.set_channel_mapping(
-                            tenant_id, "telegram", t_hash
-                        ))
+                        _run_async(tenants.set_channel_mapping(tenant_id, "telegram", t_hash))
 
                 self._json_response({"ok": True})
         except Exception as e:
@@ -615,9 +618,7 @@ class AWSHandler(BaseHTTPRequestHandler):
         directly from the login form and exchanged for tokens server-side.
         """
         try:
-            body = json.loads(
-                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
-            )
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             email = body.get("email", "").strip()
             password = body.get("password", "")
 
@@ -630,6 +631,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 return
 
             import boto3
+
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
             result = client.initiate_auth(
                 ClientId=COGNITO_APP_CLIENT_ID,
@@ -651,11 +653,13 @@ class AWSHandler(BaseHTTPRequestHandler):
                 return
 
             auth_result = result.get("AuthenticationResult", {})
-            self._json_response({
-                "id_token": auth_result.get("IdToken", ""),
-                "access_token": auth_result.get("AccessToken", ""),
-                "refresh_token": auth_result.get("RefreshToken", ""),
-            })
+            self._json_response(
+                {
+                    "id_token": auth_result.get("IdToken", ""),
+                    "access_token": auth_result.get("AccessToken", ""),
+                    "refresh_token": auth_result.get("RefreshToken", ""),
+                }
+            )
 
         except Exception as e:
             err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
@@ -679,9 +683,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_auth_forgot_password(self):
         """Initiate password reset — sends a verification code to the user's email."""
         try:
-            body = json.loads(
-                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
-            )
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             email = body.get("email", "").strip()
 
             if not email:
@@ -693,6 +695,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 return
 
             import boto3
+
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
             client.forgot_password(
                 ClientId=COGNITO_APP_CLIENT_ID,
@@ -708,9 +711,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 # Don't leak email existence
                 self._json_response({"message": "Reset code sent"})
             elif err_code == "LimitExceededException":
-                self._json_response(
-                    {"error": "Too many attempts. Please try again later."}, 429
-                )
+                self._json_response({"error": "Too many attempts. Please try again later."}, 429)
             else:
                 logger.exception("Auth forgot-password error")
                 self._json_response({"error": str(e)}, 500)
@@ -718,17 +719,13 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_auth_confirm_reset(self):
         """Complete password reset with verification code and new password."""
         try:
-            body = json.loads(
-                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
-            )
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             email = body.get("email", "").strip()
             code = body.get("code", "").strip()
             new_password = body.get("new_password", "")
 
             if not email or not code or not new_password:
-                self._json_response(
-                    {"error": "Email, code, and new password are required"}, 400
-                )
+                self._json_response({"error": "Email, code, and new password are required"}, 400)
                 return
 
             if not COGNITO_APP_CLIENT_ID:
@@ -736,6 +733,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 return
 
             import boto3
+
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
             client.confirm_forgot_password(
                 ClientId=COGNITO_APP_CLIENT_ID,
@@ -762,9 +760,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_auth_signup(self):
         """Register a new user via Cognito SignUp."""
         try:
-            body = json.loads(
-                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
-            )
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             email = body.get("email", "").strip()
             password = body.get("password", "")
             name = body.get("name", "").strip()
@@ -778,6 +774,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 return
 
             import boto3
+
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
             user_attrs = [
                 {"Name": "email", "Value": email},
@@ -790,17 +787,18 @@ class AWSHandler(BaseHTTPRequestHandler):
                 UserAttributes=user_attrs,
             )
 
-            self._json_response({
-                "user_sub": result.get("UserSub", ""),
-                "confirmed": result.get("UserConfirmed", False),
-            }, 201)
+            self._json_response(
+                {
+                    "user_sub": result.get("UserSub", ""),
+                    "confirmed": result.get("UserConfirmed", False),
+                },
+                201,
+            )
 
         except Exception as e:
             err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
             if err_code == "UsernameExistsException":
-                self._json_response(
-                    {"error": "An account with this email already exists"}, 409
-                )
+                self._json_response({"error": "An account with this email already exists"}, 409)
             elif err_code == "InvalidPasswordException":
                 msg = getattr(e, "response", {}).get("Error", {}).get("Message", str(e))
                 self._json_response({"error": msg}, 400)
@@ -811,9 +809,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_auth_confirm(self):
         """Confirm a user's email with the verification code."""
         try:
-            body = json.loads(
-                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
-            )
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             email = body.get("email", "").strip()
             code = body.get("code", "").strip()
 
@@ -826,6 +822,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 return
 
             import boto3
+
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
             client.confirm_sign_up(
                 ClientId=COGNITO_APP_CLIENT_ID,
@@ -848,9 +845,7 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_auth_refresh(self):
         """Refresh tokens using a refresh token."""
         try:
-            body = json.loads(
-                self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
-            )
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             refresh_token = body.get("refresh_token", "")
 
             if not refresh_token:
@@ -862,6 +857,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 return
 
             import boto3
+
             client = boto3.client("cognito-idp", region_name=AWS_REGION)
             result = client.initiate_auth(
                 ClientId=COGNITO_APP_CLIENT_ID,
@@ -872,10 +868,12 @@ class AWSHandler(BaseHTTPRequestHandler):
             )
 
             auth_result = result.get("AuthenticationResult", {})
-            self._json_response({
-                "id_token": auth_result.get("IdToken", ""),
-                "access_token": auth_result.get("AccessToken", ""),
-            })
+            self._json_response(
+                {
+                    "id_token": auth_result.get("IdToken", ""),
+                    "access_token": auth_result.get("AccessToken", ""),
+                }
+            )
 
         except Exception as e:
             logger.exception("Auth refresh error")
@@ -883,12 +881,14 @@ class AWSHandler(BaseHTTPRequestHandler):
 
     def _handle_auth_config(self):
         """Return Cognito config for the frontend login flow."""
-        self._json_response({
-            "enabled": bool(COGNITO_USER_POOL_ID),
-            "client_id": COGNITO_APP_CLIENT_ID,
-            "auth_domain": COGNITO_AUTH_DOMAIN,
-            "user_pool_id": COGNITO_USER_POOL_ID,
-        })
+        self._json_response(
+            {
+                "enabled": bool(COGNITO_USER_POOL_ID),
+                "client_id": COGNITO_APP_CLIENT_ID,
+                "auth_domain": COGNITO_AUTH_DOMAIN,
+                "user_pool_id": COGNITO_USER_POOL_ID,
+            }
+        )
 
     def _handle_auth_me(self):
         """Return current authenticated user info, including tenant status.
@@ -897,11 +897,13 @@ class AWSHandler(BaseHTTPRequestHandler):
         returns empty tenant_id so the frontend redirects to onboarding.
         """
         if not COGNITO_USER_POOL_ID:
-            self._json_response({
-                "authenticated": False,
-                "tenant_id": DEFAULT_TENANT,
-                "tenant_status": "active",
-            })
+            self._json_response(
+                {
+                    "authenticated": False,
+                    "tenant_id": DEFAULT_TENANT,
+                    "tenant_status": "active",
+                }
+            )
             return
         try:
             auth = extract_auth(self.headers)
@@ -936,16 +938,18 @@ class AWSHandler(BaseHTTPRequestHandler):
                 except Exception:
                     tenant_status = "active"
 
-            self._json_response({
-                "authenticated": True,
-                "user_id": auth.user_id,
-                "tenant_id": tenant_id,
-                "email": email,
-                "display_name": display_name,
-                "avatar_url": avatar_url,
-                "tenant_status": tenant_status,
-                "tenant_name": tenant_name,
-            })
+            self._json_response(
+                {
+                    "authenticated": True,
+                    "user_id": auth.user_id,
+                    "tenant_id": tenant_id,
+                    "email": email,
+                    "display_name": display_name,
+                    "avatar_url": avatar_url,
+                    "tenant_status": tenant_status,
+                    "tenant_name": tenant_name,
+                }
+            )
         except AuthError as e:
             self._json_response({"error": e.message}, e.status)
 
@@ -956,12 +960,14 @@ class AWSHandler(BaseHTTPRequestHandler):
             connected = _run_async(secrets.list_integrations(tenant_id))
             result = []
             for name, schema in INTEGRATION_SCHEMAS.items():
-                result.append({
-                    "name": name,
-                    "label": schema["label"],
-                    "connected": name in connected,
-                    "fields": schema["fields"],
-                })
+                result.append(
+                    {
+                        "name": name,
+                        "label": schema["label"],
+                        "connected": name in connected,
+                        "fields": schema["fields"],
+                    }
+                )
             self._json_response(result)
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
@@ -972,9 +978,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             tenant_id, _ = _get_auth_info(self.headers)
             integration_name = path.rstrip("/").split("/")[-1]
             if integration_name not in INTEGRATION_SCHEMAS:
-                self._json_response(
-                    {"error": f"Unknown integration: {integration_name}"}, 404
-                )
+                self._json_response({"error": f"Unknown integration: {integration_name}"}, 404)
                 return
 
             schema = INTEGRATION_SCHEMAS[integration_name]
@@ -983,9 +987,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             try:
                 stored = _run_async(secrets.get(tenant_id, integration_name))
                 connected = True
-                password_keys = {
-                    f["key"] for f in schema["fields"] if f["type"] == "password"
-                }
+                password_keys = {f["key"] for f in schema["fields"] if f["type"] == "password"}
                 for key, value in stored.items():
                     if key in password_keys and value:
                         config[key] = "\u2022" * 8
@@ -994,13 +996,15 @@ class AWSHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-            self._json_response({
-                "name": integration_name,
-                "label": schema["label"],
-                "connected": connected,
-                "config": config,
-                "fields": schema["fields"],
-            })
+            self._json_response(
+                {
+                    "name": integration_name,
+                    "label": schema["label"],
+                    "connected": connected,
+                    "config": config,
+                    "fields": schema["fields"],
+                }
+            )
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
@@ -1024,22 +1028,24 @@ class AWSHandler(BaseHTTPRequestHandler):
             # Connected integrations for the tenant
             connected_integrations = _run_async(secrets.list_integrations(tenant_id))
 
-            self._json_response({
-                "ai_model": s.ai_model or DEFAULT_MODEL_ID,
-                "provider": PROVIDER,
-                "models": get_models_for_provider(PROVIDER),
-                "platform": PLATFORM,
-                "stage": STAGE,
-                "build": BUILD_NUMBER,
-                "enabled_skills": s.enabled_skills,
-                "available_skills": available_skills,
-                "connected_integrations": connected_integrations,
-                "enabled_channels": s.enabled_channels,
-                "system_prompt_override": s.system_prompt_override,
-                "max_tokens_per_message": s.max_tokens_per_message,
-                "messages_per_day": s.messages_per_day,
-                "max_conversation_history": s.max_conversation_history,
-            })
+            self._json_response(
+                {
+                    "ai_model": s.ai_model or DEFAULT_MODEL_ID,
+                    "provider": PROVIDER,
+                    "models": get_models_for_provider(PROVIDER),
+                    "platform": PLATFORM,
+                    "stage": STAGE,
+                    "build": BUILD_NUMBER,
+                    "enabled_skills": s.enabled_skills,
+                    "available_skills": available_skills,
+                    "connected_integrations": connected_integrations,
+                    "enabled_channels": s.enabled_channels,
+                    "system_prompt_override": s.system_prompt_override,
+                    "max_tokens_per_message": s.max_tokens_per_message,
+                    "messages_per_day": s.messages_per_day,
+                    "max_conversation_history": s.max_conversation_history,
+                }
+            )
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
@@ -1047,14 +1053,14 @@ class AWSHandler(BaseHTTPRequestHandler):
         """Return conversation history for the authenticated tenant."""
         try:
             tenant_id, _ = _get_auth_info(self.headers)
-            history = _run_async(
-                memory.get_conversation(tenant_id, "dashboard-default")
+            history = _run_async(memory.get_conversation(tenant_id, "dashboard-default"))
+            self._json_response(
+                {
+                    "messages": history,
+                    "platform": PLATFORM,
+                    "stage": STAGE,
+                }
             )
-            self._json_response({
-                "messages": history,
-                "platform": PLATFORM,
-                "stage": STAGE,
-            })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
@@ -1090,9 +1096,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                 known = set(skills.list_skill_names())
                 unknown = [s for s in skill_list if s not in known]
                 if unknown:
-                    self._json_response(
-                        {"error": f"Unknown skills: {', '.join(unknown)}"}, 400
-                    )
+                    self._json_response({"error": f"Unknown skills: {', '.join(unknown)}"}, 400)
                     return
                 tenant.settings.enabled_skills = skill_list
                 changed = True
@@ -1105,9 +1109,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             if "max_tokens_per_message" in body:
                 val = body["max_tokens_per_message"]
                 if not isinstance(val, int) or val < 256 or val > 16384:
-                    self._json_response(
-                        {"error": "max_tokens_per_message must be 256-16384"}, 400
-                    )
+                    self._json_response({"error": "max_tokens_per_message must be 256-16384"}, 400)
                     return
                 tenant.settings.max_tokens_per_message = val
                 changed = True
@@ -1125,9 +1127,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             if "max_conversation_history" in body:
                 val = body["max_conversation_history"]
                 if not isinstance(val, int) or val < 1 or val > 100:
-                    self._json_response(
-                        {"error": "max_conversation_history must be 1-100"}, 400
-                    )
+                    self._json_response({"error": "max_conversation_history must be 1-100"}, 400)
                     return
                 tenant.settings.max_conversation_history = val
                 changed = True
@@ -1167,6 +1167,7 @@ class AWSHandler(BaseHTTPRequestHandler):
         if token:
             try:
                 import base64
+
                 payload_b64 = token.split(".")[1]
                 padding = 4 - len(payload_b64) % 4
                 if padding != 4:
@@ -1230,6 +1231,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             if token:
                 try:
                     import base64
+
                     payload_b64 = token.split(".")[1]
                     padding = 4 - len(payload_b64) % 4
                     if padding != 4:
@@ -1249,7 +1251,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
             # Send initial connection confirmation
-            self.wfile.write(b"event: connected\ndata: {\"status\": \"ok\"}\n\n")
+            self.wfile.write(b'event: connected\ndata: {"status": "ok"}\n\n')
             self.wfile.flush()
 
             # Register this connection (SSE manager must be active)
@@ -1313,17 +1315,31 @@ When you have data to present, format it clearly with structure."""
                     # --- Async path: publish to EventBridge, return immediately ---
                     if USE_ASYNC_SKILLS and event_bus and pending_store:
                         return self._handle_async_skill(
-                            tenant_id, user_email, match.skill_name, match.params,
-                            conversation_id, clean_text, is_raw, "rule",
-                            active_model, model_short_name,
+                            tenant_id,
+                            user_email,
+                            match.skill_name,
+                            match.params,
+                            conversation_id,
+                            clean_text,
+                            is_raw,
+                            "rule",
+                            active_model,
+                            model_short_name,
                         )
 
                     # --- Sync fallback: DirectBus ---
                     request_id = f"rule-{conversation_id}"
-                    _run_async(bus.publish_skill_invocation(
-                        tenant_id, match.skill_name, match.params,
-                        conversation_id, request_id, "dashboard", "user",
-                    ))
+                    _run_async(
+                        bus.publish_skill_invocation(
+                            tenant_id,
+                            match.skill_name,
+                            match.params,
+                            conversation_id,
+                            request_id,
+                            "dashboard",
+                            "user",
+                        )
+                    )
                     skill_result = bus.get_result(request_id) or {"error": "No result"}
 
                     if is_raw and rule_router.supports_raw(match.skill_name):
@@ -1353,17 +1369,31 @@ When you have data to present, format it clearly with structure."""
                         # --- Async path for AI-routed skills ---
                         if USE_ASYNC_SKILLS and event_bus and pending_store:
                             return self._handle_async_skill(
-                                tenant_id, user_email, tc.tool_name, tc.tool_params,
-                                conversation_id, clean_text, is_raw, "ai",
-                                active_model, model_short_name,
+                                tenant_id,
+                                user_email,
+                                tc.tool_name,
+                                tc.tool_params,
+                                conversation_id,
+                                clean_text,
+                                is_raw,
+                                "ai",
+                                active_model,
+                                model_short_name,
                             )
 
                         # --- Sync fallback ---
                         request_id = f"ai-{conversation_id}"
-                        _run_async(bus.publish_skill_invocation(
-                            tenant_id, tc.tool_name, tc.tool_params,
-                            conversation_id, request_id, "dashboard", "user",
-                        ))
+                        _run_async(
+                            bus.publish_skill_invocation(
+                                tenant_id,
+                                tc.tool_name,
+                                tc.tool_params,
+                                conversation_id,
+                                request_id,
+                                "dashboard",
+                                "user",
+                            )
+                        )
                         skill_result = bus.get_result(request_id) or {"error": "No result"}
 
                         if is_raw and rule_router.supports_raw(tc.tool_name):
@@ -1373,10 +1403,36 @@ When you have data to present, format it clearly with structure."""
                             route_type = "ai"
                             is_raw_response = True
                         else:
-                            messages_with_tool = messages + [{"role": "assistant", "content": [{"type": "tool_use", "id": tc.tool_use_id, "name": tc.tool_name, "input": tc.tool_params}]}]
-                            final = _run_async(ai.chat_with_tool_result(active_model, system, messages_with_tool, tools, tc.tool_use_id, skill_result))
+                            messages_with_tool = messages + [
+                                {
+                                    "role": "assistant",
+                                    "content": [
+                                        {
+                                            "type": "tool_use",
+                                            "id": tc.tool_use_id,
+                                            "name": tc.tool_name,
+                                            "input": tc.tool_params,
+                                        }
+                                    ],
+                                }
+                            ]
+                            final = _run_async(
+                                ai.chat_with_tool_result(
+                                    active_model,
+                                    system,
+                                    messages_with_tool,
+                                    tools,
+                                    tc.tool_use_id,
+                                    skill_result,
+                                )
+                            )
                             assistant_text = final.text or "Got data but couldn't format."
-                            total_tokens = response.input_tokens + response.output_tokens + final.input_tokens + final.output_tokens
+                            total_tokens = (
+                                response.input_tokens
+                                + response.output_tokens
+                                + final.input_tokens
+                                + final.output_tokens
+                            )
                             route_type = "ai"
                     else:
                         assistant_text = response.text or "Not sure how to help."
@@ -1395,33 +1451,51 @@ When you have data to present, format it clearly with structure."""
             if user_email:
                 chat_metadata["user_email"] = user_email
             if not is_raw_response:
-                _run_async(memory.save_turn(
-                    tenant_id, conversation_id, clean_text, assistant_text,
-                    metadata=chat_metadata,
-                ))
+                _run_async(
+                    memory.save_turn(
+                        tenant_id,
+                        conversation_id,
+                        clean_text,
+                        assistant_text,
+                        metadata=chat_metadata,
+                    )
+                )
 
-            self._json_response({
-                "text": assistant_text,
-                "conversation_id": conversation_id,
-                "tokens": total_tokens,
-                "route": route_type,
-                "raw": is_raw_response,
-                "model": model_short_name,
-                "user_email": user_email,
-            })
+            self._json_response(
+                {
+                    "text": assistant_text,
+                    "conversation_id": conversation_id,
+                    "tokens": total_tokens,
+                    "route": route_type,
+                    "raw": is_raw_response,
+                    "model": model_short_name,
+                    "user_email": user_email,
+                }
+            )
         except Exception as e:
             logger.exception("Chat error")
             stats["errors"] += 1
             friendly = error_handler.handle(e, context="chat")
-            self._json_response({
-                "error": friendly.message,
-                **friendly.to_dict(),
-            }, 500)
+            self._json_response(
+                {
+                    "error": friendly.message,
+                    **friendly.to_dict(),
+                },
+                500,
+            )
 
     def _handle_async_skill(
-        self, tenant_id, user_email, skill_name, params,
-        conversation_id, user_message, is_raw, route_type,
-        model_id="", model_short_name="",
+        self,
+        tenant_id,
+        user_email,
+        skill_name,
+        params,
+        conversation_id,
+        user_message,
+        is_raw,
+        route_type,
+        model_id="",
+        model_short_name="",
     ):
         """
         Publish a skill invocation to EventBridge and return immediately.
@@ -1450,10 +1524,17 @@ When you have data to present, format it clearly with structure."""
         pending_store.create(pending_req)
 
         # Publish to EventBridge (returns immediately)
-        _run_async(event_bus.publish_skill_invocation(
-            tenant_id, skill_name, params,
-            conversation_id, request_id, "dashboard", user_key,
-        ))
+        _run_async(
+            event_bus.publish_skill_invocation(
+                tenant_id,
+                skill_name,
+                params,
+                conversation_id,
+                request_id,
+                "dashboard",
+                user_key,
+            )
+        )
 
         stats[f"{route_type}_routed"] += 1
         logger.info(
@@ -1462,15 +1543,77 @@ When you have data to present, format it clearly with structure."""
         )
 
         # Return immediately — client will receive result via WebSocket/SSE
-        self._json_response({
-            "status": "processing",
-            "request_id": request_id,
-            "conversation_id": conversation_id,
-            "skill": skill_name,
-            "route": route_type,
-            "model": "",
-            "user_email": user_email,
-        })
+        self._json_response(
+            {
+                "status": "processing",
+                "request_id": request_id,
+                "conversation_id": conversation_id,
+                "skill": skill_name,
+                "route": route_type,
+                "model": "",
+                "user_email": user_email,
+            }
+        )
+
+    def _handle_async_channel_skill(
+        self,
+        tenant_id,
+        channel,
+        skill_name,
+        params,
+        conversation_id,
+        reply_target,
+        user_key,
+        user_message,
+        is_raw,
+        route_type,
+        model_id="",
+        model_short_name="",
+        service_url="",
+    ):
+        """
+        Publish a skill invocation to EventBridge for Teams/Telegram channels.
+        Returns immediately — the result will be delivered by AsyncResultRouter
+        when SQS picks it up.
+        """
+        import uuid
+
+        request_id = f"async-{channel}-{uuid.uuid4().hex[:12]}"
+
+        pending_req = PendingRequest(
+            request_id=request_id,
+            tenant_id=tenant_id,
+            skill_name=skill_name,
+            channel=channel,
+            conversation_id=conversation_id,
+            reply_target=reply_target,
+            user_key=user_key,
+            is_raw=is_raw,
+            user_message=user_message,
+            model_id=model_id,
+            model_short_name=model_short_name,
+            route_type=route_type,
+            service_url=service_url,
+        )
+        pending_store.create(pending_req)
+
+        _run_async(
+            event_bus.publish_skill_invocation(
+                tenant_id,
+                skill_name,
+                params,
+                conversation_id,
+                request_id,
+                channel,
+                user_key,
+            )
+        )
+
+        stats[f"{route_type}_routed"] += 1
+        logger.info(
+            f"{channel.capitalize()}: async skill '{skill_name}' dispatched, "
+            f"request={request_id[:8]}"
+        )
 
     # --- Invitation endpoints (public) ---
 
@@ -1478,6 +1621,7 @@ When you have data to present, format it clearly with structure."""
         """Public: validate an invite code, return tenant name + email."""
         try:
             from urllib.parse import parse_qs
+
             query = parse_qs(urlparse(self.path).query)
             code = query.get("code", [""])[0]
             if not code:
@@ -1495,13 +1639,15 @@ When you have data to present, format it clearly with structure."""
             except Exception:
                 tenant_name = invitation.tenant_id
 
-            self._json_response({
-                "valid": True,
-                "tenant_name": tenant_name,
-                "tenant_id": invitation.tenant_id,
-                "email": invitation.email,
-                "role": invitation.role,
-            })
+            self._json_response(
+                {
+                    "valid": True,
+                    "tenant_name": tenant_name,
+                    "tenant_id": invitation.tenant_id,
+                    "email": invitation.email,
+                    "role": invitation.role,
+                }
+            )
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
@@ -1527,22 +1673,23 @@ When you have data to present, format it clearly with structure."""
                 return
 
             # Check if user is already a member
-            existing = _run_async(tenants.get_user_by_email(
-                invitation.tenant_id, invitation.email
-            ))
+            existing = _run_async(tenants.get_user_by_email(invitation.tenant_id, invitation.email))
             if existing:
                 invitation.status = "accepted"
                 invitation.accepted_at = datetime.now(timezone.utc).isoformat()
                 _run_async(tenants.update_invitation(invitation))
-                self._json_response({
-                    "accepted": True,
-                    "tenant_id": invitation.tenant_id,
-                    "already_member": True,
-                })
+                self._json_response(
+                    {
+                        "accepted": True,
+                        "tenant_id": invitation.tenant_id,
+                        "already_member": True,
+                    }
+                )
                 return
 
             # Create TenantUser
             from agent.models.tenant import TenantUser
+
             user = TenantUser(
                 user_id=auth.user_id,  # Cognito sub
                 tenant_id=invitation.tenant_id,
@@ -1558,12 +1705,14 @@ When you have data to present, format it clearly with structure."""
             invitation.accepted_at = datetime.now(timezone.utc).isoformat()
             _run_async(tenants.update_invitation(invitation))
 
-            self._json_response({
-                "accepted": True,
-                "tenant_id": invitation.tenant_id,
-                "user_id": auth.user_id,
-                "role": invitation.role,
-            })
+            self._json_response(
+                {
+                    "accepted": True,
+                    "tenant_id": invitation.tenant_id,
+                    "user_id": auth.user_id,
+                    "role": invitation.role,
+                }
+            )
         except AuthError as e:
             self._json_response({"error": e.message}, e.status)
         except Exception as e:
@@ -1597,9 +1746,7 @@ When you have data to present, format it clearly with structure."""
 
             # Validate webhook authenticity
             auth_header = self.headers.get("Authorization", "")
-            if auth_header and not teams_adapter.validate_webhook(
-                dict(self.headers), body_bytes
-            ):
+            if auth_header and not teams_adapter.validate_webhook(dict(self.headers), body_bytes):
                 logger.warning("Teams webhook JWT validation failed")
                 self._json_response({"error": "Unauthorized"}, 401)
                 return
@@ -1654,9 +1801,7 @@ Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 You are communicating via Microsoft Teams. Keep responses clear and well-formatted.
 When you have data to present, format it clearly with structure."""
 
-        history = _strip_metadata(
-            _run_async(memory.get_conversation(tenant_id, conversation_id))
-        )
+        history = _strip_metadata(_run_async(memory.get_conversation(tenant_id, conversation_id)))
 
         if not is_raw and rule_router.is_conversational(clean_text):
             stats["conversational"] += 1
@@ -1668,11 +1813,39 @@ When you have data to present, format it clearly with structure."""
             match = rule_router.match(clean_text, tenant.settings.enabled_skills)
 
             if match:
+                # --- Async path: publish to EventBridge, return immediately ---
+                if USE_ASYNC_SKILLS and event_bus and pending_store:
+                    service_url = teams_adapter._service_urls.get(message.conversation_id, "")
+                    self._handle_async_channel_skill(
+                        tenant_id=tenant_id,
+                        channel="teams",
+                        skill_name=match.skill_name,
+                        params=match.params,
+                        conversation_id=conversation_id,
+                        reply_target=message.conversation_id,
+                        user_key=message.channel_user_id,
+                        user_message=clean_text,
+                        is_raw=is_raw,
+                        route_type="rule",
+                        model_id=active_model,
+                        model_short_name=model_short_name,
+                        service_url=service_url,
+                    )
+                    return
+
+                # --- Sync fallback: DirectBus ---
                 request_id = f"teams-rule-{conversation_id}"
-                _run_async(bus.publish_skill_invocation(
-                    tenant_id, match.skill_name, match.params,
-                    conversation_id, request_id, "teams", message.channel_user_id,
-                ))
+                _run_async(
+                    bus.publish_skill_invocation(
+                        tenant_id,
+                        match.skill_name,
+                        match.params,
+                        conversation_id,
+                        request_id,
+                        "teams",
+                        message.channel_user_id,
+                    )
+                )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
 
                 if is_raw and rule_router.supports_raw(match.skill_name):
@@ -1684,8 +1857,8 @@ When you have data to present, format it clearly with structure."""
                     stats["rule_routed"] += 1
                     prompt = (
                         f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                        f'Tool data:\n{json.dumps(skill_result, indent=2)}\n\n'
-                        f'Format this clearly.'
+                        f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
+                        f"Format this clearly."
                     )
                     messages = history + [{"role": "user", "content": prompt}]
                     response = _run_async(ai.chat(active_model, system, messages, []))
@@ -1693,32 +1866,52 @@ When you have data to present, format it clearly with structure."""
                     total_tokens = response.input_tokens + response.output_tokens
             else:
                 stats["ai_routed"] += 1
-                tools = skills.get_tools_for_tenant(
-                    type("C", (), {"tenant": tenant})()
-                )
+                tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
                 messages = history + [{"role": "user", "content": clean_text}]
-                response = _run_async(
-                    ai.chat(active_model, system, messages, tools)
-                )
+                response = _run_async(ai.chat(active_model, system, messages, tools))
 
                 if response.has_tool_use:
                     tc = response.tool_calls[0]
+
+                    # --- Async path for AI-routed skills ---
+                    if USE_ASYNC_SKILLS and event_bus and pending_store:
+                        service_url = teams_adapter._service_urls.get(message.conversation_id, "")
+                        self._handle_async_channel_skill(
+                            tenant_id=tenant_id,
+                            channel="teams",
+                            skill_name=tc.tool_name,
+                            params=tc.tool_params,
+                            conversation_id=conversation_id,
+                            reply_target=message.conversation_id,
+                            user_key=message.channel_user_id,
+                            user_message=clean_text,
+                            is_raw=is_raw,
+                            route_type="ai",
+                            model_id=active_model,
+                            model_short_name=model_short_name,
+                            service_url=service_url,
+                        )
+                        return
+
+                    # --- Sync fallback ---
                     request_id = f"teams-ai-{conversation_id}"
-                    _run_async(bus.publish_skill_invocation(
-                        tenant_id, tc.tool_name, tc.tool_params,
-                        conversation_id, request_id, "teams",
-                        message.channel_user_id,
-                    ))
-                    skill_result = (
-                        bus.get_result(request_id) or {"error": "No result"}
+                    _run_async(
+                        bus.publish_skill_invocation(
+                            tenant_id,
+                            tc.tool_name,
+                            tc.tool_params,
+                            conversation_id,
+                            request_id,
+                            "teams",
+                            message.channel_user_id,
+                        )
                     )
+                    skill_result = bus.get_result(request_id) or {"error": "No result"}
 
                     if is_raw and rule_router.supports_raw(tc.tool_name):
                         stats["raw"] += 1
                         assistant_text = _format_raw_json(skill_result)
-                        total_tokens = (
-                            response.input_tokens + response.output_tokens
-                        )
+                        total_tokens = response.input_tokens + response.output_tokens
                     else:
                         messages_with_tool = messages + [
                             {
@@ -1735,17 +1928,20 @@ When you have data to present, format it clearly with structure."""
                         ]
                         final = _run_async(
                             ai.chat_with_tool_result(
-                                active_model, system,
-                                messages_with_tool, tools,
-                                tc.tool_use_id, skill_result,
+                                active_model,
+                                system,
+                                messages_with_tool,
+                                tools,
+                                tc.tool_use_id,
+                                skill_result,
                             )
                         )
-                        assistant_text = (
-                            final.text or "Got data but couldn't format."
-                        )
+                        assistant_text = final.text or "Got data but couldn't format."
                         total_tokens = (
-                            response.input_tokens + response.output_tokens
-                            + final.input_tokens + final.output_tokens
+                            response.input_tokens
+                            + response.output_tokens
+                            + final.input_tokens
+                            + final.output_tokens
                         )
                 else:
                     assistant_text = response.text or "Not sure how to help."
@@ -1754,15 +1950,20 @@ When you have data to present, format it clearly with structure."""
         stats["total_tokens"] += total_tokens
 
         # Save conversation turn
-        _run_async(memory.save_turn(
-            tenant_id, conversation_id, clean_text, assistant_text,
-            metadata={
-                "route": "teams",
-                "model": model_short_name,
-                "tokens": total_tokens,
-                "channel": "teams",
-            },
-        ))
+        _run_async(
+            memory.save_turn(
+                tenant_id,
+                conversation_id,
+                clean_text,
+                assistant_text,
+                metadata={
+                    "route": "teams",
+                    "model": model_short_name,
+                    "tokens": total_tokens,
+                    "channel": "teams",
+                },
+            )
+        )
 
         # Send response back to Teams
         outbound = OutboundMessage(
@@ -1773,9 +1974,7 @@ When you have data to present, format it clearly with structure."""
         )
         _run_async(teams_adapter.send_response(outbound))
 
-    def _handle_teams_bot_added(
-        self, teams_adapter: TeamsAdapter, activity: dict
-    ):
+    def _handle_teams_bot_added(self, teams_adapter: TeamsAdapter, activity: dict):
         """Handle bot being added to a Teams channel/chat."""
         from agent.models.message import OutboundMessage
 
@@ -1818,9 +2017,9 @@ When you have data to present, format it clearly with structure."""
                         if creds.get("app_id") == bot_app_id:
                             tenant = t
                             # Create channel mapping for faster lookup next time
-                            _run_async(tenants.set_channel_mapping(
-                                t.tenant_id, "teams", bot_app_id
-                            ))
+                            _run_async(
+                                tenants.set_channel_mapping(t.tenant_id, "teams", bot_app_id)
+                            )
                             break
                     except Exception:
                         continue
@@ -1888,6 +2087,7 @@ When you have data to present, format it clearly with structure."""
 
         # Resolve tenant — look up by token hash in channel mapping GSI
         import hashlib
+
         token_hash = hashlib.sha256(adapter.bot_token.encode()).hexdigest()[:16]
         try:
             tenant = _run_async(tenants.get_by_channel_id("telegram", token_hash))
@@ -1911,9 +2111,7 @@ Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 You are communicating via Telegram. Keep responses concise and well-formatted.
 Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
 
-        history = _strip_metadata(
-            _run_async(memory.get_conversation(tenant_id, conversation_id))
-        )
+        history = _strip_metadata(_run_async(memory.get_conversation(tenant_id, conversation_id)))
 
         # Route through the same pipeline
         if not is_raw and rule_router.is_conversational(clean_text):
@@ -1925,11 +2123,37 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
         else:
             match = rule_router.match(clean_text, tenant.settings.enabled_skills)
             if match:
+                # --- Async path: publish to EventBridge, return immediately ---
+                if USE_ASYNC_SKILLS and event_bus and pending_store:
+                    self._handle_async_channel_skill(
+                        tenant_id=tenant_id,
+                        channel="telegram",
+                        skill_name=match.skill_name,
+                        params=match.params,
+                        conversation_id=conversation_id,
+                        reply_target=message.conversation_id,
+                        user_key=message.channel_user_id,
+                        user_message=clean_text,
+                        is_raw=is_raw,
+                        route_type="rule",
+                        model_id=active_model,
+                        model_short_name=model_short_name,
+                    )
+                    return
+
+                # --- Sync fallback: DirectBus ---
                 request_id = f"tg-rule-{conversation_id}"
-                _run_async(bus.publish_skill_invocation(
-                    tenant_id, match.skill_name, match.params,
-                    conversation_id, request_id, "telegram", message.channel_user_id,
-                ))
+                _run_async(
+                    bus.publish_skill_invocation(
+                        tenant_id,
+                        match.skill_name,
+                        match.params,
+                        conversation_id,
+                        request_id,
+                        "telegram",
+                        message.channel_user_id,
+                    )
+                )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
                 stats["rule_routed"] += 1
                 if is_raw and rule_router.supports_raw(match.skill_name):
@@ -1939,8 +2163,8 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                 else:
                     prompt = (
                         f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                        f'Tool data:\n{json.dumps(skill_result, indent=2)}\n\n'
-                        f'Format this clearly and concisely for Telegram.'
+                        f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
+                        f"Format this clearly and concisely for Telegram."
                     )
                     messages = history + [{"role": "user", "content": prompt}]
                     response = _run_async(ai.chat(active_model, system, messages, []))
@@ -1953,36 +2177,83 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                 response = _run_async(ai.chat(active_model, system, messages, tools))
                 if response.has_tool_use:
                     tc = response.tool_calls[0]
+
+                    # --- Async path for AI-routed skills ---
+                    if USE_ASYNC_SKILLS and event_bus and pending_store:
+                        self._handle_async_channel_skill(
+                            tenant_id=tenant_id,
+                            channel="telegram",
+                            skill_name=tc.tool_name,
+                            params=tc.tool_params,
+                            conversation_id=conversation_id,
+                            reply_target=message.conversation_id,
+                            user_key=message.channel_user_id,
+                            user_message=clean_text,
+                            is_raw=is_raw,
+                            route_type="ai",
+                            model_id=active_model,
+                            model_short_name=model_short_name,
+                        )
+                        return
+
+                    # --- Sync fallback ---
                     request_id = f"tg-ai-{conversation_id}"
-                    _run_async(bus.publish_skill_invocation(
-                        tenant_id, tc.tool_name, tc.tool_params,
-                        conversation_id, request_id, "telegram", message.channel_user_id,
-                    ))
+                    _run_async(
+                        bus.publish_skill_invocation(
+                            tenant_id,
+                            tc.tool_name,
+                            tc.tool_params,
+                            conversation_id,
+                            request_id,
+                            "telegram",
+                            message.channel_user_id,
+                        )
+                    )
                     skill_result = bus.get_result(request_id) or {"error": "No result"}
                     messages_with_tool = messages + [
-                        {"role": "assistant", "content": [
-                            {"type": "tool_use", "id": tc.tool_use_id,
-                             "name": tc.tool_name, "input": tc.tool_params}
-                        ]}
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": tc.tool_use_id,
+                                    "name": tc.tool_name,
+                                    "input": tc.tool_params,
+                                }
+                            ],
+                        }
                     ]
-                    final = _run_async(ai.chat_with_tool_result(
-                        active_model, system, messages_with_tool,
-                        tools, tc.tool_use_id, skill_result,
-                    ))
+                    final = _run_async(
+                        ai.chat_with_tool_result(
+                            active_model,
+                            system,
+                            messages_with_tool,
+                            tools,
+                            tc.tool_use_id,
+                            skill_result,
+                        )
+                    )
                     assistant_text = final.text or "Got data but couldn't format."
                     total_tokens = (
-                        response.input_tokens + response.output_tokens
-                        + final.input_tokens + final.output_tokens
+                        response.input_tokens
+                        + response.output_tokens
+                        + final.input_tokens
+                        + final.output_tokens
                     )
                 else:
                     assistant_text = response.text or "Not sure how to help."
                     total_tokens = response.input_tokens + response.output_tokens
 
         stats["total_tokens"] += total_tokens
-        _run_async(memory.save_turn(
-            tenant_id, conversation_id, clean_text, assistant_text,
-            metadata={"route": "telegram", "model": model_short_name, "tokens": total_tokens},
-        ))
+        _run_async(
+            memory.save_turn(
+                tenant_id,
+                conversation_id,
+                clean_text,
+                assistant_text,
+                metadata={"route": "telegram", "model": model_short_name, "tokens": total_tokens},
+            )
+        )
 
         outbound = OutboundMessage(
             channel=ChannelType.TELEGRAM,
@@ -2038,9 +2309,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
             # Inject WebSocket config into chat page
             if filename == "chat.html" and WS_API_ENDPOINT:
                 config_script = (
-                    f'<script>window.__CONFIG__ = '
-                    f'{{"ws_endpoint": "{WS_API_ENDPOINT}"}};'
-                    f'</script>'
+                    f'<script>window.__CONFIG__ = {{"ws_endpoint": "{WS_API_ENDPOINT}"}};</script>'
                 ).encode()
                 content = content.replace(b"</head>", config_script + b"\n</head>")
 
@@ -2085,7 +2354,9 @@ def init():
     secrets_prefix = os.getenv("SECRETS_PREFIX")
 
     if not all([conversations_table, tenants_table, secrets_prefix]):
-        logger.error("Missing required env vars: DYNAMODB_CONVERSATIONS_TABLE, DYNAMODB_TENANTS_TABLE, SECRETS_PREFIX")
+        logger.error(
+            "Missing required env vars: DYNAMODB_CONVERSATIONS_TABLE, DYNAMODB_TENANTS_TABLE, SECRETS_PREFIX"
+        )
         sys.exit(1)
 
     ai = BedrockProvider(region=region, model_id=BEDROCK_MODEL_ID)
@@ -2125,6 +2396,7 @@ def init():
                 ai_provider=ai,
                 conversation_store=memory,
                 bedrock_model_id=BEDROCK_MODEL_ID,
+                secrets_provider=secrets,
             )
             sqs_poller = SQSResultPoller(
                 queue_url=sqs_queue_url,
@@ -2148,6 +2420,7 @@ def init():
         logger.info(f"Tenant '{DEFAULT_TENANT}' exists")
     except Exception:
         from agent.models.tenant import Tenant, TenantSettings
+
         now = datetime.now(timezone.utc).isoformat()
         tenant = Tenant(
             tenant_id=DEFAULT_TENANT,
@@ -2169,6 +2442,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     Required for SSE: long-lived SSE connections would block a single-threaded
     server from handling other requests.
     """
+
     daemon_threads = True
 
 

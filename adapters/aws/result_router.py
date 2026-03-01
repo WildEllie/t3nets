@@ -60,12 +60,14 @@ class AsyncResultRouter:
         ai_provider=None,
         conversation_store=None,
         bedrock_model_id: str = "",
+        secrets_provider=None,
     ):
         self.sse = push_client
         self.pending = pending_store
         self.ai = ai_provider
         self.memory = conversation_store
         self._bedrock_model_id = bedrock_model_id
+        self.secrets = secrets_provider
 
     def handle_result(self, message: dict) -> None:
         """
@@ -113,36 +115,44 @@ class AsyncResultRouter:
         route_type = (pending_req.route_type if pending_req else "") or "rule"
 
         if not user_key:
-            logger.warning(
-                f"AsyncResultRouter: no user_key for dashboard result {request_id[:8]}"
-            )
+            logger.warning(f"AsyncResultRouter: no user_key for dashboard result {request_id[:8]}")
             return
 
         # For raw mode, send the result directly
         if is_raw:
-            delivered = self.sse.send_event(user_key, "message", {
-                "request_id": request_id,
-                "text": json.dumps(result, indent=2),
-                "raw": True,
-                "skill": skill_name,
-                "route": route_type,
-                "tokens": 0,
-                "model": "",
-            })
+            delivered = self.sse.send_event(
+                user_key,
+                "message",
+                {
+                    "request_id": request_id,
+                    "text": json.dumps(result, indent=2),
+                    "raw": True,
+                    "skill": skill_name,
+                    "route": route_type,
+                    "tokens": 0,
+                    "model": "",
+                },
+            )
         else:
             # Format with AI if available, otherwise send raw
             formatted_text, fmt_tokens, fmt_model = self._format_result(
-                result, skill_name, pending_req,
+                result,
+                skill_name,
+                pending_req,
             )
-            delivered = self.sse.send_event(user_key, "message", {
-                "request_id": request_id,
-                "text": formatted_text,
-                "raw": False,
-                "skill": skill_name,
-                "route": route_type,
-                "tokens": fmt_tokens,
-                "model": fmt_model,
-            })
+            delivered = self.sse.send_event(
+                user_key,
+                "message",
+                {
+                    "request_id": request_id,
+                    "text": formatted_text,
+                    "raw": False,
+                    "skill": skill_name,
+                    "route": route_type,
+                    "tokens": fmt_tokens,
+                    "model": fmt_model,
+                },
+            )
 
         # Save conversation turn with full metadata (survives page reload)
         if pending_req and self.memory:
@@ -151,7 +161,10 @@ class AsyncResultRouter:
                 save_tokens = fmt_tokens if not is_raw else 0
                 save_model = fmt_model if not is_raw else ""
                 import time as _time
-                roundtrip_sec = round(_time.time() - pending_req.created_at, 1) if pending_req.created_at else 0
+
+                roundtrip_sec = (
+                    round(_time.time() - pending_req.created_at, 1) if pending_req.created_at else 0
+                )
                 _run_async(
                     self.memory.save_turn(
                         pending_req.tenant_id,
@@ -164,7 +177,9 @@ class AsyncResultRouter:
                             "tokens": save_tokens,
                             "model": save_model,
                             "user_email": pending_req.user_key,
-                            "timestamp": int(pending_req.created_at * 1000) if pending_req.created_at else 0,
+                            "timestamp": int(pending_req.created_at * 1000)
+                            if pending_req.created_at
+                            else 0,
                             "roundtrip_sec": roundtrip_sec,
                         },
                     )
@@ -173,62 +188,171 @@ class AsyncResultRouter:
                 logger.error(f"AsyncResultRouter: failed to save turn: {e}")
 
         logger.info(
-            f"AsyncResultRouter: delivered to {delivered} connection(s) "
-            f"for user {user_key[:20]}"
+            f"AsyncResultRouter: delivered to {delivered} connection(s) for user {user_key[:20]}"
         )
 
     def _route_teams(self, request_id, result, skill_name, pending_req, message):
         """Send result back to Teams via Bot Framework."""
+        from agent.channels.teams import TeamsAdapter
+        from agent.models.message import ChannelType, OutboundMessage
+
         if not pending_req:
             logger.warning(f"AsyncResultRouter: no pending request for Teams {request_id[:8]}")
             return
 
         service_url = pending_req.service_url
         if not service_url:
-            logger.error(
-                f"AsyncResultRouter: no service_url for Teams result {request_id[:8]}"
-            )
+            logger.error(f"AsyncResultRouter: no service_url for Teams result {request_id[:8]}")
             return
 
-        # Teams reply is handled by the TeamsAdapter — import here to avoid
-        # circular imports and keep Lambda handler lightweight
         try:
-            from agent.channels.teams import TeamsAdapter
+            # Load Teams credentials from Secrets Manager
+            creds = _run_async(self.secrets.get(pending_req.tenant_id, "teams"))
+            app_id = creds.get("app_id", "")
+            app_secret = creds.get("app_secret", "")
+            if not app_id or not app_secret:
+                logger.error(
+                    f"AsyncResultRouter: missing Teams credentials for "
+                    f"tenant {pending_req.tenant_id}"
+                )
+                return
 
-            formatted_text, _, _ = self._format_result(result, skill_name, pending_req)
-            # TeamsAdapter.send_proactive_message() would go here
-            # For now, log that we'd send to Teams
-            logger.info(
-                f"AsyncResultRouter: would send Teams reply via {service_url} "
-                f"to {pending_req.reply_target}"
+            # Create adapter and inject cached service_url
+            adapter = TeamsAdapter(app_id, app_secret)
+            adapter._service_urls[pending_req.reply_target] = service_url
+
+            # Format result
+            is_raw = pending_req.is_raw
+            if is_raw:
+                formatted_text = json.dumps(result, indent=2)
+                fmt_tokens, fmt_model = 0, ""
+            else:
+                formatted_text, fmt_tokens, fmt_model = self._format_result(
+                    result,
+                    skill_name,
+                    pending_req,
+                )
+
+            # Send response
+            outbound = OutboundMessage(
+                channel=ChannelType.TEAMS,
+                conversation_id=pending_req.reply_target,
+                recipient_id="",
+                text=formatted_text,
             )
-            # TODO: Implement Teams proactive messaging in Phase 3c
+            _run_async(adapter.send_response(outbound))
+
+            # Save conversation turn
+            if self.memory:
+                import time as _time
+
+                route_type = pending_req.route_type or "rule"
+                roundtrip_sec = (
+                    round(_time.time() - pending_req.created_at, 1) if pending_req.created_at else 0
+                )
+                _run_async(
+                    self.memory.save_turn(
+                        pending_req.tenant_id,
+                        pending_req.conversation_id,
+                        pending_req.user_message,
+                        formatted_text,
+                        metadata={
+                            "route": route_type,
+                            "skill": skill_name,
+                            "tokens": fmt_tokens,
+                            "model": fmt_model,
+                            "channel": "teams",
+                            "roundtrip_sec": roundtrip_sec,
+                        },
+                    )
+                )
+
+            logger.info(
+                f"AsyncResultRouter: Teams reply sent via {service_url} "
+                f"to {pending_req.reply_target[:30]}"
+            )
         except Exception as e:
             logger.exception(f"AsyncResultRouter: Teams routing failed: {e}")
 
     def _route_telegram(self, request_id, result, skill_name, pending_req, message):
         """Send result back to Telegram via Bot API."""
+        from agent.channels.telegram import TelegramAdapter
+        from agent.models.message import ChannelType, OutboundMessage
+
         if not pending_req:
-            logger.warning(
-                f"AsyncResultRouter: no pending request for Telegram {request_id[:8]}"
-            )
+            logger.warning(f"AsyncResultRouter: no pending request for Telegram {request_id[:8]}")
             return
 
         try:
-            from agent.channels.telegram import TelegramAdapter
+            # Load Telegram credentials from Secrets Manager
+            creds = _run_async(self.secrets.get(pending_req.tenant_id, "telegram"))
+            bot_token = creds.get("bot_token", "")
+            if not bot_token:
+                logger.error(
+                    f"AsyncResultRouter: missing Telegram bot_token for "
+                    f"tenant {pending_req.tenant_id}"
+                )
+                return
 
-            formatted_text, _, _ = self._format_result(result, skill_name, pending_req)
-            # TelegramAdapter.send_message() would go here
-            logger.info(
-                f"AsyncResultRouter: would send Telegram reply to "
-                f"chat {pending_req.reply_target}"
+            adapter = TelegramAdapter(bot_token)
+
+            # Format result
+            is_raw = pending_req.is_raw
+            if is_raw:
+                formatted_text = json.dumps(result, indent=2)
+                fmt_tokens, fmt_model = 0, ""
+            else:
+                formatted_text, fmt_tokens, fmt_model = self._format_result(
+                    result,
+                    skill_name,
+                    pending_req,
+                )
+
+            # Send response
+            outbound = OutboundMessage(
+                channel=ChannelType.TELEGRAM,
+                conversation_id=pending_req.reply_target,
+                recipient_id="",
+                text=formatted_text,
             )
-            # TODO: Implement Telegram async reply in Phase 3c
+            _run_async(adapter.send_response(outbound))
+
+            # Save conversation turn
+            if self.memory:
+                import time as _time
+
+                route_type = pending_req.route_type or "rule"
+                roundtrip_sec = (
+                    round(_time.time() - pending_req.created_at, 1) if pending_req.created_at else 0
+                )
+                _run_async(
+                    self.memory.save_turn(
+                        pending_req.tenant_id,
+                        pending_req.conversation_id,
+                        pending_req.user_message,
+                        formatted_text,
+                        metadata={
+                            "route": route_type,
+                            "skill": skill_name,
+                            "tokens": fmt_tokens,
+                            "model": fmt_model,
+                            "channel": "telegram",
+                            "roundtrip_sec": roundtrip_sec,
+                        },
+                    )
+                )
+
+            logger.info(
+                f"AsyncResultRouter: Telegram reply sent to chat {pending_req.reply_target}"
+            )
         except Exception as e:
             logger.exception(f"AsyncResultRouter: Telegram routing failed: {e}")
 
     def _format_result(
-        self, result: dict, skill_name: str, pending_req,
+        self,
+        result: dict,
+        skill_name: str,
+        pending_req,
     ) -> tuple[str, int, str]:
         """
         Format a skill result into human-readable text.
@@ -245,10 +369,7 @@ class AsyncResultRouter:
             )
 
         # Use tenant's model from the pending request, fall back to server default
-        active_model = (
-            (pending_req.model_id if pending_req else "")
-            or self._bedrock_model_id
-        )
+        active_model = (pending_req.model_id if pending_req else "") or self._bedrock_model_id
         model_short = (pending_req.model_short_name if pending_req else "") or ""
 
         if self.ai and active_model:
