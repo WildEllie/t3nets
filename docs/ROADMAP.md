@@ -169,6 +169,14 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [x] **Milestone:** Admin can invite users by link; invited users join the correct tenant and land in chat
 
 
+### Phase 4.5: Session Management
+- [ ] Decode JWT `exp` client-side; track mouse/keyboard activity
+- [ ] Active user: silent token refresh 5 min before expiry via `/api/auth/refresh`
+- [ ] Idle user: "Session Expired" modal at expiry → OK navigates to `/login`
+- [ ] Apply to `chat.html`, `settings.html`, and `health.html`
+- [ ] **Milestone:** No silent 401 failures; idle sessions expire gracefully
+
+
 ### Phase 5: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
       ↳ ✅ Completed — see [handoff notes](../handoffs/001-fix-release-notes-skill.md)

@@ -718,6 +718,7 @@
                     } catch (e) { /* /api/auth/me not available */ }
                 }
             } catch (e) { /* auth not available */ }
+            SessionManager.init();
         }
 
         function logout() {
@@ -726,6 +727,76 @@
             localStorage.removeItem('t3nets_refresh_token');
             window.location.href = '/login';
         }
+
+        async function tryRefreshToken() {
+            const refreshToken = localStorage.getItem('t3nets_refresh_token');
+            if (!refreshToken) return false;
+            try {
+                const resp = await fetch('/api/auth/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ refresh_token: refreshToken }),
+                });
+                if (!resp.ok) return false;
+                const data = await resp.json();
+                if (data.id_token) localStorage.setItem('t3nets_id_token', data.id_token);
+                if (data.access_token) localStorage.setItem('t3nets_access_token', data.access_token);
+                return true;
+            } catch { return false; }
+        }
+
+        const SessionManager = {
+            lastActivity: Date.now(),
+            _refreshTimer: null,
+            _expiredTimer: null,
+            IDLE_MS: 10 * 60 * 1000,
+            REFRESH_BEFORE_MS: 5 * 60 * 1000,
+
+            init() {
+                ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'].forEach(ev =>
+                    document.addEventListener(ev, () => { this.lastActivity = Date.now(); },
+                        { passive: true })
+                );
+                this.schedule();
+            },
+
+            _getExp() {
+                const token = localStorage.getItem('t3nets_id_token');
+                if (!token) return null;
+                try {
+                    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+                    return JSON.parse(atob(b64)).exp * 1000;
+                } catch { return null; }
+            },
+
+            schedule() {
+                clearTimeout(this._refreshTimer);
+                clearTimeout(this._expiredTimer);
+                const exp = this._getExp();
+                if (!exp) return;
+                const msLeft = exp - Date.now();
+                if (msLeft <= 0) { this._showExpired(); return; }
+                const msToWindow = msLeft - this.REFRESH_BEFORE_MS;
+                if (msToWindow > 0)
+                    this._refreshTimer = setTimeout(() => this._onRefreshWindow(), msToWindow);
+                else
+                    this._onRefreshWindow();
+                this._expiredTimer = setTimeout(() => this._showExpired(), msLeft);
+            },
+
+            async _onRefreshWindow() {
+                const active = (Date.now() - this.lastActivity) < this.IDLE_MS;
+                if (active) {
+                    const ok = await tryRefreshToken();
+                    if (ok) { this.schedule(); return; }
+                }
+                // idle or refresh failed — expiredTimer fires at exp
+            },
+
+            _showExpired() {
+                document.getElementById('session-expired-modal').style.display = 'flex';
+            },
+        };
 
         checkAuth();
 
@@ -1459,5 +1530,22 @@
         // ==================== Init ====================
         loadSettings();
     </script>
+
+    <div id="session-expired-modal"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+                z-index:9999;align-items:center;justify-content:center;">
+        <div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;
+                    padding:32px;max-width:360px;text-align:center;">
+            <h3 style="margin:0 0 12px;color:#f1f5f9;">Session Expired</h3>
+            <p style="color:#94a3b8;margin:0 0 24px;">
+                Your session has expired. Please sign in again.
+            </p>
+            <button onclick="window.location.href='/login'"
+                    style="background:#3b82f6;color:#fff;border:none;border-radius:6px;
+                           padding:10px 28px;font-size:14px;cursor:pointer;">
+                OK
+            </button>
+        </div>
+    </div>
 </body>
 </html>
