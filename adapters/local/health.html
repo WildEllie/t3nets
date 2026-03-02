@@ -454,6 +454,8 @@
             },
 
             _showExpired() {
+                localStorage.removeItem('t3nets_id_token');
+                localStorage.removeItem('t3nets_access_token');
                 document.getElementById('session-expired-modal').style.display = 'flex';
             },
         };
