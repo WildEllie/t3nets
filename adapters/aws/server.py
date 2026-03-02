@@ -21,13 +21,21 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer
 from pathlib import Path
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from adapters.shared.base_handler import BaseHandler
+from adapters.shared.server_utils import (
+    INTEGRATION_SCHEMAS,
+    _format_raw_json,
+    _strip_metadata,
+    _uptime_human,
+)
 
 from agent.skills.registry import SkillRegistry
 from agent.channels.base import ChannelRegistry
@@ -97,114 +105,6 @@ WS_MANAGEMENT_ENDPOINT = os.environ.get(
 WS_CONNECTIONS_TABLE = os.environ.get("WS_CONNECTIONS_TABLE", "")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-# Integration field schemas — defines the config form per integration type.
-INTEGRATION_SCHEMAS: dict = {
-    "jira": {
-        "label": "Jira",
-        "fields": [
-            {
-                "key": "url",
-                "label": "Jira URL",
-                "type": "url",
-                "required": True,
-                "placeholder": "https://yourteam.atlassian.net",
-            },
-            {
-                "key": "email",
-                "label": "Email",
-                "type": "email",
-                "required": True,
-                "placeholder": "admin@company.com",
-            },
-            {
-                "key": "api_token",
-                "label": "API Token",
-                "type": "password",
-                "required": True,
-                "placeholder": "Your Jira API token",
-            },
-            {
-                "key": "project_key",
-                "label": "Project Key",
-                "type": "text",
-                "required": True,
-                "placeholder": "PROJ",
-            },
-            {
-                "key": "board_id",
-                "label": "Board ID",
-                "type": "text",
-                "required": False,
-                "placeholder": "Optional — for sprint queries",
-            },
-        ],
-    },
-    "github": {
-        "label": "GitHub",
-        "fields": [
-            {
-                "key": "token",
-                "label": "Personal Access Token",
-                "type": "password",
-                "required": True,
-                "placeholder": "ghp_...",
-            },
-            {
-                "key": "org",
-                "label": "Organization",
-                "type": "text",
-                "required": True,
-                "placeholder": "your-org",
-            },
-        ],
-    },
-    "teams": {
-        "label": "Microsoft Teams",
-        "fields": [
-            {
-                "key": "app_id",
-                "label": "Bot App ID",
-                "type": "text",
-                "required": True,
-                "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-            },
-            {
-                "key": "app_secret",
-                "label": "Bot App Secret",
-                "type": "password",
-                "required": True,
-                "placeholder": "Your bot client secret",
-            },
-            {
-                "key": "azure_tenant_id",
-                "label": "Azure AD Tenant ID",
-                "type": "text",
-                "required": False,
-                "placeholder": "Leave blank for multi-tenant bots",
-            },
-        ],
-    },
-    "telegram": {
-        "label": "Telegram",
-        "fields": [
-            {
-                "key": "bot_token",
-                "label": "Bot Token",
-                "type": "password",
-                "required": True,
-                "placeholder": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-            },
-            {
-                "key": "webhook_secret",
-                "label": "Webhook Secret",
-                "type": "text",
-                "required": False,
-                "placeholder": "Optional — auto-generated if blank",
-            },
-        ],
-    },
-}
-
 # Build number — read from version.txt at startup
 _version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
 BUILD_NUMBER = _version_path.read_text().strip() if _version_path.exists() else "0"
@@ -245,10 +145,6 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
-def _format_raw_json(data: dict) -> str:
-    return json.dumps(data, indent=2, default=str)
-
-
 def _bedrock_geo_prefix() -> str:
     """Map AWS region to Bedrock geographic inference profile prefix.
 
@@ -284,11 +180,6 @@ def _resolve_model(tenant):
     return BEDROCK_MODEL_ID, model.short_name
 
 
-def _strip_metadata(messages: list[dict]) -> list[dict]:
-    """Strip metadata from conversation history before sending to the AI provider."""
-    return [{"role": m["role"], "content": m["content"]} for m in messages]
-
-
 def _get_auth_info(headers) -> tuple[str, str]:
     """Extract (tenant_id, user_email) from JWT in Authorization header.
 
@@ -319,64 +210,37 @@ def _get_auth_info(headers) -> tuple[str, str]:
         return DEFAULT_TENANT, ""
 
 
-def _uptime_human(seconds: float) -> str:
-    s = int(seconds)
-    if s < 60:
-        return f"{s}s"
-    elif s < 3600:
-        return f"{s // 60}m {s % 60}s"
-    elif s < 86400:
-        return f"{s // 3600}h {(s % 3600) // 60}m"
-    else:
-        return f"{s // 86400}d {(s % 86400) // 3600}h"
-
-
-class AWSHandler(BaseHTTPRequestHandler):
+class AWSHandler(BaseHandler):
     """HTTP request handler for AWS deployment."""
 
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
-        if path == "/" or path == "/chat":
-            self._serve_file("chat.html", "adapters/local")
-        elif path == "/health":
-            self._serve_file("health.html", "adapters/local")
-        elif path == "/settings":
-            self._serve_file("settings.html", "adapters/local")
-        elif path == "/login":
-            self._serve_file("login.html", "adapters/local")
-        elif path == "/callback":
-            self._serve_file("callback.html", "adapters/local")
-        elif path == "/onboard":
-            self._serve_file("onboard.html", "adapters/local")
-        elif path == "/platform":
-            self._serve_file("platform.html", "adapters/local")
-        elif path == "/api/events":
-            self._handle_sse()
-        elif path == "/api/health":
-            self._handle_health_api()
-        elif path == "/api/settings":
-            self._handle_settings_get()
-        elif path == "/api/history":
-            self._handle_history()
-        elif path == "/api/auth/config":
-            self._handle_auth_config()
-        elif path == "/api/auth/me":
-            self._handle_auth_me()
-        elif path == "/api/integrations":
-            self._handle_integrations_list()
-        elif path.startswith("/api/integrations/"):
-            self._handle_integration_get(path)
-        elif path == "/api/invitations/validate":
-            self._handle_invitation_validate()
-        elif path.startswith("/api/platform/"):
-            self._handle_platform("GET", path)
-        elif path.startswith("/api/admin/"):
-            self._handle_admin("GET", path)
-        else:
-            self.send_error(404)
+    def do_GET(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        self._dispatch(
+            {
+                "/": lambda: self._serve_file("chat.html", "adapters/local"),
+                "/chat": lambda: self._serve_file("chat.html", "adapters/local"),
+                "/health": lambda: self._serve_file("health.html", "adapters/local"),
+                "/settings": lambda: self._serve_file("settings.html", "adapters/local"),
+                "/login": lambda: self._serve_file("login.html", "adapters/local"),
+                "/callback": lambda: self._serve_file("callback.html", "adapters/local"),
+                "/onboard": lambda: self._serve_file("onboard.html", "adapters/local"),
+                "/platform": lambda: self._serve_file("platform.html", "adapters/local"),
+                "/api/events": self._handle_sse,
+                "/api/health": self._handle_health_api,
+                "/api/settings": self._handle_settings_get,
+                "/api/history": self._handle_history,
+                "/api/auth/config": self._handle_auth_config,
+                "/api/auth/me": self._handle_auth_me,
+                "/api/integrations": self._handle_integrations_list,
+                "/api/integrations/*": lambda: self._handle_integration_get(path),
+                "/api/invitations/validate": self._handle_invitation_validate,
+                "/api/platform/*": lambda: self._handle_platform("GET", path),
+                "/api/admin/*": lambda: self._handle_admin("GET", path),
+            },
+            path,
+        )
 
-    def do_POST(self):
+    def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
 
         # WebSocket API Gateway routes — identified by X-WS-Route header
@@ -390,68 +254,55 @@ class AWSHandler(BaseHTTPRequestHandler):
                 self._handle_ws_default()
             return
 
-        if path == "/api/channels/teams/webhook":
-            self._handle_teams_webhook()
-        elif path.startswith("/api/channels/telegram/webhook"):
-            self._handle_telegram_webhook()
-        elif path == "/api/chat":
-            self._handle_chat()
-        elif path == "/api/clear":
-            self._handle_clear()
-        elif path == "/api/settings":
-            self._handle_settings_post()
-        elif path.startswith("/api/integrations/"):
-            self._handle_integrations_post(path)
-        elif path == "/api/auth/login":
-            self._handle_auth_login()
-        elif path == "/api/auth/signup":
-            self._handle_auth_signup()
-        elif path == "/api/auth/confirm":
-            self._handle_auth_confirm()
-        elif path == "/api/auth/refresh":
-            self._handle_auth_refresh()
-        elif path == "/api/auth/forgot-password":
-            self._handle_auth_forgot_password()
-        elif path == "/api/auth/confirm-reset":
-            self._handle_auth_confirm_reset()
-        elif path == "/api/invitations/accept":
-            self._handle_invitation_accept()
-        elif path.startswith("/api/platform/"):
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
-            self._handle_platform("POST", path, body)
-        elif path.startswith("/api/admin/"):
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
-            self._handle_admin("POST", path, body)
-        else:
-            self.send_error(404)
+        self._dispatch(
+            {
+                "/api/channels/teams/webhook": self._handle_teams_webhook,
+                "/api/channels/telegram/webhook*": self._handle_telegram_webhook,
+                "/api/chat": self._handle_chat,
+                "/api/clear": self._handle_clear,
+                "/api/settings": self._handle_settings_post,
+                "/api/integrations/*": lambda: self._handle_integrations_post(path),
+                "/api/auth/login": self._handle_auth_login,
+                "/api/auth/signup": self._handle_auth_signup,
+                "/api/auth/confirm": self._handle_auth_confirm,
+                "/api/auth/refresh": self._handle_auth_refresh,
+                "/api/auth/forgot-password": self._handle_auth_forgot_password,
+                "/api/auth/confirm-reset": self._handle_auth_confirm_reset,
+                "/api/invitations/accept": self._handle_invitation_accept,
+                "/api/platform/*": lambda: self._handle_platform("POST", path, self._read_json()),
+                "/api/admin/*": lambda: self._handle_admin("POST", path, self._read_json()),
+            },
+            path,
+        )
 
-    def do_PUT(self):
+    def do_PUT(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path.startswith("/api/admin/"):
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
-            self._handle_admin("PUT", path, body)
-        else:
-            self.send_error(404)
+        self._dispatch(
+            {
+                "/api/admin/*": lambda: self._handle_admin("PUT", path, self._read_json()),
+            },
+            path,
+        )
 
-    def do_DELETE(self):
+    def do_DELETE(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path.startswith("/api/platform/"):
-            self._handle_platform("DELETE", path)
-        elif path.startswith("/api/admin/"):
-            self._handle_admin("DELETE", path)
-        else:
-            self.send_error(404)
+        self._dispatch(
+            {
+                "/api/platform/*": lambda: self._handle_platform("DELETE", path),
+                "/api/admin/*": lambda: self._handle_admin("DELETE", path),
+            },
+            path,
+        )
 
-    def do_PATCH(self):
+    def do_PATCH(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path.startswith("/api/platform/"):
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
-            self._handle_platform("PATCH", path, body)
-        elif path.startswith("/api/admin/"):
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
-            self._handle_admin("PATCH", path, body)
-        else:
-            self.send_error(404)
+        self._dispatch(
+            {
+                "/api/platform/*": lambda: self._handle_platform("PATCH", path, self._read_json()),
+                "/api/admin/*": lambda: self._handle_admin("PATCH", path, self._read_json()),
+            },
+            path,
+        )
 
     def _handle_admin(self, method: str, path: str, body: dict | None = None):
         """Delegate to admin API."""
@@ -2322,43 +2173,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
-    def _serve_file(self, filename: str, search_dir: str = None):
-        """Serve HTML — check local adapter dir (shared UI files)."""
-        base = Path(__file__).parent.parent.parent
-        if search_dir:
-            path = base / search_dir / filename
-        else:
-            path = base / filename
-
-        if path.exists():
-            content = path.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(content)
-        else:
-            self.send_error(404, f"{filename} not found")
-
-    def _json_response(self, data: dict, status: int = 200):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        self.end_headers()
-
-    def log_message(self, format, *args):
-        pass
-
-
-# Single region for all AWS calls (data residency / IAM scope)
-AWS_REGION = "us-east-1"
+    # _serve_file, _json_response, do_OPTIONS, log_message inherited from BaseHandler
 
 
 def init():

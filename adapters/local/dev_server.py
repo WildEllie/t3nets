@@ -23,13 +23,21 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer
 from socketserver import ThreadingMixIn
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from adapters.shared.base_handler import BaseHandler
+from adapters.shared.server_utils import (
+    INTEGRATION_SCHEMAS,
+    _format_raw_json,
+    _strip_metadata,
+    _uptime_human,
+)
 
 from agent.interfaces.ai_provider import ToolDefinition
 from agent.skills.registry import SkillRegistry
@@ -76,115 +84,6 @@ DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
 PROVIDER = "anthropic"
 
-# Integration field schemas — defines the config form per integration type.
-# Used by GET /api/integrations to tell the frontend which fields to render.
-INTEGRATION_SCHEMAS: dict = {
-    "jira": {
-        "label": "Jira",
-        "fields": [
-            {
-                "key": "url",
-                "label": "Jira URL",
-                "type": "url",
-                "required": True,
-                "placeholder": "https://yourteam.atlassian.net",
-            },
-            {
-                "key": "email",
-                "label": "Email",
-                "type": "email",
-                "required": True,
-                "placeholder": "admin@company.com",
-            },
-            {
-                "key": "api_token",
-                "label": "API Token",
-                "type": "password",
-                "required": True,
-                "placeholder": "Your Jira API token",
-            },
-            {
-                "key": "project_key",
-                "label": "Project Key",
-                "type": "text",
-                "required": True,
-                "placeholder": "PROJ",
-            },
-            {
-                "key": "board_id",
-                "label": "Board ID",
-                "type": "text",
-                "required": False,
-                "placeholder": "Optional — for sprint queries",
-            },
-        ],
-    },
-    "github": {
-        "label": "GitHub",
-        "fields": [
-            {
-                "key": "token",
-                "label": "Personal Access Token",
-                "type": "password",
-                "required": True,
-                "placeholder": "ghp_...",
-            },
-            {
-                "key": "org",
-                "label": "Organization",
-                "type": "text",
-                "required": True,
-                "placeholder": "your-org",
-            },
-        ],
-    },
-    "teams": {
-        "label": "Microsoft Teams",
-        "fields": [
-            {
-                "key": "app_id",
-                "label": "Bot App ID",
-                "type": "text",
-                "required": True,
-                "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-            },
-            {
-                "key": "app_secret",
-                "label": "Bot App Secret",
-                "type": "password",
-                "required": True,
-                "placeholder": "Your bot client secret",
-            },
-            {
-                "key": "azure_tenant_id",
-                "label": "Azure AD Tenant ID",
-                "type": "text",
-                "required": False,
-                "placeholder": "Leave blank for multi-tenant bots",
-            },
-        ],
-    },
-    "telegram": {
-        "label": "Telegram",
-        "fields": [
-            {
-                "key": "bot_token",
-                "label": "Bot Token",
-                "type": "password",
-                "required": True,
-                "placeholder": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-            },
-            {
-                "key": "webhook_secret",
-                "label": "Webhook Secret",
-                "type": "text",
-                "required": False,
-                "placeholder": "Optional — auto-generated if blank",
-            },
-        ],
-    },
-}
-
 # Build number — read from version.txt at startup
 _version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
 BUILD_NUMBER = _version_path.read_text().strip() if _version_path.exists() else "0"
@@ -209,11 +108,6 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
-def _format_raw_json(data: dict) -> str:
-    """Format raw JSON for dashboard display."""
-    return json.dumps(data, indent=2, default=str)
-
-
 def _resolve_model(tenant):
     """Resolve the tenant's ai_model setting to an Anthropic API model ID and short name."""
     model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
@@ -227,115 +121,92 @@ def _resolve_model(tenant):
     return api_id or model.anthropic_id, model.short_name
 
 
-def _strip_metadata(messages: list[dict]) -> list[dict]:
-    """Strip metadata from conversation history before sending to the AI provider."""
-    return [{"role": m["role"], "content": m["content"]} for m in messages]
-
-
-def _uptime_human(seconds: float) -> str:
-    """Convert seconds to human-readable uptime."""
-    s = int(seconds)
-    if s < 60:
-        return f"{s}s"
-    elif s < 3600:
-        return f"{s // 60}m {s % 60}s"
-    elif s < 86400:
-        h = s // 3600
-        m = (s % 3600) // 60
-        return f"{h}h {m}m"
-    else:
-        d = s // 86400
-        h = (s % 86400) // 3600
-        return f"{d}d {h}h"
-
-
-class DevHandler(BaseHTTPRequestHandler):
+class DevHandler(BaseHandler):
     """HTTP request handler for local development."""
 
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
+    def do_GET(self) -> None:  # noqa: N802
+        path = urlparse(self.path).path
+        self._dispatch(
+            {
+                "/": lambda: self._serve_file("chat.html", "adapters/local"),
+                "/chat": lambda: self._serve_file("chat.html", "adapters/local"),
+                "/health": lambda: self._serve_file("health.html", "adapters/local"),
+                "/settings": lambda: self._serve_file("settings.html", "adapters/local"),
+                "/onboard": lambda: self._serve_file("onboard.html", "adapters/local"),
+                "/platform": lambda: self._serve_file("platform.html", "adapters/local"),
+                "/api/events": self._handle_sse,
+                "/api/health": self._handle_health_api,
+                "/api/settings": self._handle_settings_get,
+                "/api/history": self._handle_history,
+                "/api/auth/config": self._handle_auth_config,
+                "/api/auth/me": self._handle_auth_me,
+                "/api/integrations": self._handle_integrations_list,
+                "/api/integrations/*": lambda: self._handle_integration_get(path),
+                "/api/invitations/validate": self._handle_invitation_validate,
+                "/api/platform/tenants": self._handle_platform_list_tenants,
+            },
+            path,
+            fallback=lambda: self._dispatch_admin_get(path),
+        )
 
-        if path == "/" or path == "/chat":
-            self._serve_file("chat.html")
-        elif path == "/health":
-            self._serve_file("health.html")
-        elif path == "/settings":
-            self._serve_file("settings.html")
-        elif path == "/onboard":
-            self._serve_file("onboard.html")
-        elif path == "/platform":
-            self._serve_file("platform.html")
-        elif path == "/api/events":
-            self._handle_sse()
-        elif path == "/api/health":
-            self._handle_health_api()
-        elif path == "/api/settings":
-            self._handle_settings_get()
-        elif path == "/api/history":
-            self._handle_history()
-        elif path == "/api/auth/config":
-            self._handle_auth_config()
-        elif path == "/api/auth/me":
-            self._handle_auth_me()
-        elif path == "/api/integrations":
-            self._handle_integrations_list()
-        elif path.startswith("/api/integrations/"):
-            self._handle_integration_get(path)
-        elif path == "/api/invitations/validate":
-            self._handle_invitation_validate()
-        elif path.startswith("/api/admin/tenants/") and "/invitations" in path:
+    def _dispatch_admin_get(self, path: str) -> None:
+        if path.startswith("/api/admin/tenants/") and "/invitations" in path:
             self._handle_admin_invitations_list(path)
         elif path.startswith("/api/admin/tenants/") and "/users" in path:
             self._handle_admin_list_users(path)
-        elif path == "/api/platform/tenants":
-            self._handle_platform_list_tenants()
         else:
             self.send_error(404)
 
-    def do_POST(self):
+    def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        self._dispatch(
+            {
+                "/api/channels/teams/webhook": self._handle_teams_webhook,
+                "/api/channels/telegram/webhook*": self._handle_telegram_webhook,
+                "/api/chat": self._handle_chat,
+                "/api/clear": self._handle_clear,
+                "/api/settings": self._handle_settings_post,
+                "/api/integrations/*": lambda: self._handle_integrations_post(path),
+                "/api/admin/tenants": self._handle_create_tenant,
+                "/api/invitations/accept": self._handle_invitation_accept,
+                "/api/platform/tenants": self._handle_platform_create_tenant,
+            },
+            path,
+            fallback=lambda: self._dispatch_admin_post(path),
+        )
 
-        if path == "/api/channels/teams/webhook":
-            self._handle_teams_webhook()
-        elif path.startswith("/api/channels/telegram/webhook"):
-            self._handle_telegram_webhook()
-        elif path == "/api/chat":
-            self._handle_chat()
-        elif path == "/api/clear":
-            self._handle_clear()
-        elif path == "/api/settings":
-            self._handle_settings_post()
-        elif path.startswith("/api/integrations/"):
-            self._handle_integrations_post(path)
-        elif path == "/api/admin/tenants":
-            self._handle_create_tenant()
-        elif path == "/api/invitations/accept":
-            self._handle_invitation_accept()
-        elif path.startswith("/api/admin/tenants/") and "/invitations" in path:
+    def _dispatch_admin_post(self, path: str) -> None:
+        if path.startswith("/api/admin/tenants/") and "/invitations" in path:
             self._handle_admin_create_invitation(path)
-        elif path == "/api/platform/tenants":
-            self._handle_platform_create_tenant()
         else:
             self.send_error(404)
 
-    def do_DELETE(self):
+    def do_DELETE(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        self._dispatch(
+            {
+                "/api/platform/tenants/*": lambda: self._handle_platform_delete_tenant(path),
+            },
+            path,
+            fallback=lambda: self._dispatch_admin_delete(path),
+        )
+
+    def _dispatch_admin_delete(self, path: str) -> None:
         if path.startswith("/api/admin/tenants/") and "/invitations/" in path:
             self._handle_admin_revoke_invitation(path)
-        elif path.startswith("/api/platform/tenants/"):
-            self._handle_platform_delete_tenant(path)
         else:
             self.send_error(404)
 
-    def do_PUT(self):
+    def do_PUT(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path.startswith("/api/admin/tenants/"):
-            self._handle_update_tenant(path)
-        else:
-            self.send_error(404)
+        self._dispatch(
+            {
+                "/api/admin/tenants/*": lambda: self._handle_update_tenant(path),
+            },
+            path,
+        )
 
-    def do_PATCH(self):
+    def do_PATCH(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path.startswith("/api/admin/tenants/") and path.endswith("/activate"):
             self._handle_activate_tenant(path)
@@ -1817,33 +1688,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
-    def _serve_file(self, filename: str):
-        """Serve an HTML file from the adapters/local directory."""
-        html_path = Path(__file__).parent / filename
-        if html_path.exists():
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(html_path.read_bytes())
-        else:
-            self.send_error(404, f"{filename} not found")
-
-    def _json_response(self, data: dict, status: int = 200):
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        self.end_headers()
-
-    def log_message(self, format, *args):
-        pass
+    # _serve_file, _json_response, do_OPTIONS, log_message inherited from BaseHandler
 
 
 def init():
