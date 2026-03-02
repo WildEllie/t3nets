@@ -53,6 +53,12 @@ variable "ws_api_endpoint" {
   default     = ""
 }
 
+variable "ws_connections_table_name" {
+  description = "Name of the ws-connections DynamoDB table"
+  type        = string
+  default     = ""
+}
+
 
 locals {
   name_prefix = "${var.project}-${var.environment}"
@@ -365,6 +371,7 @@ resource "aws_ecs_task_definition" "router" {
         { name = "PENDING_REQUESTS_TABLE", value = var.pending_requests_table_name },
         # WebSocket API (real-time push — derived from wss:// endpoint at runtime)
         { name = "WS_API_ENDPOINT", value = var.ws_api_endpoint },
+        { name = "WS_CONNECTIONS_TABLE", value = var.ws_connections_table_name },
       ]
 
       logConfiguration = {

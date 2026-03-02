@@ -137,6 +137,9 @@ module "compute" {
 
   # WebSocket API endpoint (wss://) — injected as ECS env var
   ws_api_endpoint = var.use_async_skills ? module.websocket[0].ws_api_endpoint : ""
+
+  # DynamoDB-backed WebSocket connection registry (cross-task fan-out)
+  ws_connections_table_name = module.data.ws_connections_table_name
 }
 
 # --- WebSocket API (real-time push, replaces SSE for AWS) ---

@@ -105,6 +105,8 @@ output "table_arns" {
     aws_dynamodb_table.conversations.arn,
     aws_dynamodb_table.tenants.arn,
     "${aws_dynamodb_table.tenants.arn}/index/*",
+    aws_dynamodb_table.ws_connections.arn,
+    "${aws_dynamodb_table.ws_connections.arn}/index/*",
   ]
 }
 
@@ -114,4 +116,12 @@ output "pending_requests_table_arn" {
 
 output "pending_requests_table_name" {
   value = aws_dynamodb_table.pending_requests.name
+}
+
+output "ws_connections_table_arn" {
+  value = aws_dynamodb_table.ws_connections.arn
+}
+
+output "ws_connections_table_name" {
+  value = aws_dynamodb_table.ws_connections.name
 }

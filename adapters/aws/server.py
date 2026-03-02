@@ -92,6 +92,8 @@ WS_MANAGEMENT_ENDPOINT = os.environ.get(
     "WS_MANAGEMENT_ENDPOINT",
     WS_API_ENDPOINT.replace("wss://", "https://") if WS_API_ENDPOINT else "",
 )
+WS_CONNECTIONS_TABLE = os.environ.get("WS_CONNECTIONS_TABLE", "")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 # Integration field schemas — defines the config form per integration type.
 INTEGRATION_SCHEMAS: dict = {
@@ -223,7 +225,9 @@ stats = {
 # --- Push client: WebSocket (API Gateway) or SSE fallback ---
 if WS_MANAGEMENT_ENDPOINT:
     push_client: SSEConnectionManager | WebSocketConnectionManager = WebSocketConnectionManager(
-        WS_MANAGEMENT_ENDPOINT
+        management_endpoint=WS_MANAGEMENT_ENDPOINT,
+        table_name=WS_CONNECTIONS_TABLE,
+        region=AWS_REGION,
     )
     ws_manager: WebSocketConnectionManager | None = push_client  # type: ignore[assignment]
     sse_manager: SSEConnectionManager | None = None  # type: ignore[assignment]
@@ -1179,7 +1183,7 @@ class AWSHandler(BaseHTTPRequestHandler):
         return DEFAULT_TENANT
 
     def _handle_ws_connect(self):
-        """Handle WebSocket $connect — register connection in memory."""
+        """Handle WebSocket $connect — register connection in DynamoDB."""
         connection_id, _ = self._extract_ws_context()
         if not connection_id or not ws_manager:
             self._json_response({"error": "WebSocket not configured"}, 400)
@@ -1191,7 +1195,7 @@ class AWSHandler(BaseHTTPRequestHandler):
         self._json_response({"status": "connected"})
 
     def _handle_ws_disconnect(self):
-        """Handle WebSocket $disconnect — remove connection from memory."""
+        """Handle WebSocket $disconnect — remove connection from DynamoDB."""
         connection_id, _ = self._extract_ws_context()
         if not connection_id or not ws_manager:
             self._json_response({"status": "ok"})
