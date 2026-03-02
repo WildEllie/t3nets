@@ -518,7 +518,6 @@
 
         .invite-result {
             margin-top: 12px;
-            padding: 10px 14px;
             background: #065f46;
             border: 1px solid #166534;
             border-radius: 8px;
@@ -526,10 +525,38 @@
             font-size: 12px;
             display: none;
         }
-        .invite-result a {
-            color: #93c5fd;
-            word-break: break-all;
+        .invite-result-header {
+            padding: 10px 14px 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
         }
+        .invite-email-body {
+            margin: 0 14px 12px;
+            padding: 12px 14px;
+            background: #0d2a1d;
+            border: 1px solid #166534;
+            border-radius: 6px;
+            color: #d1fae5;
+            font-size: 13px;
+            line-height: 1.65;
+            white-space: pre-wrap;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .btn-copy-invite {
+            background: #166534;
+            border: 1px solid #16a34a;
+            color: #6ee7b7;
+            border-radius: 5px;
+            padding: 4px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .btn-copy-invite:hover { background: #15803d; }
 
         .btn-revoke {
             background: none; border: 1px solid #7f1d1d; color: #fca5a5;
@@ -1360,6 +1387,18 @@
 
         // ==================== Team ====================
         let tenantId = '';
+        let _lastInviteEmailText = '';
+
+        async function copyInviteText() {
+            try {
+                await navigator.clipboard.writeText(_lastInviteEmailText);
+                const btn = document.getElementById('copy-invite-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy to clipboard'; }, 2000);
+            } catch (e) {
+                showToast('Could not copy — please select the text manually');
+            }
+        }
 
         async function loadTeam() {
             if (!tenantId) {
@@ -1462,20 +1501,30 @@
                     return;
                 }
 
-                // Show invite URL
+                // Show invite email text
                 const host = window.location.origin;
                 const invUrl = data.invite_url || `${host}/login?invite=${data.invite_code}`;
+                const tenantName = document.getElementById('nav-tenant-name').textContent.trim() || 'our team';
+                _lastInviteEmailText = `Hi,
+
+You've been invited to join ${tenantName} on T3nets — an AI-powered productivity platform that connects your team to tools like Jira, GitHub, and more.
+
+To accept your invitation and set up your account, click the link below:
+
+${invUrl}
+
+This invitation was sent to ${email}. If you weren't expecting it, you can safely ignore this message.`;
+
                 const resultEl = document.getElementById('invite-result');
-                resultEl.innerHTML = `Invitation created! Share this link:<br><a href="${invUrl}" target="_blank">${invUrl}</a>`;
+                resultEl.innerHTML = `
+                    <div class="invite-result-header">
+                        <span>✓ Invitation created — paste the text below into an email</span>
+                        <button class="btn-copy-invite" id="copy-invite-btn" onclick="copyInviteText()">Copy to clipboard</button>
+                    </div>
+                    <pre class="invite-email-body">${escapeHtml(_lastInviteEmailText)}</pre>`;
                 resultEl.style.display = 'block';
 
-                // Copy to clipboard
-                try {
-                    await navigator.clipboard.writeText(invUrl);
-                    showToast('Invite link copied to clipboard');
-                } catch (e) {
-                    showToast('Invitation created');
-                }
+                showToast('Invitation created');
 
                 // Clear form and refresh
                 document.getElementById('invite-email').value = '';
