@@ -71,6 +71,15 @@ class WebSocketConnectionManager:
         )
         return [item["pk"] for item in response.get("Items", [])]
 
+    @property
+    def connection_count(self) -> int:
+        """Count active connections via DynamoDB Scan (health check only — not a hot path)."""
+        try:
+            resp = self._table.scan(Select="COUNT")
+            return resp.get("Count", 0)
+        except Exception:
+            return 0
+
     def send_event(self, user_key: str, event_type: str, data: dict) -> int:
         """Push event via ApiGatewayManagementApi. Returns delivery count.
 
