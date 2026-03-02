@@ -24,6 +24,7 @@ infra/**/.terraform/
 infra/**/*.tfstate
 infra/**/*.tfstate.backup
 infra/**/*.tfplan
+infra/**/*.out
 
 # Lambda build artifacts
 lambda_base.zip
