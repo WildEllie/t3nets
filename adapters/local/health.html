@@ -361,6 +361,10 @@
                                 tn.textContent = me.tenant_name;
                                 tn.style.display = 'inline';
                             }
+                            if (me.role === 'member') {
+                                const sl = document.querySelector('a[href="/settings"]');
+                                if (sl) sl.style.display = 'none';
+                            }
                         }
                     } catch (e) { /* /api/auth/me not available */ }
                 } else {
@@ -373,6 +377,10 @@
                                 const tn = document.getElementById('nav-tenant-name');
                                 tn.textContent = me.tenant_name;
                                 tn.style.display = 'inline';
+                            }
+                            if (me.role === 'member') {
+                                const sl = document.querySelector('a[href="/settings"]');
+                                if (sl) sl.style.display = 'none';
                             }
                         }
                     } catch (e) { /* /api/auth/me not available */ }

@@ -427,6 +427,7 @@ class DevHandler(BaseHTTPRequestHandler):
             "user_id": "local-admin",
             "tenant_id": DEFAULT_TENANT,
             "email": "admin@local.dev",
+            "role": "admin",
             "tenant_status": tenant.status,
             "tenant_name": tenant.name,
         })

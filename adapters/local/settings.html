@@ -724,6 +724,7 @@
                         const meResp = await fetch('/api/auth/me', { headers: getAuthHeaders() });
                         if (meResp.ok) {
                             const me = await meResp.json();
+                            if (me.role === 'member') { window.location.href = '/chat'; return; }
                             if (me.tenant_name) {
                                 const tn = document.getElementById('nav-tenant-name');
                                 tn.textContent = me.tenant_name;
@@ -736,6 +737,7 @@
                         const meResp = await fetch('/api/auth/me');
                         if (meResp.ok) {
                             const me = await meResp.json();
+                            if (me.role === 'member') { window.location.href = '/chat'; return; }
                             if (me.tenant_name) {
                                 const tn = document.getElementById('nav-tenant-name');
                                 tn.textContent = me.tenant_name;

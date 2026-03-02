@@ -915,6 +915,7 @@ class AWSHandler(BaseHTTPRequestHandler):
             tenant_id = ""
             display_name = ""
             avatar_url = ""
+            role = "member"
             tenant_status = "onboarding"
 
             # Look up user in DynamoDB by IdP sub
@@ -925,6 +926,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                     email = email or user.email
                     display_name = user.display_name
                     avatar_url = user.avatar_url
+                    role = user.role
                     logger.info(
                         f"auth/me: resolved tenant '{tenant_id}' from DynamoDB "
                         f"for sub {auth.user_id[:8]}..."
@@ -948,6 +950,7 @@ class AWSHandler(BaseHTTPRequestHandler):
                     "user_id": auth.user_id,
                     "tenant_id": tenant_id,
                     "email": email,
+                    "role": role,
                     "display_name": display_name,
                     "avatar_url": avatar_url,
                     "tenant_status": tenant_status,
