@@ -143,30 +143,30 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
 Two-path signup: existing flow creates a new tenant; invited users join an existing tenant and skip onboarding.
 
 **Phase 4a — Backend**
-- [ ] Add `Invitation` dataclass to `agent/models/tenant.py` (code, tenant_id, email, role, status, TTL)
-- [ ] DynamoDB invitation storage: `pk=INVITE#{code}`, `sk=META`, TTL attribute for auto-cleanup
-- [ ] Terraform: enable DynamoDB TTL on tenants table (`infra/aws/modules/data/main.tf`)
-- [ ] `POST /api/admin/tenants/{id}/invitations` — create invitation, return code + URL (admin only)
-- [ ] `GET /api/admin/tenants/{id}/invitations` — list pending invitations (admin only)
-- [ ] `DELETE /api/admin/tenants/{id}/invitations/{code}` — revoke invitation (admin only)
-- [ ] `GET /api/invitations/validate?code=xxx` — public; return tenant name + email if valid
-- [ ] `POST /api/invitations/accept` — validate JWT, match email, link user to tenant, mark accepted
-- [ ] Terraform: add public API Gateway routes for validate + accept (`infra/aws/modules/api/main.tf`)
-- [ ] Local dev: mock invitation endpoints in `dev_server.py`, SQLite storage in `sqlite_tenant_store.py`
+- [x] Add `Invitation` dataclass to `agent/models/tenant.py` (code, tenant_id, email, role, status, TTL)
+- [x] DynamoDB invitation storage: `pk=INVITE#{code}`, `sk=META`, TTL attribute for auto-cleanup
+- [x] Terraform: enable DynamoDB TTL on tenants table (`infra/aws/modules/data/main.tf`)
+- [x] `POST /api/admin/tenants/{id}/invitations` — create invitation, return code + URL (admin only)
+- [x] `GET /api/admin/tenants/{id}/invitations` — list pending invitations (admin only)
+- [x] `DELETE /api/admin/tenants/{id}/invitations/{code}` — revoke invitation (admin only)
+- [x] `GET /api/invitations/validate?code=xxx` — public; return tenant name + email if valid
+- [x] `POST /api/invitations/accept` — validate JWT, match email, link user to tenant, mark accepted
+- [x] Terraform: add public API Gateway routes for validate + accept (`infra/aws/modules/api/main.tf`)
+- [x] Local dev: mock invitation endpoints in `dev_server.py`, SQLite storage in `sqlite_tenant_store.py`
 
 **Phase 4b — UI**
-- [ ] `/join?code=xxx` page — validate code, show invitation panel (tenant name, email, login or signup)
-- [ ] Signup panel: invitation-aware — email pre-filled + locked, call accept after verify, redirect to `/chat`
-- [ ] Login panel: invitation-aware — call accept after login, redirect to `/chat`
-- [ ] Settings → Team tab: current members table, pending invitations table (copy link / revoke), invite form
-- [ ] `GET /api/admin/tenants/{id}/users` endpoint for Team tab member list
+- [x] `/join?code=xxx` page — validate code, show invitation panel (tenant name, email, login or signup)
+- [x] Signup panel: invitation-aware — email pre-filled + locked, call accept after verify, redirect to `/chat`
+- [x] Login panel: invitation-aware — call accept after login, redirect to `/chat`
+- [x] Settings → Team tab: current members table, pending invitations table (copy link / revoke), invite form
+- [x] `GET /api/admin/tenants/{id}/users` endpoint for Team tab member list
 
 **Phase 4c — Future: Email Delivery**
 - [ ] SES domain verification + IAM in Terraform
 - [ ] HTML invite email template with tenant branding
 - [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
 
-- [ ] **Milestone:** Admin can invite users by link; invited users join the correct tenant and land in chat
+- [x] **Milestone:** Admin can invite users by link; invited users join the correct tenant and land in chat
 
 
 ### Phase 5: Expand Skills
