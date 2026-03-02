@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 2, 2026
+**Last Updated:** March 2, 2026 (Platform Admin — Phase 4.6)
 
 ---
 
@@ -170,12 +170,25 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 
 
 ### Phase 4.5: Session Management
-- [ ] Decode JWT `exp` client-side; track mouse/keyboard activity
-- [ ] Active user: silent token refresh 5 min before expiry via `/api/auth/refresh`
-- [ ] Idle user: "Session Expired" modal at expiry → OK navigates to `/login`
-- [ ] Apply to `chat.html`, `settings.html`, and `health.html`
-- [ ] **Milestone:** No silent 401 failures; idle sessions expire gracefully
+- [x] Decode JWT `exp` client-side; track mouse/keyboard activity
+- [x] Active user: silent token refresh 5 min before expiry via `/api/auth/refresh`
+- [x] Idle user: "Session Expired" modal at expiry → OK navigates to `/login`
+- [x] Apply to `chat.html`, `settings.html`, and `health.html`
+- [x] Role-based access: members redirected away from settings page
+- [x] **Milestone:** No silent 401 failures; idle sessions expire gracefully
 
+
+### Phase 4.6: Platform Admin
+- [x] `adapters/aws/platform_api.py` — new API class gated to default-tenant admins only
+- [x] `GET /api/platform/tenants` — list all tenants with user counts
+- [x] `POST /api/platform/tenants` — create tenant with server-side slugify + admin invitation
+- [x] `PATCH /api/platform/tenants/{id}/suspend|activate` — lifecycle management
+- [x] `DELETE /api/platform/tenants/{id}` — tombstone delete (preserves user records)
+- [x] `adapters/local/platform.html` — tenant management UI (table, status badges, create dialog, invite copy)
+- [x] Platform nav link injected dynamically for default-tenant admins on all nav pages
+- [x] Terraform: `GET /platform` public API Gateway route
+      ↳ ✅ Completed — see [handoff notes](../handoffs/016-platform-admin-tenant-management.md)
+- [x] **Milestone:** Platform admins can create, suspend, and delete tenants from the dashboard
 
 ### Phase 5: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
