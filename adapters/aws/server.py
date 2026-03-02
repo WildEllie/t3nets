@@ -903,15 +903,20 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._json_response({"error": str(e)}, 500)
 
     def _handle_auth_config(self):
-        """Return Cognito config for the frontend login flow."""
-        self._json_response(
-            {
-                "enabled": bool(COGNITO_USER_POOL_ID),
-                "client_id": COGNITO_APP_CLIENT_ID,
-                "auth_domain": COGNITO_AUTH_DOMAIN,
-                "user_pool_id": COGNITO_USER_POOL_ID,
-            }
-        )
+        """Return Cognito config for the frontend login flow.
+
+        Also includes ws_endpoint so the frontend can connect to WebSocket
+        transport without requiring server-side HTML injection.
+        """
+        response: dict = {
+            "enabled": bool(COGNITO_USER_POOL_ID),
+            "client_id": COGNITO_APP_CLIENT_ID,
+            "auth_domain": COGNITO_AUTH_DOMAIN,
+            "user_pool_id": COGNITO_USER_POOL_ID,
+        }
+        if WS_API_ENDPOINT:
+            response["ws_endpoint"] = WS_API_ENDPOINT
+        self._json_response(response)
 
     def _handle_auth_me(self):
         """Return current authenticated user info, including tenant status.
@@ -2318,11 +2323,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
             self._json_response({"error": str(e)}, 500)
 
     def _serve_file(self, filename: str, search_dir: str = None):
-        """Serve HTML — check local adapter dir (shared UI files).
-
-        For chat.html, injects window.__CONFIG__ with WebSocket endpoint
-        so the frontend can use WebSocket transport when available.
-        """
+        """Serve HTML — check local adapter dir (shared UI files)."""
         base = Path(__file__).parent.parent.parent
         if search_dir:
             path = base / search_dir / filename
@@ -2331,14 +2332,6 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
 
         if path.exists():
             content = path.read_bytes()
-
-            # Inject WebSocket config into chat page
-            if filename == "chat.html" and WS_API_ENDPOINT:
-                config_script = (
-                    f'<script>window.__CONFIG__ = {{"ws_endpoint": "{WS_API_ENDPOINT}"}};</script>'
-                ).encode()
-                content = content.replace(b"</head>", config_script + b"\n</head>")
-
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()

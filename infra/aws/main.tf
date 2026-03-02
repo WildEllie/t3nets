@@ -190,3 +190,13 @@ module "api" {
   cognito_user_pool_endpoint = module.cognito.user_pool_endpoint
   cognito_app_client_id      = module.cognito.app_client_id
 }
+
+# --- CDN (S3 + CloudFront) ---
+module "cdn" {
+  source = "./modules/cdn"
+
+  project     = var.project
+  environment = var.environment
+
+  api_gateway_url = module.api.api_endpoint
+}

@@ -66,3 +66,20 @@ output "ws_endpoint" {
   description = "WebSocket endpoint (wss://) for browser connections"
   value       = var.use_async_skills ? module.websocket[0].ws_api_endpoint : ""
 }
+
+# --- CDN ---
+
+output "cloudfront_domain" {
+  description = "CloudFront distribution domain (user-facing URL)"
+  value       = module.cdn.cloudfront_domain
+}
+
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID (for cache invalidations in deploy.sh)"
+  value       = module.cdn.cloudfront_distribution_id
+}
+
+output "s3_bucket_name" {
+  description = "S3 bucket name for static HTML files"
+  value       = module.cdn.s3_bucket_name
+}

@@ -459,9 +459,11 @@
         }
 
         async function checkAuth() {
+            let wsEndpoint = '';
             try {
                 const resp = await fetch('/api/auth/config');
                 const config = await resp.json();
+                wsEndpoint = config.ws_endpoint || '';
                 if (config.enabled) {
                     const token = localStorage.getItem('t3nets_id_token');
                     if (!token) { window.location.href = '/login'; return; }
@@ -549,6 +551,7 @@
                 }
             } catch (e) { /* auth not available — continue without */ }
             SessionManager.init();
+            connectRealtime(wsEndpoint);
         }
 
         async function tryRefreshToken() {
@@ -776,8 +779,7 @@
             };
         }
 
-        function connectRealtime() {
-            const wsEndpoint = (window.__CONFIG__ || {}).ws_endpoint;
+        function connectRealtime(wsEndpoint) {
             const token = localStorage.getItem('t3nets_id_token') || '';
             if (wsEndpoint) {
                 connectWebSocket(wsEndpoint, token);
@@ -785,9 +787,6 @@
                 connectSSE();
             }
         }
-
-        // Start real-time connection on page load
-        connectRealtime();
 
         input.addEventListener('input', function() {
             this.style.height = 'auto';

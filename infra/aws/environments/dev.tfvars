@@ -13,9 +13,11 @@ use_async_skills = true
 # Cognito callback URLs — localhost for local dev, API Gateway for deployed app
 cognito_callback_urls = [
   "http://localhost:8080/callback",
-  "https://i9yxlqqro8.execute-api.us-east-1.amazonaws.com/callback"
+  "https://i9yxlqqro8.execute-api.us-east-1.amazonaws.com/callback",
+  "https://d3ma51b4qocpkj.cloudfront.net/callback"
 ]
 cognito_logout_urls = [
   "http://localhost:8080/login",
-  "https://i9yxlqqro8.execute-api.us-east-1.amazonaws.com/login"
+  "https://i9yxlqqro8.execute-api.us-east-1.amazonaws.com/login",
+  "https://d3ma51b4qocpkj.cloudfront.net/login"
 ]

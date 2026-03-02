@@ -246,6 +246,44 @@ end=$(date +%s)
 echo "Execution time: $((end - start)) seconds"
 
 # --- Show the API endpoint ---
-API_ENDPOINT=$(cd infra/aws && terraform output -raw api_endpoint 2>/dev/null || echo "unknown")
+TF_DIR="infra/aws"
+API_ENDPOINT=$(cd "${TF_DIR}" && terraform output -raw api_endpoint 2>/dev/null || echo "unknown")
 echo "API: ${API_ENDPOINT}"
 echo ""
+
+# --- Upload HTML to S3 + invalidate CloudFront ---
+S3_BUCKET=$(cd "${TF_DIR}" && terraform output -raw s3_bucket_name 2>/dev/null || echo "")
+CF_DISTRIBUTION_ID=$(cd "${TF_DIR}" && terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
+
+if [ -n "${S3_BUCKET}" ]; then
+    echo "→ Uploading HTML to S3 (${S3_BUCKET})..."
+    aws s3 sync adapters/local/ "s3://${S3_BUCKET}/" \
+        --exclude "*" \
+        --include "*.html" \
+        --delete \
+        --region "${REGION}"
+    echo ""
+else
+    echo "→ Skipping S3 upload (s3_bucket_name output not found)"
+    echo ""
+fi
+
+if [ -n "${CF_DISTRIBUTION_ID}" ]; then
+    echo "→ Invalidating CloudFront cache (${CF_DISTRIBUTION_ID})..."
+    aws cloudfront create-invalidation \
+        --distribution-id "${CF_DISTRIBUTION_ID}" \
+        --paths "/*" \
+        --region "${REGION}" \
+        --no-cli-pager > /dev/null
+    echo "   Cache invalidation submitted."
+    echo ""
+else
+    echo "→ Skipping CloudFront invalidation (cloudfront_distribution_id output not found)"
+    echo ""
+fi
+
+CF_DOMAIN=$(cd "${TF_DIR}" && terraform output -raw cloudfront_domain 2>/dev/null || echo "")
+if [ -n "${CF_DOMAIN}" ]; then
+    echo "Dashboard: https://${CF_DOMAIN}/chat"
+    echo ""
+fi
