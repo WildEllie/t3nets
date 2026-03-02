@@ -160,6 +160,36 @@
             margin-top: 32px;
         }
 
+        /* --- Collapsible sections --- */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+        .section-header:not(:first-child) {
+            margin-top: 32px;
+        }
+        .section-header .section-title {
+            margin-bottom: 0;
+            margin-top: 0;
+        }
+        .section-chevron {
+            color: #555;
+            font-size: 11px;
+            transition: transform 0.2s;
+        }
+        .section-header.collapsed .section-chevron {
+            transform: rotate(-90deg);
+        }
+        .section-body {
+            margin-top: 12px;
+        }
+        .section-body.collapsed {
+            display: none;
+        }
+
         /* --- Model cards --- */
         .model-list {
             display: flex;
@@ -614,32 +644,41 @@
 
         <!-- ===== General Tab ===== -->
         <div class="tab-panel active" id="tab-general">
-            <div class="section-title">AI Model</div>
-            <div id="model-list" class="model-list"></div>
-
-            <div class="section-title">Agent Settings</div>
-
-            <div class="settings-field">
-                <label for="system-prompt">System Prompt Override</label>
-                <textarea id="system-prompt" placeholder="Leave blank to use the default system prompt..."></textarea>
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">AI Model</div>
+                <span class="section-chevron">&#9660;</span>
+            </div>
+            <div class="section-body">
+                <div id="model-list" class="model-list"></div>
             </div>
 
-            <div class="settings-field">
-                <label for="max-tokens">Max Tokens per Message</label>
-                <input type="number" id="max-tokens" min="256" max="16384" step="256">
+            <div class="section-header" onclick="toggleSection(this)">
+                <div class="section-title">Agent Settings</div>
+                <span class="section-chevron">&#9660;</span>
             </div>
+            <div class="section-body">
+                <div class="settings-field">
+                    <label for="system-prompt">System Prompt Override</label>
+                    <textarea id="system-prompt" placeholder="Leave blank to use the default system prompt..."></textarea>
+                </div>
 
-            <div class="settings-field">
-                <label for="messages-per-day">Messages per Day Limit</label>
-                <input type="number" id="messages-per-day" min="1" max="100000" step="1">
+                <div class="settings-field">
+                    <label for="max-tokens">Max Tokens per Message</label>
+                    <input type="number" id="max-tokens" min="256" max="16384" step="256">
+                </div>
+
+                <div class="settings-field">
+                    <label for="messages-per-day">Messages per Day Limit</label>
+                    <input type="number" id="messages-per-day" min="1" max="100000" step="1">
+                </div>
+
+                <div class="settings-field">
+                    <label for="max-history">Conversation History Length</label>
+                    <input type="number" id="max-history" min="1" max="100" step="1">
+                </div>
+
+                <button class="save-btn" id="save-agent-btn" onclick="saveAgentSettings()">Save Agent Settings</button>
             </div>
-
-            <div class="settings-field">
-                <label for="max-history">Conversation History Length</label>
-                <input type="number" id="max-history" min="1" max="100" step="1">
-            </div>
-
-            <button class="save-btn" id="save-agent-btn" onclick="saveAgentSettings()">Save Agent Settings</button>
         </div>
 
         <!-- ===== Skills Tab ===== -->
@@ -1578,6 +1617,13 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
             } catch (err) {
                 showToast('Failed to revoke invitation');
             }
+        }
+
+        // ==================== Collapsible sections ====================
+        function toggleSection(header) {
+            const body = header.nextElementSibling;
+            header.classList.toggle('collapsed');
+            body.classList.toggle('collapsed');
         }
 
         // ==================== Utilities ====================
