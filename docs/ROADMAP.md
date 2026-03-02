@@ -130,7 +130,8 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
       ↳ ✅ Completed — see [handoff notes](../handoffs/015-websocket-api-gateway.md)
 - [x] Deploy and verify end-to-end (`terraform apply` + `deploy.sh` with `USE_ASYNC_SKILLS=true`)
       ↳ ✅ Completed — Terraform infra already applied, `deploy.sh` with `USE_ASYNC_SKILLS=true` deployed router + skill Lambdas, verified via dashboard
-- [ ] Verify horizontal scaling: run 2+ ECS tasks, confirm no message loss or duplicate responses
+- [x] Verify horizontal scaling: run 2+ ECS tasks, confirm no message loss or duplicate responses
+      ↳ ✅ Completed — DynamoDB-backed WebSocket registry (`ws_connections.py`); 2 tasks verified: connections tracked in `t3nets-dev-ws-connections` table, async results delivered across tasks, disconnect cleans up row
 - [x] **Milestone:** Skills run on Lambda, router is stateless, container scales horizontally
 
       ↳ 📋 Implementation — see [handoff notes](../handoffs/014-phase-3b-implementation.md)
