@@ -85,14 +85,16 @@ SKILL_ACTION_RULES: dict[str, list[tuple[str, str]]] = {
         (r"\bwhat\s+(version|release)s\b", "list_releases"),
         (r"\bfix\s*version", "list_releases"),
         (r"\ball\b.*\brelease", "list_releases"),
-        # Summarize (default — more specific patterns first)
+        (r"\bavailable\b.*\brelease", "list_releases"),
+        # Summarize (more specific patterns first)
         (r"\brelease\s*notes?\b", "summarize"),
         (r"\bchangelog\b", "summarize"),
         (r"\bwhat\b.*\bship(ped)?\b", "summarize"),
         (r"\bwhat'?s?\s+in\b.*\b(release|version)\b", "summarize"),
-        (r"\bsummar(y|ize)\b.*\brelease\b", "summarize"),
-        (r"\brelease\b.*\bsummar(y|ize)\b", "summarize"),
         (r"\bgenerate\b.*\brelease\b", "summarize"),
+        (r"\bsummariz\w*\b.*\brelease\b", "summarize"),
+        (r"\brelease\b.*\bsummar\w*\b", "summarize"),
+        # Fallback
         (r"\brelease\b", "summarize"),
     ],
     "meeting_prep": [
@@ -109,23 +111,6 @@ SKILL_ACTION_RULES: dict[str, list[tuple[str, str]]] = {
         (r"\b(unread|new)\b.*\b(email|message|mail)\b", "summary"),
         (r"\bemail\b", "summary"),
         (r"\bmail\b", "summary"),
-    ],
-    "release_notes": [
-        # List releases
-        (r"\blist\b.*\brelease", "list_releases"),
-        (r"\bshow\b.*\b(version|release)s\b", "list_releases"),
-        (r"\bwhat\s+(version|release)s\b", "list_releases"),
-        (r"\ball\b.*\brelease", "list_releases"),
-        (r"\bavailable\b.*\brelease", "list_releases"),
-        # Summarize (specific release)
-        (r"\brelease\s*notes?\b", "summarize"),
-        (r"\bchangelog\b", "summarize"),
-        (r"\bwhat\b.*\bship(ped)?\b", "summarize"),
-        (r"\bgenerate\b.*\brelease\b", "summarize"),
-        (r"\bsummariz\w*\b.*\brelease\b", "summarize"),
-        (r"\brelease\b.*\bsummar\w*\b", "summarize"),
-        # Fallback
-        (r"\brelease\b", "summarize"),
     ],
 }
 
@@ -166,12 +151,13 @@ SKILL_PATTERNS: dict[str, list[str]] = {
         r"\bchangelog\b",
         r"\bwhat\b.*\bship(ped)?\b",
         r"\bwhat'?s?\s+in\b.*\b(release|version)\b",
-        r"\brelease\s*summar(y|ize)\b",
-        r"\bgenerate\b.*\brelease\b",
         r"\blist\b.*\breleases?\b",
         r"\bfix\s*version\b",
         r"\bwhat\s+(did we|have we)\s+release\b",
         r"\bwhat\s+versions?\b",
+        r"\bgenerate\b.*\b(release|changelog)\b",
+        r"\bsummariz\w*\b.*\brelease\b",
+        r"\brelease\b.*\bsummar\w*\b",
         r"\brelease\b(?!\s*(status|ready|readiness)\b)",
     ],
     "meeting_prep": [
@@ -184,20 +170,6 @@ SKILL_PATTERNS: dict[str, list[str]] = {
         r"\b(inbox|email|mail)\b",
         r"\bunread\b",
         r"\b(urgent|important)\s+(email|message)\b",
-    ],
-    "release_notes": [
-        r"\brelease\s*notes?\b",
-        r"\bchangelog\b",
-        r"\bwhat\b.*\bship(ped)?\b",
-        r"\bwhat'?s?\s+in\b.*\b(release|version)\b",
-        r"\blist\b.*\breleases?\b",
-        r"\bfix\s*version\b",
-        r"\bwhat\s+(did we|have we)\s+release\b",
-        r"\bwhat\s+versions?\b",
-        r"\bgenerate\b.*\b(release|changelog)\b",
-        r"\bsummariz\w*\b.*\brelease\b",
-        r"\brelease\b.*\bsummar\w*\b",
-        r"\brelease\b(?!\s*(status|ready|readiness)\b)",
     ],
 }
 
