@@ -161,11 +161,6 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [x] Settings → Team tab: current members table, pending invitations table (copy link / revoke), invite form
 - [x] `GET /api/admin/tenants/{id}/users` endpoint for Team tab member list
 
-**Phase 4c — Future: Email Delivery**
-- [ ] SES domain verification + IAM in Terraform
-- [ ] HTML invite email template with tenant branding
-- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
-
 - [x] **Milestone:** Admin can invite users by link; invited users join the correct tenant and land in chat
 
 
@@ -199,7 +194,15 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
 
-### Phase 6: Practices — Skill Bundles & Customization
+### Phase 6: Email Delivery
+- [ ] SES domain verification + IAM in Terraform
+- [ ] HTML invite email template with tenant branding
+- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
+- [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
+- [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
+
+
+### Phase 7: Practices — Skill Bundles & Customization
 - [ ] Define Practice model (name, description, list of skill IDs)
 - [ ] Bundle existing skills into default practices (e.g. "Engineering", "Project Management")
 - [ ] Per-tenant practice selection (assign a practice to a tenant)
@@ -213,7 +216,7 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] Skill versioning and rollback
 - [ ] **Milestone:** Tenants can pick a practice or build a custom one from the skill catalog
 
-### Phase 7: Dashboard & UX
+### Phase 8: Dashboard & UX
 - [x] Markdown rendering in chat responses
 - [ ] Dashboard theming — polished design system (dark mode, consistent components)
 - [ ] Make the console/dashboard an SPA, serve static HTML from CDN with pure AJAX
@@ -221,7 +224,7 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] Conversation history browser
 - [ ] Skill configuration UI
 
-### Phase 8: Long-Term Memory & Polish
+### Phase 9: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
 - [ ] Additional channels (Slack, WhatsApp)
 - [ ] OSS contributor guides
