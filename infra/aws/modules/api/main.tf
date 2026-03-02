@@ -126,6 +126,12 @@ resource "aws_apigatewayv2_route" "public_onboard" {
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
+resource "aws_apigatewayv2_route" "public_platform" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /platform"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
 # Onboarding API routes — no JWT required because users don't have
 # custom:tenant_id in their token yet during the onboarding flow.
 # Server-side auth handles validation (extracts sub/email from JWT directly).

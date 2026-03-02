@@ -365,6 +365,12 @@
                                 const sl = document.querySelector('a[href="/settings"]');
                                 if (sl) sl.style.display = 'none';
                             }
+                            if (me.tenant_id === 'default' && me.role === 'admin') {
+                                const pl = document.createElement('a');
+                                pl.href = '/platform';
+                                pl.textContent = 'Platform';
+                                document.querySelector('.nav-links').appendChild(pl);
+                            }
                         }
                     } catch (e) { /* /api/auth/me not available */ }
                 } else {
@@ -381,6 +387,12 @@
                             if (me.role === 'member') {
                                 const sl = document.querySelector('a[href="/settings"]');
                                 if (sl) sl.style.display = 'none';
+                            }
+                            if (me.tenant_id === 'default' && me.role === 'admin') {
+                                const pl = document.createElement('a');
+                                pl.href = '/platform';
+                                pl.textContent = 'Platform';
+                                document.querySelector('.nav-links').appendChild(pl);
                             }
                         }
                     } catch (e) { /* /api/auth/me not available */ }

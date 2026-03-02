@@ -730,6 +730,12 @@
                                 tn.textContent = me.tenant_name;
                                 tn.style.display = 'inline';
                             }
+                            if (me.tenant_id === 'default' && me.role === 'admin') {
+                                const pl = document.createElement('a');
+                                pl.href = '/platform';
+                                pl.textContent = 'Platform';
+                                document.querySelector('.nav-links').appendChild(pl);
+                            }
                         }
                     } catch (e) { /* /api/auth/me not available */ }
                 } else {
@@ -742,6 +748,12 @@
                                 const tn = document.getElementById('nav-tenant-name');
                                 tn.textContent = me.tenant_name;
                                 tn.style.display = 'inline';
+                            }
+                            if (me.tenant_id === 'default' && me.role === 'admin') {
+                                const pl = document.createElement('a');
+                                pl.href = '/platform';
+                                pl.textContent = 'Platform';
+                                document.querySelector('.nav-links').appendChild(pl);
                             }
                         }
                     } catch (e) { /* /api/auth/me not available */ }

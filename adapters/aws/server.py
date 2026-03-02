@@ -40,6 +40,7 @@ from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
 from adapters.aws.secrets_manager import SecretsManagerProvider
 from adapters.aws.auth_middleware import extract_auth, AuthError
 from adapters.aws.admin_api import AdminAPI
+from adapters.aws.platform_api import PlatformAPI
 from adapters.local.direct_bus import DirectBus
 from adapters.aws.event_bridge_bus import EventBridgeBus
 from adapters.aws.pending_requests import PendingRequestsStore, PendingRequest
@@ -77,6 +78,7 @@ sqs_poller: SQSResultPoller | None = None
 result_router: AsyncResultRouter | None = None
 rule_router: RuleBasedRouter
 admin_api: AdminAPI
+platform_api: PlatformAPI
 error_handler: ErrorHandler
 started_at: float = 0.0
 USE_ASYNC_SKILLS = os.environ.get("USE_ASYNC_SKILLS", "false").lower() == "true"
@@ -347,6 +349,8 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._serve_file("callback.html", "adapters/local")
         elif path == "/onboard":
             self._serve_file("onboard.html", "adapters/local")
+        elif path == "/platform":
+            self._serve_file("platform.html", "adapters/local")
         elif path == "/api/events":
             self._handle_sse()
         elif path == "/api/health":
@@ -365,6 +369,8 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._handle_integration_get(path)
         elif path == "/api/invitations/validate":
             self._handle_invitation_validate()
+        elif path.startswith("/api/platform/"):
+            self._handle_platform("GET", path)
         elif path.startswith("/api/admin/"):
             self._handle_admin("GET", path)
         else:
@@ -410,6 +416,9 @@ class AWSHandler(BaseHTTPRequestHandler):
             self._handle_auth_confirm_reset()
         elif path == "/api/invitations/accept":
             self._handle_invitation_accept()
+        elif path.startswith("/api/platform/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_platform("POST", path, body)
         elif path.startswith("/api/admin/"):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             self._handle_admin("POST", path, body)
@@ -426,14 +435,19 @@ class AWSHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urlparse(self.path).path
-        if path.startswith("/api/admin/"):
+        if path.startswith("/api/platform/"):
+            self._handle_platform("DELETE", path)
+        elif path.startswith("/api/admin/"):
             self._handle_admin("DELETE", path)
         else:
             self.send_error(404)
 
     def do_PATCH(self):
         path = urlparse(self.path).path
-        if path.startswith("/api/admin/"):
+        if path.startswith("/api/platform/"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            self._handle_platform("PATCH", path, body)
+        elif path.startswith("/api/admin/"):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
             self._handle_admin("PATCH", path, body)
         else:
@@ -442,6 +456,11 @@ class AWSHandler(BaseHTTPRequestHandler):
     def _handle_admin(self, method: str, path: str, body: dict | None = None):
         """Delegate to admin API."""
         data, status = admin_api.handle_request(method, path, self.headers, body)
+        self._json_response(data, status)
+
+    def _handle_platform(self, method: str, path: str, body: dict | None = None):
+        """Delegate to platform API."""
+        data, status = platform_api.handle_request(method, path, self.headers, body)
         self._json_response(data, status)
 
     def _handle_health_api(self):
@@ -2351,7 +2370,7 @@ AWS_REGION = "us-east-1"
 
 def init():
     global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
-    global sqs_poller, result_router, rule_router, admin_api, error_handler, started_at
+    global sqs_poller, result_router, rule_router, admin_api, platform_api, error_handler, started_at
 
     started_at = time.time()
 
@@ -2380,6 +2399,7 @@ def init():
     rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
     bus = DirectBus(skills, secrets)  # Sync fallback, always initialized
     admin_api = AdminAPI(tenants, secrets, skills)
+    platform_api = PlatformAPI(tenants, secrets, skills)
     error_handler = ErrorHandler()
 
     # --- Phase 3b: Async skill execution ---

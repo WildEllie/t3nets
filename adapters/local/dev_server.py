@@ -264,6 +264,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._serve_file("settings.html")
         elif path == "/onboard":
             self._serve_file("onboard.html")
+        elif path == "/platform":
+            self._serve_file("platform.html")
         elif path == "/api/events":
             self._handle_sse()
         elif path == "/api/health":
@@ -286,6 +288,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_admin_invitations_list(path)
         elif path.startswith("/api/admin/tenants/") and "/users" in path:
             self._handle_admin_list_users(path)
+        elif path == "/api/platform/tenants":
+            self._handle_platform_list_tenants()
         else:
             self.send_error(404)
 
@@ -310,6 +314,8 @@ class DevHandler(BaseHTTPRequestHandler):
             self._handle_invitation_accept()
         elif path.startswith("/api/admin/tenants/") and "/invitations" in path:
             self._handle_admin_create_invitation(path)
+        elif path == "/api/platform/tenants":
+            self._handle_platform_create_tenant()
         else:
             self.send_error(404)
 
@@ -317,6 +323,8 @@ class DevHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith("/api/admin/tenants/") and "/invitations/" in path:
             self._handle_admin_revoke_invitation(path)
+        elif path.startswith("/api/platform/tenants/"):
+            self._handle_platform_delete_tenant(path)
         else:
             self.send_error(404)
 
@@ -331,6 +339,10 @@ class DevHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path.startswith("/api/admin/tenants/") and path.endswith("/activate"):
             self._handle_activate_tenant(path)
+        elif path.startswith("/api/platform/tenants/") and path.endswith("/suspend"):
+            self._handle_platform_suspend_tenant(path)
+        elif path.startswith("/api/platform/tenants/") and path.endswith("/activate"):
+            self._handle_platform_activate_tenant(path)
         else:
             self.send_error(404)
 
@@ -659,6 +671,144 @@ class DevHandler(BaseHTTPRequestHandler):
             tenant.status = "active"
             _run_async(tenants.update_tenant(tenant))
             self._json_response({"tenant_id": tenant_id, "status": "active", "activated": True})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    # --- Platform API handlers (local dev, no auth) ---
+
+    def _handle_platform_list_tenants(self):
+        """Platform: list all tenants with user counts."""
+        try:
+            tenant_list = _run_async(tenants.list_tenants())
+            result = []
+            for t in tenant_list:
+                try:
+                    users = _run_async(tenants.list_users(t.tenant_id))
+                    user_count = len(users)
+                except Exception:
+                    user_count = 0
+                result.append({
+                    "tenant_id": t.tenant_id,
+                    "name": t.name,
+                    "status": t.status,
+                    "created_at": t.created_at,
+                    "user_count": user_count,
+                })
+            self._json_response({"tenants": result, "count": len(result)})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_platform_create_tenant(self):
+        """Platform: create a new tenant and an admin invitation."""
+        try:
+            import re
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)))
+            tenant_name = body.get("tenant_name", "").strip()
+            admin_email = body.get("admin_email", "").strip().lower()
+            admin_name = body.get("admin_name", "").strip()
+
+            if not tenant_name or not admin_email or not admin_name:
+                self._json_response(
+                    {"error": "tenant_name, admin_email, and admin_name are required"}, 400
+                )
+                return
+
+            from agent.models.tenant import Tenant, TenantSettings
+
+            slug = re.sub(r"[^a-z0-9-]+", "-", tenant_name.lower()).strip("-")
+            if not slug or len(slug) < 2:
+                self._json_response({"error": "Tenant name cannot be slugified to a valid ID"}, 400)
+                return
+
+            # Uniqueness check
+            candidate = slug
+            suffix = 2
+            while True:
+                try:
+                    _run_async(tenants.get_tenant(candidate))
+                    candidate = f"{slug}-{suffix}"
+                    suffix += 1
+                except Exception:
+                    break
+
+            tenant_id = candidate
+            now = datetime.now(timezone.utc).isoformat()
+            tenant = Tenant(
+                tenant_id=tenant_id,
+                name=tenant_name,
+                status="active",
+                created_at=now,
+                settings=TenantSettings(enabled_skills=skills.list_skill_names()),
+            )
+            _run_async(tenants.create_tenant(tenant))
+
+            invitation = Invitation(
+                invite_code=Invitation.generate_code(),
+                tenant_id=tenant_id,
+                email=admin_email,
+                role="admin",
+                status="pending",
+                invited_by="platform-admin",
+                created_at=now,
+                expires_at=Invitation.default_expiry(),
+            )
+            _run_async(tenants.create_invitation(invitation))
+
+            host = self.headers.get("Host", "localhost:8080")
+            scheme = "http" if "localhost" in host else "https"
+            invite_url = f"{scheme}://{host}/login?invite={invitation.invite_code}"
+
+            self._json_response({
+                "tenant_id": tenant_id,
+                "tenant_name": tenant_name,
+                "invite_code": invitation.invite_code,
+                "invite_url": invite_url,
+                "admin_name": admin_name,
+                "admin_email": admin_email,
+            }, 201)
+        except Exception as e:
+            logger.exception("Platform create tenant error")
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_platform_suspend_tenant(self, path: str):
+        """Platform: suspend a tenant."""
+        try:
+            parts = path.rstrip("/").split("/")
+            tenant_id = parts[-2]
+            if tenant_id == "default":
+                self._json_response({"error": "Cannot suspend the default tenant"}, 400)
+                return
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+            tenant.status = "suspended"
+            _run_async(tenants.update_tenant(tenant))
+            self._json_response({"tenant_id": tenant_id, "status": "suspended"})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_platform_activate_tenant(self, path: str):
+        """Platform: activate a tenant."""
+        try:
+            parts = path.rstrip("/").split("/")
+            tenant_id = parts[-2]
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+            tenant.status = "active"
+            _run_async(tenants.update_tenant(tenant))
+            self._json_response({"tenant_id": tenant_id, "status": "active"})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_platform_delete_tenant(self, path: str):
+        """Platform: tombstone-delete a tenant."""
+        try:
+            parts = path.rstrip("/").split("/")
+            tenant_id = parts[-1]
+            if tenant_id == "default":
+                self._json_response({"error": "Cannot delete the default tenant"}, 400)
+                return
+            tenant = _run_async(tenants.get_tenant(tenant_id))
+            tenant.status = "deleted"
+            _run_async(tenants.update_tenant(tenant))
+            self._json_response({"tenant_id": tenant_id, "status": "deleted"})
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
