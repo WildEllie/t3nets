@@ -11,7 +11,7 @@ can still call POST /api/admin/tenants to create their first tenant.
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from agent.models.tenant import Invitation, Tenant, TenantSettings, TenantUser
 from adapters.aws.auth_middleware import extract_auth, AuthError
@@ -22,7 +22,7 @@ logger = logging.getLogger("t3nets.admin")
 class AdminAPI:
     """Handles admin-level API requests for tenant management."""
 
-    def __init__(self, tenants, secrets, skills):
+    def __init__(self, tenants: Any, secrets: Any, skills: Any) -> None:
         self.tenants = tenants
         self.secrets = secrets
         self.skills = skills
@@ -31,9 +31,9 @@ class AdminAPI:
         self,
         method: str,
         path: str,
-        headers: dict,
-        body: dict | None = None,
-    ) -> tuple[dict, int]:
+        headers: dict[str, Any],
+        body: Optional[dict[str, Any]] = None,
+    ) -> tuple[dict[str, Any], int]:
         """Route an admin API request. Returns (response_dict, status_code)."""
         try:
             # Onboarding: allow tenant creation without a tenant_id in JWT.
@@ -86,7 +86,7 @@ class AdminAPI:
             logger.exception("Admin API error")
             return {"error": str(e)}, 500
 
-    def _list_tenants(self) -> tuple[dict, int]:
+    def _list_tenants(self) -> tuple[dict[str, Any], int]:
         """List all tenants."""
         import asyncio
         tenant_list = asyncio.run(self.tenants.list_tenants())
@@ -105,7 +105,7 @@ class AdminAPI:
             "count": len(tenant_list),
         }, 200
 
-    def _get_tenant(self, tenant_id: str) -> tuple[dict, int]:
+    def _get_tenant(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """Get a single tenant with full details."""
         import asyncio
         try:
@@ -130,7 +130,7 @@ class AdminAPI:
             "integrations": list(connected),
         }, 200
 
-    def _create_tenant(self, body: dict, headers: dict) -> tuple[dict, int]:
+    def _create_tenant(self, body: dict[str, Any], headers: dict[str, Any]) -> tuple[dict[str, Any], int]:
         """Create a new tenant, optionally with a first admin user.
 
         This endpoint uses relaxed auth: the user may not have a tenant_id
@@ -191,7 +191,7 @@ class AdminAPI:
 
         return {"tenant_id": tenant_id, "created": True}, 201
 
-    def _activate_tenant(self, tenant_id: str) -> tuple[dict, int]:
+    def _activate_tenant(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """Set tenant status from 'onboarding' to 'active'."""
         import asyncio
 
@@ -209,7 +209,7 @@ class AdminAPI:
 
         return {"tenant_id": tenant_id, "status": "active", "activated": True}, 200
 
-    def _update_tenant(self, tenant_id: str, body: dict) -> tuple[dict, int]:
+    def _update_tenant(self, tenant_id: str, body: dict[str, Any]) -> tuple[dict[str, Any], int]:
         """Update an existing tenant's settings."""
         import asyncio
 
@@ -237,8 +237,8 @@ class AdminAPI:
     # --- Invitation management ---
 
     def _create_invitation(
-        self, tenant_id: str, body: dict, headers: dict,
-    ) -> tuple[dict, int]:
+        self, tenant_id: str, body: dict[str, Any], headers: dict[str, Any],
+    ) -> tuple[dict[str, Any], int]:
         """Create an invitation to join a tenant."""
         import asyncio
 
@@ -289,7 +289,7 @@ class AdminAPI:
             "expires_at": invitation.expires_at,
         }, 201
 
-    def _list_invitations(self, tenant_id: str) -> tuple[dict, int]:
+    def _list_invitations(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """List pending invitations for a tenant."""
         import asyncio
 
@@ -309,7 +309,7 @@ class AdminAPI:
             "count": len(invitations),
         }, 200
 
-    def _revoke_invitation(self, invite_code: str) -> tuple[dict, int]:
+    def _revoke_invitation(self, invite_code: str) -> tuple[dict[str, Any], int]:
         """Revoke a pending invitation."""
         import asyncio
 
@@ -323,7 +323,7 @@ class AdminAPI:
 
         return {"revoked": True, "invite_code": invite_code}, 200
 
-    def _list_users(self, tenant_id: str) -> tuple[dict, int]:
+    def _list_users(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """List all users in a tenant."""
         import asyncio
 

@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from urllib.request import urlopen, Request
 
 logger = logging.getLogger("t3nets.teams.auth")
@@ -52,19 +52,19 @@ class TokenCache:
 
     def is_valid(self) -> bool:
         """Check if token is still valid (with 5-minute buffer)."""
-        return self.access_token and time.time() < (self.expires_at - 300)
+        return bool(self.access_token) and time.time() < (self.expires_at - 300)
 
 
 @dataclass
 class SigningKeyCache:
     """Cached JWKS signing keys with refresh tracking."""
 
-    keys: list[dict] = field(default_factory=list)
+    keys: list[dict[str, Any]] = field(default_factory=list)
     fetched_at: float = 0.0
     max_age: float = 86400  # Refresh keys every 24 hours
 
     def is_fresh(self) -> bool:
-        return self.keys and (time.time() - self.fetched_at) < self.max_age
+        return bool(self.keys) and (time.time() - self.fetched_at) < self.max_age
 
 
 class BotFrameworkAuth:
@@ -151,7 +151,7 @@ class BotFrameworkAuth:
             logger.error(f"JWT validation error: {e}")
             return False
 
-    def _get_signing_keys(self) -> list[dict]:
+    def _get_signing_keys(self) -> list[dict[str, Any]]:
         """Fetch Microsoft's signing keys from OpenID metadata."""
         if self._key_cache.is_fresh():
             return self._key_cache.keys
@@ -172,7 +172,7 @@ class BotFrameworkAuth:
             with urlopen(req, timeout=10) as resp:
                 jwks = json.loads(resp.read().decode())
 
-            keys = jwks.get("keys", [])
+            keys = list(jwks.get("keys", []))
             self._key_cache = SigningKeyCache(keys=keys, fetched_at=time.time())
             logger.info(f"Fetched {len(keys)} signing keys from Bot Framework")
             return keys
@@ -181,7 +181,7 @@ class BotFrameworkAuth:
             logger.error(f"Failed to fetch signing keys: {e}")
             return self._key_cache.keys  # Return stale keys as fallback
 
-    def _decode_jwt_header(self, token: str) -> dict:
+    def _decode_jwt_header(self, token: str) -> dict[str, Any]:
         """Decode JWT header without verification (to get kid)."""
         import base64
 
@@ -191,11 +191,11 @@ class BotFrameworkAuth:
         if padding != 4:
             header_b64 += "=" * padding
         header_bytes = base64.urlsafe_b64decode(header_b64)
-        return json.loads(header_bytes)
+        return dict(json.loads(header_bytes))
 
     def _decode_and_validate_jwt(
-        self, token: str, signing_key: dict
-    ) -> Optional[dict]:
+        self, token: str, signing_key: dict[str, Any]
+    ) -> Optional[dict[str, Any]]:
         """
         Decode and validate a JWT using the provided signing key.
 
@@ -203,10 +203,10 @@ class BotFrameworkAuth:
         manual validation for environments without PyJWT.
         """
         try:
-            import jwt  # PyJWT
+            import jwt  # type: ignore[import-not-found]  # PyJWT
 
             # Build the public key from JWK
-            from jwt.algorithms import RSAAlgorithm
+            from jwt.algorithms import RSAAlgorithm  # type: ignore[import-not-found]
 
             public_key = RSAAlgorithm.from_jwk(json.dumps(signing_key))
 
@@ -219,7 +219,7 @@ class BotFrameworkAuth:
                     "verify_iss": False,  # We check issuer manually
                 },
             )
-            return payload
+            return dict(payload)
 
         except ImportError:
             # PyJWT not installed — do basic decode without signature verification
@@ -234,7 +234,7 @@ class BotFrameworkAuth:
             logger.error(f"JWT decode failed: {e}")
             return None
 
-    def _unsafe_decode_jwt_payload(self, token: str) -> Optional[dict]:
+    def _unsafe_decode_jwt_payload(self, token: str) -> Optional[dict[str, Any]]:
         """Decode JWT payload WITHOUT signature verification. Dev/testing only."""
         import base64
 
@@ -244,7 +244,7 @@ class BotFrameworkAuth:
             if padding != 4:
                 payload_b64 += "=" * padding
             payload_bytes = base64.urlsafe_b64decode(payload_b64)
-            return json.loads(payload_bytes)
+            return dict(json.loads(payload_bytes))
         except Exception as e:
             logger.error(f"Failed to decode JWT payload: {e}")
             return None
@@ -286,8 +286,8 @@ class BotFrameworkAuth:
             with urlopen(req, timeout=10) as resp:
                 result = json.loads(resp.read().decode())
 
-            access_token = result.get("access_token", "")
-            expires_in = result.get("expires_in", 3600)
+            access_token = str(result.get("access_token", ""))
+            expires_in = int(result.get("expires_in", 3600))
 
             if access_token:
                 self._token_cache = TokenCache(

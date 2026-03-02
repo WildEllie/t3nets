@@ -19,9 +19,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Protocol
+from typing import Any, Coroutine, Optional, Protocol
 
-from adapters.aws.pending_requests import PendingRequestsStore
+from adapters.aws.pending_requests import PendingRequest, PendingRequestsStore
+from agent.interfaces.ai_provider import AIProvider
+from agent.interfaces.conversation_store import ConversationStore
+from agent.interfaces.secrets_provider import SecretsProvider
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +32,13 @@ logger = logging.getLogger(__name__)
 class PushClient(Protocol):
     """Common interface for SSEConnectionManager and WebSocketConnectionManager."""
 
-    def send_event(self, user_key: str, event_type: str, data: dict) -> int: ...
+    def send_event(self, user_key: str, event_type: str, data: dict[str, Any]) -> int: ...
 
     @property
     def connection_count(self) -> int: ...
 
 
-def _run_async(coro):
+def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     """Run an async coroutine from a synchronous background thread."""
     loop = asyncio.new_event_loop()
     try:
@@ -57,11 +60,11 @@ class AsyncResultRouter:
         self,
         push_client: PushClient,
         pending_store: PendingRequestsStore,
-        ai_provider=None,
-        conversation_store=None,
+        ai_provider: Optional[AIProvider] = None,
+        conversation_store: Optional[ConversationStore] = None,
         bedrock_model_id: str = "",
-        secrets_provider=None,
-    ):
+        secrets_provider: Optional[SecretsProvider] = None,
+    ) -> None:
         self.sse = push_client
         self.pending = pending_store
         self.ai = ai_provider
@@ -69,7 +72,7 @@ class AsyncResultRouter:
         self._bedrock_model_id = bedrock_model_id
         self.secrets = secrets_provider
 
-    def handle_result(self, message: dict) -> None:
+    def handle_result(self, message: dict[str, Any]) -> None:
         """
         Route a skill result to the appropriate channel.
         Called by SQSResultPoller for each received message.
@@ -108,7 +111,13 @@ class AsyncResultRouter:
         else:
             logger.warning(f"AsyncResultRouter: unknown channel '{reply_channel}'")
 
-    def _route_dashboard(self, request_id, result, skill_name, pending_req):
+    def _route_dashboard(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        skill_name: str,
+        pending_req: Optional[PendingRequest],
+    ) -> None:
         """Push result to dashboard via push client (SSE or WebSocket)."""
         user_key = pending_req.user_key if pending_req else ""
         is_raw = pending_req.is_raw if pending_req else False
@@ -191,7 +200,14 @@ class AsyncResultRouter:
             f"AsyncResultRouter: delivered to {delivered} connection(s) for user {user_key[:20]}"
         )
 
-    def _route_teams(self, request_id, result, skill_name, pending_req, message):
+    def _route_teams(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        skill_name: str,
+        pending_req: Optional[PendingRequest],
+        message: dict[str, Any],
+    ) -> None:
         """Send result back to Teams via Bot Framework."""
         from agent.channels.teams import TeamsAdapter
         from agent.models.message import ChannelType, OutboundMessage
@@ -207,6 +223,9 @@ class AsyncResultRouter:
 
         try:
             # Load Teams credentials from Secrets Manager
+            if not self.secrets:
+                logger.error("AsyncResultRouter: no secrets provider configured")
+                return
             creds = _run_async(self.secrets.get(pending_req.tenant_id, "teams"))
             app_id = creds.get("app_id", "")
             app_secret = creds.get("app_secret", "")
@@ -274,7 +293,14 @@ class AsyncResultRouter:
         except Exception as e:
             logger.exception(f"AsyncResultRouter: Teams routing failed: {e}")
 
-    def _route_telegram(self, request_id, result, skill_name, pending_req, message):
+    def _route_telegram(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        skill_name: str,
+        pending_req: Optional[PendingRequest],
+        message: dict[str, Any],
+    ) -> None:
         """Send result back to Telegram via Bot API."""
         from agent.channels.telegram import TelegramAdapter
         from agent.models.message import ChannelType, OutboundMessage
@@ -285,6 +311,9 @@ class AsyncResultRouter:
 
         try:
             # Load Telegram credentials from Secrets Manager
+            if not self.secrets:
+                logger.error("AsyncResultRouter: no secrets provider configured")
+                return
             creds = _run_async(self.secrets.get(pending_req.tenant_id, "telegram"))
             bot_token = creds.get("bot_token", "")
             if not bot_token:
@@ -358,9 +387,9 @@ class AsyncResultRouter:
 
     def _format_result(
         self,
-        result: dict,
+        result: dict[str, Any],
         skill_name: str,
-        pending_req,
+        pending_req: Optional[PendingRequest],
     ) -> tuple[str, int, str]:
         """
         Format a skill result into human-readable text.

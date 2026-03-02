@@ -8,6 +8,7 @@ Secrets are loaded from environment variables with a naming convention:
 
 import os
 from pathlib import Path
+from typing import Any
 
 from agent.interfaces.secrets_provider import SecretsProvider, SecretNotFound
 
@@ -47,7 +48,7 @@ class EnvSecretsProvider(SecretsProvider):
     def __init__(self, env_file: str = ".env"):
         self._load_env_file(env_file)
 
-    def _load_env_file(self, env_file: str):
+    def _load_env_file(self, env_file: str) -> None:
         """Load .env file into os.environ."""
         path = Path(env_file)
         if not path.exists():
@@ -59,7 +60,7 @@ class EnvSecretsProvider(SecretsProvider):
                     key, value = line.split("=", 1)
                     os.environ.setdefault(key.strip(), value.strip())
 
-    async def get(self, tenant_id: str, integration_name: str) -> dict:
+    async def get(self, tenant_id: str, integration_name: str) -> dict[str, Any]:
         """
         Get secrets for an integration.
         In local mode, tenant_id is ignored (single-tenant).
@@ -85,7 +86,7 @@ class EnvSecretsProvider(SecretsProvider):
 
         return secrets
 
-    async def put(self, tenant_id: str, integration_name: str, secrets: dict) -> None:
+    async def put(self, tenant_id: str, integration_name: str, secrets: dict[str, Any]) -> None:
         """In local mode, just set env vars (non-persistent)."""
         key_map = INTEGRATION_KEYS.get(integration_name, {})
         for secret_key, value in secrets.items():

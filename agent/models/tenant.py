@@ -4,7 +4,7 @@ Tenant and User models.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -55,7 +55,7 @@ class TenantUser:
     cognito_sub: str = ""  # IdP subject ID (Cognito sub, Authentik uid, etc.)
     last_login: str = ""  # ISO 8601 timestamp of last login
     avatar_url: str = ""  # URL or data URI for user avatar
-    channel_identities: dict = field(default_factory=dict)
+    channel_identities: dict[str, Any] = field(default_factory=dict)
     # e.g., {"teams": "aad-object-id", "whatsapp": "+1555...", "slack": "U12345"}
 
     def is_admin(self) -> bool:

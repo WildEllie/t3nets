@@ -20,8 +20,9 @@ import json
 import logging
 import time
 
-import boto3
-from botocore.exceptions import ClientError
+import boto3  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +77,11 @@ class WebSocketConnectionManager:
         """Count active connections via DynamoDB Scan (health check only — not a hot path)."""
         try:
             resp = self._table.scan(Select="COUNT")
-            return resp.get("Count", 0)
+            return int(resp.get("Count", 0))
         except Exception:
             return 0
 
-    def send_event(self, user_key: str, event_type: str, data: dict) -> int:
+    def send_event(self, user_key: str, event_type: str, data: dict[str, Any]) -> int:
         """Push event via ApiGatewayManagementApi. Returns delivery count.
 
         Matches SSEConnectionManager.send_event() signature so result_router

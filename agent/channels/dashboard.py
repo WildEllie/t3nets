@@ -5,6 +5,8 @@ The built-in web chat. For the local dev server, this works over
 simple HTTP POST (not WebSocket — keep it simple for now).
 """
 
+from typing import Any
+
 from agent.channels.base import ChannelAdapter
 from agent.models.message import (
     ChannelType,
@@ -31,7 +33,7 @@ class DashboardAdapter(ChannelAdapter):
             ChannelCapability.TYPING_INDICATOR,
         }
 
-    def parse_inbound(self, raw_event: dict) -> InboundMessage:
+    def parse_inbound(self, raw_event: dict[str, Any]) -> InboundMessage:
         return InboundMessage(
             channel=ChannelType.DASHBOARD,
             channel_user_id=raw_event.get("user_id", "dashboard-user"),
@@ -48,6 +50,6 @@ class DashboardAdapter(ChannelAdapter):
         # This method would be used for WebSocket push in production.
         return True
 
-    def validate_webhook(self, headers: dict, body: bytes) -> bool:
+    def validate_webhook(self, headers: dict[str, Any], body: bytes) -> bool:
         # Dashboard uses JWT auth, not webhook signatures.
         return True

@@ -9,7 +9,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 
 from agent.interfaces.conversation_store import ConversationStore
 
@@ -22,7 +22,7 @@ class SQLiteConversationStore(ConversationStore):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS conversations (
@@ -39,7 +39,7 @@ class SQLiteConversationStore(ConversationStore):
         tenant_id: str,
         conversation_id: str,
         max_turns: int = 20,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 "SELECT messages FROM conversations WHERE tenant_id = ? AND conversation_id = ?",
@@ -49,7 +49,7 @@ class SQLiteConversationStore(ConversationStore):
         if not row:
             return []
 
-        messages = json.loads(row[0])
+        messages = cast(list[dict[str, Any]], json.loads(row[0]))
         # Return last N turns (each turn = 2 messages: user + assistant)
         return messages[-(max_turns * 2):]
 
@@ -59,7 +59,7 @@ class SQLiteConversationStore(ConversationStore):
         conversation_id: str,
         user_message: str,
         assistant_message: str,
-        metadata: Optional[dict] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
 
@@ -74,11 +74,11 @@ class SQLiteConversationStore(ConversationStore):
             else:
                 messages = []
 
-            user_msg: dict = {"role": "user", "content": user_message}
+            user_msg: dict[str, Any] = {"role": "user", "content": user_message}
             if metadata and metadata.get("user_email"):
                 user_msg["metadata"] = {"user_email": metadata["user_email"]}
             messages.append(user_msg)
-            assistant_msg: dict = {"role": "assistant", "content": assistant_message}
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": assistant_message}
             if metadata:
                 assistant_msg["metadata"] = metadata
             messages.append(assistant_msg)

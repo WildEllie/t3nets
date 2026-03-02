@@ -7,8 +7,9 @@ Results come back through SQS (not through EventBridge).
 
 import json
 import logging
+from typing import Any
 
-import boto3
+import boto3  # type: ignore[import-untyped]
 
 from agent.interfaces.event_bus import EventBus
 
@@ -31,7 +32,7 @@ class EventBridgeBus(EventBus):
         self,
         source: str,
         detail_type: str,
-        detail: dict,
+        detail: dict[str, Any],
     ) -> None:
         """Put an event to EventBridge. Returns immediately (async invocation)."""
         logger.info(

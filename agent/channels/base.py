@@ -6,6 +6,7 @@ ChannelAdapter. The router discovers available channels via ChannelRegistry.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from agent.models.message import (
     ChannelType,
@@ -35,7 +36,7 @@ class ChannelAdapter(ABC):
         ...
 
     @abstractmethod
-    def parse_inbound(self, raw_event: dict) -> InboundMessage:
+    def parse_inbound(self, raw_event: dict[str, Any]) -> InboundMessage:
         """
         Convert a raw webhook/event payload into a normalized InboundMessage.
         Each channel has its own payload format — this is where translation happens.
@@ -51,7 +52,7 @@ class ChannelAdapter(ABC):
         ...
 
     @abstractmethod
-    def validate_webhook(self, headers: dict, body: bytes) -> bool:
+    def validate_webhook(self, headers: dict[str, Any], body: bytes) -> bool:
         """
         Verify that an incoming webhook is authentic.
         Each channel has its own signature/token verification.
@@ -78,7 +79,7 @@ class ChannelRegistry:
     Channels register at startup. Router queries the registry to handle messages.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._adapters: dict[ChannelType, ChannelAdapter] = {}
 
     def register(self, adapter: ChannelAdapter) -> None:

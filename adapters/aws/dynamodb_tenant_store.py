@@ -11,8 +11,8 @@ Schema (single-table design):
 """
 
 import json
-import boto3
-from typing import Optional
+from typing import Any, Optional
+import boto3  # type: ignore[import-untyped]
 
 from agent.interfaces.tenant_store import TenantStore, TenantNotFound, UserNotFound
 from agent.models.tenant import Invitation, Tenant, TenantSettings, TenantUser
@@ -154,7 +154,7 @@ class DynamoDBTenantStore(TenantStore):
         """Store a new invitation in DynamoDB with TTL."""
         from datetime import datetime, timezone
 
-        item: dict = {
+        item: dict[str, Any] = {
             "pk": f"INVITE#{invitation.invite_code}",
             "sk": "META",
             "invite_code": invitation.invite_code,
@@ -187,7 +187,7 @@ class DynamoDBTenantStore(TenantStore):
 
     async def update_invitation(self, invitation: Invitation) -> None:
         """Update an invitation (e.g., mark as accepted or revoked)."""
-        item: dict = {
+        item: dict[str, Any] = {
             "pk": f"INVITE#{invitation.invite_code}",
             "sk": "META",
             "invite_code": invitation.invite_code,
@@ -230,7 +230,7 @@ class DynamoDBTenantStore(TenantStore):
                 invitations.append(inv)
         return invitations
 
-    def _item_to_invitation(self, item: dict) -> Invitation:
+    def _item_to_invitation(self, item: dict[str, Any]) -> Invitation:
         return Invitation(
             invite_code=item["invite_code"],
             tenant_id=item["tenant_id"],
@@ -245,7 +245,7 @@ class DynamoDBTenantStore(TenantStore):
 
     # --- Helpers ---
 
-    def _tenant_to_item(self, tenant: Tenant) -> dict:
+    def _tenant_to_item(self, tenant: Tenant) -> dict[str, Any]:
         return {
             "pk": f"TENANT#{tenant.tenant_id}",
             "sk": "META",
@@ -256,7 +256,7 @@ class DynamoDBTenantStore(TenantStore):
             "settings": json.dumps(tenant.settings.__dict__),
         }
 
-    def _item_to_tenant(self, item: dict) -> Tenant:
+    def _item_to_tenant(self, item: dict[str, Any]) -> Tenant:
         settings_dict = json.loads(item.get("settings", "{}"))
         return Tenant(
             tenant_id=item["tenant_id"],
@@ -284,8 +284,8 @@ class DynamoDBTenantStore(TenantStore):
 
         return self._item_to_user(items[0])
 
-    def _user_to_item(self, user: TenantUser) -> dict:
-        item: dict = {
+    def _user_to_item(self, user: TenantUser) -> dict[str, Any]:
+        item: dict[str, Any] = {
             "pk": f"TENANT#{user.tenant_id}",
             "sk": f"USER#{user.user_id}",
             "user_id": user.user_id,
@@ -304,7 +304,7 @@ class DynamoDBTenantStore(TenantStore):
             item["avatar_url"] = user.avatar_url
         return item
 
-    def _item_to_user(self, item: dict) -> TenantUser:
+    def _item_to_user(self, item: dict[str, Any]) -> TenantUser:
         return TenantUser(
             user_id=item["user_id"],
             tenant_id=item["tenant_id"],

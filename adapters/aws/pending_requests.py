@@ -20,8 +20,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-import boto3
-from botocore.exceptions import ClientError
+import boto3  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -157,4 +157,5 @@ class PendingRequestsStore:
         item = response.get("Item")
         if not item:
             return None
-        return item.get("status")
+        status = item.get("status")
+        return str(status) if status is not None else None

@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 2, 2026 (Platform Admin — Phase 4.6)
+**Last Updated:** March 3, 2026 (CDN + ASGI migration + mypy)
 
 ---
 
@@ -218,8 +218,12 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 
 ### Phase 8: Dashboard & UX
 - [x] Markdown rendering in chat responses
+- [x] S3 + CloudFront CDN module: private bucket (OAC), path-based routing (`/api/*` → API GW, `/*` → S3), 5-min TTL
+      ↳ ✅ Completed — `infra/aws/modules/cdn/`
+- [x] CloudFront Function: extensionless path rewriting (`/chat` → `/chat.html`) at viewer-request stage
+- [x] `deploy.sh`: HTML sync to S3 + CloudFront invalidation (`/*`) after ECS stabilises
 - [ ] Dashboard theming — polished design system (dark mode, consistent components)
-- [ ] Make the console/dashboard an SPA, serve static HTML from CDN with pure AJAX
+- [ ] Make the console/dashboard a full SPA with client-side routing
 - [ ] Mobile-responsive layout
 - [ ] Conversation history browser
 - [ ] Skill configuration UI
@@ -253,7 +257,11 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] Streaming responses (WebSocket transport ready — needs Bedrock streaming integration)
 
 ### Developer Experience
-- [ ] Auto-reload dev server (watchdog / uvicorn)
+- [x] Migrate both servers to uvicorn ASGI + Starlette: persistent event loop, true async concurrency — no `asyncio.run()` per request
+      ↳ ✅ `adapters/local/dev_server.py`, `adapters/aws/server.py`; `base_handler.py` deleted
+- [x] Auto-reload dev server — uvicorn `--reload` flag available now that both servers use uvicorn
+- [x] Strict mypy compliance — 0 errors across all 60 source files in `agent/` + `adapters/` (284 fixed)
+- [x] License compliance — `THIRD_PARTY_LICENSES` with BSD-3-Clause attribution for uvicorn
 - [ ] CLI tool for scaffolding new skills
 - [ ] Local development docker-compose with hot reload
 - [x] Unit test suite for router, rule engine, skills (tenant isolation, release notes, error handler)

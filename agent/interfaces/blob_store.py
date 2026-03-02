@@ -8,6 +8,7 @@ Used for long-term memory, custom skills, exports, and audit logs.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class BlobStore(ABC):
@@ -35,7 +36,7 @@ class BlobStore(ABC):
         ...
 
     @abstractmethod
-    async def get_json(self, tenant_id: str, key: str) -> dict:
+    async def get_json(self, tenant_id: str, key: str) -> dict[str, Any]:
         """Convenience: retrieve and parse JSON."""
         ...
 
@@ -52,7 +53,7 @@ class BlobStore(ABC):
         ...
 
     @abstractmethod
-    async def put_json(self, tenant_id: str, key: str, data: dict) -> None:
+    async def put_json(self, tenant_id: str, key: str, data: dict[str, Any]) -> None:
         """Convenience: serialize dict to JSON and store."""
         ...
 

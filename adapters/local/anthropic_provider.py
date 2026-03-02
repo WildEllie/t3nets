@@ -6,6 +6,8 @@ For local development. No AWS/Bedrock dependency.
 
 import json
 import urllib.request
+from typing import Any
+
 from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolDefinition, ToolCall
 
 
@@ -20,7 +22,7 @@ class AnthropicProvider(AIProvider):
         self,
         model: str,
         system: str,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
         max_tokens: int = 4096,
     ) -> AIResponse:
@@ -47,10 +49,10 @@ class AnthropicProvider(AIProvider):
         self,
         model: str,
         system: str,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
         tool_use_id: str,
-        tool_result: dict,
+        tool_result: dict[str, Any],
         max_tokens: int = 4096,
     ) -> AIResponse:
         # Append tool result to messages
@@ -86,7 +88,7 @@ class AnthropicProvider(AIProvider):
 
         return self._call_api(body)
 
-    def _call_api(self, body: dict) -> AIResponse:
+    def _call_api(self, body: dict[str, Any]) -> AIResponse:
         """Make HTTP request to Anthropic API."""
         data = json.dumps(body).encode()
 
@@ -100,7 +102,7 @@ class AnthropicProvider(AIProvider):
 
         return self._parse_response(result)
 
-    def _parse_response(self, result: dict) -> AIResponse:
+    def _parse_response(self, result: dict[str, Any]) -> AIResponse:
         """Parse Anthropic API response into AIResponse."""
         text_parts = []
         tool_calls = []

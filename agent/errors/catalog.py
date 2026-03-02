@@ -15,7 +15,7 @@ from agent.errors.models import FriendlyError, ErrorSeverity
 # Each entry: (compiled_regex, FriendlyError template)
 # Order matters — first match wins.
 
-ERROR_PATTERNS: list[tuple[re.Pattern, FriendlyError]] = [
+ERROR_PATTERNS: list[tuple[re.Pattern[str], FriendlyError]] = [
     # ── Bedrock / AI Provider ──────────────────────────────────────────────
 
     (

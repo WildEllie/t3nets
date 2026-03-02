@@ -6,9 +6,11 @@ and either responds directly or dispatches skill execution.
 """
 
 import logging
+from typing import Any, Optional
 
 from agent.models.message import ChannelType, InboundMessage, OutboundMessage
 from agent.models.context import RequestContext
+from agent.models.tenant import Tenant
 from agent.channels.base import ChannelRegistry
 from agent.skills.registry import SkillRegistry
 from agent.interfaces.ai_provider import AIProvider
@@ -43,7 +45,7 @@ class Router:
     async def handle_message(
         self,
         channel_type: ChannelType,
-        raw_event: dict,
+        raw_event: dict[str, Any],
     ) -> None:
         """
         Main entry point. Handles a single inbound message end-to-end.
@@ -150,7 +152,9 @@ class Router:
                     reply_target=message.channel_user_id,
                 )
 
-    async def _resolve_tenant(self, channel_type, raw_event):
+    async def _resolve_tenant(
+        self, channel_type: ChannelType, raw_event: dict[str, Any]
+    ) -> Optional[Tenant]:
         """Resolve which tenant this message belongs to."""
         try:
             if channel_type in (ChannelType.DASHBOARD, ChannelType.API):

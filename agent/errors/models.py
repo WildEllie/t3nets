@@ -6,6 +6,7 @@ Every user-facing error should be a FriendlyError — clear, actionable, warm.
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 
 class ErrorSeverity(str, Enum):
@@ -27,7 +28,7 @@ class FriendlyError:
     admin_required: bool = False          # Does an admin need to fix this?
     original_error: str = ""              # Raw error (logged, never shown to user)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": "error",
             "severity": self.severity.value,

@@ -12,7 +12,7 @@ Claude is still used to FORMAT the response after the skill returns data.
 import re
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from agent.skills.registry import SkillRegistry, SkillDefinition
 
@@ -24,7 +24,7 @@ class RouteMatch:
     """Result of rule-based routing."""
     skill_name: str
     action: str
-    params: dict = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0  # 0.0 to 1.0
     raw_mode: bool = False   # --raw flag detected
 
@@ -37,9 +37,9 @@ class RuleSet:
     # Exact trigger phrases (case-insensitive)
     triggers: list[str] = field(default_factory=list)
     # Regex patterns for skill matching
-    patterns: list[re.Pattern] = field(default_factory=list)
+    patterns: list[re.Pattern[str]] = field(default_factory=list)
     # Action routing rules: list of (regex_pattern, action_name)
-    action_rules: list[tuple[re.Pattern, str]] = field(default_factory=list)
+    action_rules: list[tuple[re.Pattern[str], str]] = field(default_factory=list)
 
 
 # --- Action routing rules per skill ---
@@ -199,10 +199,10 @@ class RuleBasedRouter:
         self.skills = skills
         self.confidence_threshold = confidence_threshold
         self._rule_sets: dict[str, RuleSet] = {}
-        self._compiled_patterns: dict[str, list[re.Pattern]] = {}
+        self._compiled_patterns: dict[str, list[re.Pattern[str]]] = {}
         self._build_rule_sets()
 
-    def _build_rule_sets(self):
+    def _build_rule_sets(self) -> None:
         """Build rule sets from skill definitions and built-in patterns."""
         for skill in self.skills.list_skills():
             rule_set = RuleSet(
@@ -322,7 +322,7 @@ class RuleBasedRouter:
 
     def _extract_params(
         self, text_lower: str, rule_set: RuleSet, action: str, text_original: str = ""
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Extract parameters from the message text."""
         params = {"action": action}
 

@@ -7,6 +7,7 @@ is fed back to Claude immediately (synchronous flow).
 """
 
 import logging
+from typing import Any
 
 from agent.interfaces.event_bus import EventBus
 from agent.skills.registry import SkillRegistry
@@ -24,13 +25,13 @@ class DirectBus(EventBus):
     def __init__(self, skills: SkillRegistry, secrets: SecretsProvider):
         self.skills = skills
         self.secrets = secrets
-        self._pending_results: dict[str, dict] = {}
+        self._pending_results: dict[str, dict[str, Any]] = {}
 
     async def publish(
         self,
         source: str,
         detail_type: str,
-        detail: dict,
+        detail: dict[str, Any],
     ) -> None:
         """
         Instead of publishing to EventBridge, execute the skill immediately.
@@ -53,7 +54,7 @@ class DirectBus(EventBus):
 
             # Get tenant's secrets for this skill's integration
             skill = self.skills.get_skill(skill_name)
-            secrets = {}
+            secrets: dict[str, Any] = {}
             if skill and skill.requires_integration:
                 try:
                     secrets = await self.secrets.get(tenant_id, skill.requires_integration)
@@ -74,6 +75,6 @@ class DirectBus(EventBus):
             logger.error(f"DirectBus: skill '{skill_name}' failed: {e}")
             self._pending_results[request_id] = {"error": str(e)}
 
-    def get_result(self, request_id: str) -> dict | None:
+    def get_result(self, request_id: str) -> dict[str, Any] | None:
         """Retrieve and consume a skill result. Used by the local router."""
         return self._pending_results.pop(request_id, None)

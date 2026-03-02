@@ -5,7 +5,7 @@ Normalized representations that all channels produce/consume.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class ChannelType(Enum):
@@ -49,9 +49,9 @@ class InboundMessage:
     user_email: Optional[str]     # If available (Teams/Slack have it; SMS doesn't)
     conversation_id: str          # Channel-specific conversation/thread ID
     text: str                     # The actual message content
-    attachments: list[dict] = field(default_factory=list)
-    raw_event: dict = field(default_factory=dict)
-    metadata: dict = field(default_factory=dict)
+    attachments: list[dict[str, Any]] = field(default_factory=list)
+    raw_event: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: str = ""
 
 
@@ -66,6 +66,6 @@ class OutboundMessage:
     conversation_id: str
     recipient_id: str
     text: str                                   # Plain text or markdown
-    rich_content: Optional[dict] = None         # Cards, buttons, etc.
-    attachments: list[dict] = field(default_factory=list)
-    metadata: dict = field(default_factory=dict)
+    rich_content: Optional[dict[str, Any]] = None         # Cards, buttons, etc.
+    attachments: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)

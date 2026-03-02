@@ -8,9 +8,10 @@ can confirm it's alive and responding.
 import platform
 import sys
 from datetime import datetime, timezone
+from typing import Any
 
 
-def execute(params: dict, secrets: dict) -> dict:
+def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
     """Return basic system info for the model to interpret."""
     now = datetime.now(timezone.utc)
     echo = params.get("echo", "")

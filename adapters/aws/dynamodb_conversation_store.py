@@ -11,9 +11,9 @@ Schema:
 
 import json
 import time
-import boto3
+from typing import Any, Optional, cast
+import boto3  # type: ignore[import-untyped]
 from datetime import datetime, timezone
-from typing import Optional
 
 from agent.interfaces.conversation_store import ConversationStore
 
@@ -30,7 +30,7 @@ class DynamoDBConversationStore(ConversationStore):
         tenant_id: str,
         conversation_id: str,
         max_turns: int = 20,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         response = self.table.get_item(
             Key={"pk": tenant_id, "sk": conversation_id},
         )
@@ -39,7 +39,7 @@ class DynamoDBConversationStore(ConversationStore):
         if not item:
             return []
 
-        messages = json.loads(item.get("messages", "[]"))
+        messages = cast(list[dict[str, Any]], json.loads(item.get("messages", "[]")))
         return messages[-(max_turns * 2):]
 
     async def save_turn(
@@ -48,15 +48,15 @@ class DynamoDBConversationStore(ConversationStore):
         conversation_id: str,
         user_message: str,
         assistant_message: str,
-        metadata: Optional[dict] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         ttl = int(time.time()) + (self.ttl_days * 86400)
 
         # Get existing messages
         existing = await self.get_conversation(tenant_id, conversation_id, max_turns=100)
-        user_msg: dict = {"role": "user", "content": user_message}
-        user_meta: dict = {}
+        user_msg: dict[str, Any] = {"role": "user", "content": user_message}
+        user_meta: dict[str, Any] = {}
         if metadata and metadata.get("user_email"):
             user_meta["user_email"] = metadata["user_email"]
         if metadata and metadata.get("timestamp"):
@@ -64,7 +64,7 @@ class DynamoDBConversationStore(ConversationStore):
         if user_meta:
             user_msg["metadata"] = user_meta
         existing.append(user_msg)
-        assistant_msg: dict = {"role": "assistant", "content": assistant_message}
+        assistant_msg: dict[str, Any] = {"role": "assistant", "content": assistant_message}
         if metadata:
             assistant_msg["metadata"] = metadata
         existing.append(assistant_msg)

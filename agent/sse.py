@@ -11,8 +11,17 @@ import json
 import logging
 import threading
 import time
+from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class WriteableIO(Protocol):
+    """Protocol for objects that support write() and flush()."""
+
+    def write(self, data: bytes) -> int: ...
+    def flush(self) -> None: ...
 
 
 class SSEConnectionManager:
@@ -22,12 +31,12 @@ class SSEConnectionManager:
     can push async skill results to the correct dashboard client.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = threading.Lock()
         # user_key → list of wfile objects (one user can have multiple tabs)
-        self._connections: dict[str, list] = {}
+        self._connections: dict[str, list[WriteableIO]] = {}
 
-    def register(self, user_key: str, wfile) -> None:
+    def register(self, user_key: str, wfile: WriteableIO) -> None:
         """Register an SSE connection for a user."""
         with self._lock:
             if user_key not in self._connections:
@@ -38,7 +47,7 @@ class SSEConnectionManager:
                 f"(total: {len(self._connections[user_key])})"
             )
 
-    def unregister(self, user_key: str, wfile) -> None:
+    def unregister(self, user_key: str, wfile: WriteableIO) -> None:
         """Remove an SSE connection."""
         with self._lock:
             if user_key in self._connections:
@@ -50,14 +59,14 @@ class SSEConnectionManager:
                     del self._connections[user_key]
                 logger.info(f"SSE: unregistered connection for {user_key}")
 
-    def send_event(self, user_key: str, event_type: str, data: dict) -> int:
+    def send_event(self, user_key: str, event_type: str, data: dict[str, Any]) -> int:
         """Send an SSE event to all connections for a user.
 
         Returns the number of connections that received the event.
         """
         payload = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
         sent = 0
-        dead: list[tuple[str, object]] = []
+        dead: list[tuple[str, WriteableIO]] = []
 
         with self._lock:
             connections = list(self._connections.get(user_key, []))
@@ -78,24 +87,24 @@ class SSEConnectionManager:
 
     def send_keepalive(self) -> None:
         """Send keepalive comment to all connections. Called periodically."""
-        all_connections: list[tuple[str, object]] = []
+        all_connections: list[tuple[str, WriteableIO]] = []
         with self._lock:
             for user_key, conns in self._connections.items():
                 for wfile in conns:
                     all_connections.append((user_key, wfile))
 
-        dead: list[tuple[str, object]] = []
+        dead: list[tuple[str, WriteableIO]] = []
         for user_key, wfile in all_connections:
             try:
-                wfile.write(b": keepalive\n\n")  # type: ignore[union-attr]
-                wfile.flush()  # type: ignore[union-attr]
+                wfile.write(b": keepalive\n\n")
+                wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
                 dead.append((user_key, wfile))
 
         if dead:
             self._remove_dead(dead)
 
-    def _remove_dead(self, dead: list[tuple[str, object]]) -> None:
+    def _remove_dead(self, dead: list[tuple[str, WriteableIO]]) -> None:
         """Remove dead connections from the registry."""
         with self._lock:
             for user_key, wfile in dead:
@@ -116,7 +125,7 @@ class SSEConnectionManager:
 def start_keepalive_thread(manager: SSEConnectionManager) -> threading.Thread:
     """Start a daemon thread that sends SSE keepalive every 15 seconds."""
 
-    def _loop():
+    def _loop() -> None:
         while True:
             time.sleep(15)
             try:

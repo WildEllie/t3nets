@@ -23,8 +23,9 @@ import logging
 import threading
 import time
 
-import boto3
-from botocore.exceptions import ClientError
+import boto3  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class SQSResultPoller:
     def __init__(
         self,
         queue_url: str,
-        callback,
+        callback: Callable[[dict[str, Any]], None],
         region: str = "us-east-1",
         wait_time_seconds: int = 20,
         max_messages: int = 1,
@@ -111,7 +112,7 @@ class SQSResultPoller:
 
         logger.info("SQSResultPoller: stopped")
 
-    def _process_message(self, msg: dict) -> None:
+    def _process_message(self, msg: dict[str, Any]) -> None:
         """Parse and route a single SQS message, then delete it."""
         receipt_handle = msg["ReceiptHandle"]
         body_str = msg.get("Body", "{}")

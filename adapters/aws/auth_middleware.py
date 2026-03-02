@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger("t3nets.auth")
 
@@ -38,7 +39,7 @@ class AuthError(Exception):
         super().__init__(message)
 
 
-def extract_auth(headers) -> AuthContext:
+def extract_auth(headers: Any) -> AuthContext:
     """Extract auth context from the Authorization header.
 
     The JWT has already been validated by API Gateway's JWT authorizer.

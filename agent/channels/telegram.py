@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import logging
+from typing import Any, cast
 from urllib.request import urlopen, Request
 
 from agent.channels.base import ChannelAdapter
@@ -54,7 +55,7 @@ class TelegramAdapter(ChannelAdapter):
             ChannelCapability.REACTIONS,
         }
 
-    def parse_inbound(self, raw_event: dict) -> InboundMessage:
+    def parse_inbound(self, raw_event: dict[str, Any]) -> InboundMessage:
         """
         Parse a Telegram Update into an InboundMessage.
 
@@ -185,7 +186,7 @@ class TelegramAdapter(ChannelAdapter):
             )
             with urlopen(req, timeout=10) as resp:
                 result = json.loads(resp.read().decode())
-                return result.get("ok", False)
+                return bool(result.get("ok", False))
         except Exception as e:
             error_detail = ""
             if hasattr(e, "read"):
@@ -198,7 +199,7 @@ class TelegramAdapter(ChannelAdapter):
             )
             return False
 
-    def validate_webhook(self, headers: dict, body: bytes) -> bool:
+    def validate_webhook(self, headers: dict[str, Any], body: bytes) -> bool:
         """
         Validate incoming Telegram webhook.
 
@@ -235,7 +236,7 @@ class TelegramAdapter(ChannelAdapter):
 
     # --- Setup helpers ---
 
-    def register_webhook(self, webhook_url: str) -> dict:
+    def register_webhook(self, webhook_url: str) -> dict[str, Any]:
         """
         Register the webhook URL with Telegram.
 
@@ -244,7 +245,7 @@ class TelegramAdapter(ChannelAdapter):
 
         Returns: {"ok": true, "description": "Webhook was set"} on success
         """
-        payload: dict = {"url": webhook_url}
+        payload: dict[str, Any] = {"url": webhook_url}
         if self.webhook_secret:
             payload["secret_token"] = self.webhook_secret
 
@@ -257,7 +258,7 @@ class TelegramAdapter(ChannelAdapter):
                 method="POST",
             )
             with urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read().decode())
+                result = cast(dict[str, Any], json.loads(resp.read().decode()))
                 if result.get("ok"):
                     logger.info(f"Telegram webhook registered: {webhook_url}")
                 else:
@@ -268,7 +269,7 @@ class TelegramAdapter(ChannelAdapter):
             logger.error(f"Failed to register Telegram webhook: {e}")
             return {"ok": False, "description": str(e)}
 
-    def get_bot_info(self) -> dict:
+    def get_bot_info(self) -> dict[str, Any]:
         """
         Verify bot token by calling getMe.
 
@@ -280,14 +281,14 @@ class TelegramAdapter(ChannelAdapter):
             with urlopen(req, timeout=10) as resp:
                 result = json.loads(resp.read().decode())
                 if result.get("ok"):
-                    return result.get("result", {})
-                return {"error": result.get("description", "Unknown error")}
+                    return cast(dict[str, Any], result.get("result", {}))
+                return {"error": str(result.get("description", "Unknown error"))}
         except Exception as e:
             return {"error": str(e)}
 
     # --- Helpers ---
 
-    def _strip_bot_command(self, text: str, message: dict) -> str:
+    def _strip_bot_command(self, text: str, message: dict[str, Any]) -> str:
         """
         Strip /command@botname prefix from the message.
 
@@ -319,13 +320,13 @@ class TelegramAdapter(ChannelAdapter):
         return f"{mapped} {rest}".strip() if rest else mapped
 
     @staticmethod
-    def is_message_update(update: dict) -> bool:
+    def is_message_update(update: dict[str, Any]) -> bool:
         """Check if an update contains a user message (not edited, not service)."""
         message = update.get("message", {})
         return bool(message.get("text", "").strip())
 
     @staticmethod
-    def is_group_chat(update: dict) -> bool:
+    def is_group_chat(update: dict[str, Any]) -> bool:
         """Check if the message is from a group or supergroup."""
         chat_type = update.get("message", {}).get("chat", {}).get("type", "")
         return chat_type in ("group", "supergroup")

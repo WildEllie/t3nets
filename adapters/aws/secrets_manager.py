@@ -6,8 +6,9 @@ Each secret is a JSON blob with integration-specific keys.
 """
 
 import json
-import boto3
-from botocore.exceptions import ClientError
+from typing import Any, cast
+import boto3  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from agent.interfaces.secrets_provider import SecretsProvider, SecretNotFound
 
@@ -22,12 +23,12 @@ class SecretsManagerProvider(SecretsProvider):
     def _secret_id(self, tenant_id: str, integration_name: str) -> str:
         return f"{self.prefix}/{tenant_id}/{integration_name}"
 
-    async def get(self, tenant_id: str, integration_name: str) -> dict:
+    async def get(self, tenant_id: str, integration_name: str) -> dict[str, Any]:
         secret_id = self._secret_id(tenant_id, integration_name)
 
         try:
             response = self.client.get_secret_value(SecretId=secret_id)
-            return json.loads(response["SecretString"])
+            return cast(dict[str, Any], json.loads(response["SecretString"]))
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("ResourceNotFoundException", "DecryptionFailureException"):
@@ -37,7 +38,7 @@ class SecretsManagerProvider(SecretsProvider):
                 )
             raise
 
-    async def put(self, tenant_id: str, integration_name: str, secrets: dict) -> None:
+    async def put(self, tenant_id: str, integration_name: str, secrets: dict[str, Any]) -> None:
         secret_id = self._secret_id(tenant_id, integration_name)
         secret_string = json.dumps(secrets)
 

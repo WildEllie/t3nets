@@ -94,7 +94,7 @@ def get_model_for_provider(model_id: str, provider: str) -> str:
     return ""
 
 
-def get_models_for_provider(provider: str) -> list[dict]:
+def get_models_for_provider(provider: str) -> list[dict[str, object]]:
     """Return all models with availability info for a given provider.
 
     Returns list of dicts suitable for API responses / UI rendering.

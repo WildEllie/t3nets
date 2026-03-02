@@ -14,9 +14,10 @@ import urllib.request
 import urllib.parse
 import base64
 from datetime import datetime
+from typing import Any, cast
 
 
-def execute(params: dict, secrets: dict) -> dict:
+def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
     """
     Skill contract entry point.
 
@@ -54,7 +55,7 @@ def execute(params: dict, secrets: dict) -> dict:
 # --- Jira API helpers ---
 
 
-def _make_headers(secrets: dict) -> dict:
+def _make_headers(secrets: dict[str, Any]) -> dict[str, str]:
     """Create Basic Auth headers for Jira Cloud."""
     creds = base64.b64encode(
         f"{secrets['email']}:{secrets['api_token']}".encode()
@@ -66,22 +67,26 @@ def _make_headers(secrets: dict) -> dict:
     }
 
 
-def _jira_rest_request(secrets: dict, endpoint: str) -> dict:
-    """Make authenticated request to Jira Cloud REST API v3."""
+def _jira_rest_request(secrets: dict[str, Any], endpoint: str) -> Any:
+    """Make authenticated request to Jira Cloud REST API v3.
+
+    Returns Any because some endpoints return a dict (search, filter)
+    while others return a list (project versions).
+    """
     url = f"{secrets['url'].rstrip('/')}/rest/api/3/{endpoint}"
     req = urllib.request.Request(url, headers=_make_headers(secrets))
     with urllib.request.urlopen(req) as response:
         return json.loads(response.read().decode())
 
 
-def _jira_search(secrets: dict, jql: str, fields: list[str],
-                 max_per_page: int = 100) -> list[dict]:
+def _jira_search(secrets: dict[str, Any], jql: str, fields: list[str],
+                 max_per_page: int = 100) -> list[dict[str, Any]]:
     """Execute a JQL search with automatic pagination.
 
     Uses the /rest/api/3/search/jql endpoint with nextPageToken pagination.
     The old /rest/api/3/search endpoint was removed by Atlassian on 2025-08-01.
     """
-    all_issues: list[dict] = []
+    all_issues: list[dict[str, Any]] = []
     next_page_token: str | None = None
 
     while True:
@@ -109,7 +114,7 @@ def _jira_search(secrets: dict, jql: str, fields: list[str],
 # --- Actions ---
 
 
-def _list_releases(secrets: dict) -> dict:
+def _list_releases(secrets: dict[str, Any]) -> dict[str, Any]:
     """List all fix versions (releases) for the project."""
     # Derive project key from board if available, or list all projects
     project_key = secrets.get("project_key", "")
@@ -153,7 +158,7 @@ def _list_releases(secrets: dict) -> dict:
     }
 
 
-def _summarize_release(secrets: dict, release_name: str) -> dict:
+def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, Any]:
     """Pull all issues for a release and structure for release notes."""
     project_key = secrets.get("project_key", "")
     if not project_key:
@@ -205,12 +210,12 @@ def _summarize_release(secrets: dict, release_name: str) -> dict:
 
     # Check if this is a future release with no meaningful work done
     if not version_info.get("released", False):
-        statuses = [
+        status_names = [
             (issue.get("fields", {}).get("status") or {}).get("name", "")
             for issue in raw_issues
         ]
         work_statuses = {"In Progress", "In Review", "Done", "Closed", "Resolved"}
-        has_work = any(s in work_statuses for s in statuses)
+        has_work = any(s in work_statuses for s in status_names)
         if not has_work:
             return {
                 "release": release_name,
@@ -227,15 +232,15 @@ def _summarize_release(secrets: dict, release_name: str) -> dict:
     issues = [_extract_issue(secrets, issue) for issue in raw_issues]
 
     # Group by type
-    by_type = {}
+    by_type: dict[str, list[dict[str, Any]]] = {}
     for issue in issues:
         issue_type = issue["issue_type"]
         by_type.setdefault(issue_type, []).append(issue)
 
     # Stats
-    statuses = {}
-    priorities = {}
-    assignees = {}
+    statuses: dict[str, int] = {}
+    priorities: dict[str, int] = {}
+    assignees: dict[str, int] = {}
     total_points = 0
 
     for issue in issues:
@@ -262,7 +267,7 @@ def _summarize_release(secrets: dict, release_name: str) -> dict:
 # --- Helpers ---
 
 
-def _extract_issue(secrets: dict, issue: dict) -> dict:
+def _extract_issue(secrets: dict[str, Any], issue: dict[str, Any]) -> dict[str, Any]:
     """Flatten a Jira issue into a clean dict."""
     f = issue.get("fields", {})
     base_url = secrets["url"].rstrip("/")
@@ -285,7 +290,7 @@ def _extract_issue(secrets: dict, issue: dict) -> dict:
     }
 
 
-def _get_version_info(secrets: dict, project_key: str, release_name: str) -> dict:
+def _get_version_info(secrets: dict[str, Any], project_key: str, release_name: str) -> dict[str, Any]:
     """Get metadata for a specific version."""
     if not project_key:
         return {}
@@ -307,7 +312,7 @@ def _get_version_info(secrets: dict, project_key: str, release_name: str) -> dic
     return {}
 
 
-def _get_project_key_from_board(secrets: dict) -> str:
+def _get_project_key_from_board(secrets: dict[str, Any]) -> str:
     """Try to derive the project key from the board configuration."""
     board_id = secrets.get("board_id", "")
     if not board_id:
@@ -323,7 +328,7 @@ def _get_project_key_from_board(secrets: dict) -> str:
         filter_id = data.get("filter", {}).get("id", "")
         if filter_id:
             filter_data = _jira_rest_request(secrets, f"filter/{filter_id}")
-            jql = filter_data.get("jql", "")
+            jql = str(filter_data.get("jql", ""))
             # Try to extract project key from JQL like "project = PROJ ..."
             if "project" in jql.lower():
                 parts = jql.split()
@@ -335,7 +340,7 @@ def _get_project_key_from_board(secrets: dict) -> str:
 
         # Fallback: get project from board location
         location = data.get("location", {})
-        project_key = location.get("projectKey", "")
+        project_key = str(location.get("projectKey", ""))
         if project_key:
             return project_key
 

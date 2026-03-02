@@ -6,6 +6,7 @@ Implementations: EventBridgeBus (AWS), DirectBus (local), etc.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class EventBus(ABC):
@@ -21,7 +22,7 @@ class EventBus(ABC):
         self,
         source: str,
         detail_type: str,
-        detail: dict,
+        detail: dict[str, Any],
     ) -> None:
         """
         Publish an event.
@@ -37,7 +38,7 @@ class EventBus(ABC):
         self,
         tenant_id: str,
         skill_name: str,
-        params: dict,
+        params: dict[str, Any],
         session_id: str,
         request_id: str,
         reply_channel: str,

@@ -27,8 +27,9 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
-import boto3
+import boto3  # type: ignore[import-untyped]
 
 # Add project root to path so we can import agent.skills etc.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -79,7 +80,7 @@ def _init_pending() -> PendingRequestsStore:
     return _pending
 
 
-def _init_sqs():
+def _init_sqs() -> Any:
     """Lazy-load the SQS client."""
     global _sqs_client
     if _sqs_client is None:
@@ -87,7 +88,7 @@ def _init_sqs():
     return _sqs_client
 
 
-def handler(event: dict, context) -> dict:
+def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     Lambda entry point. Receives EventBridge event with skill invocation details.
 
@@ -142,7 +143,7 @@ def handler(event: dict, context) -> dict:
 
     # Fetch integration secrets if the skill requires them
     skill_def = skills.get_skill(skill_name)
-    skill_secrets: dict = {}
+    skill_secrets: dict[str, Any] = {}
     if skill_def and skill_def.requires_integration:
         try:
             import asyncio
@@ -185,7 +186,7 @@ def handler(event: dict, context) -> dict:
     return {"statusCode": 200, "body": "OK"}
 
 
-def _send_result(request_id: str, detail: dict, result: dict) -> None:
+def _send_result(request_id: str, detail: dict[str, Any], result: dict[str, Any]) -> None:
     """Publish skill result to SQS for the router to pick up."""
     sqs = _init_sqs()
     message = {
@@ -199,7 +200,7 @@ def _send_result(request_id: str, detail: dict, result: dict) -> None:
     }
 
     try:
-        send_kwargs: dict = {
+        send_kwargs: dict[str, Any] = {
             "QueueUrl": SQS_QUEUE_URL,
             "MessageBody": json.dumps(message),
         }

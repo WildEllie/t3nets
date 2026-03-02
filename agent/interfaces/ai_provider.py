@@ -7,7 +7,7 @@ Implementations: BedrockProvider (AWS), AnthropicProvider (local), etc.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -15,14 +15,14 @@ class ToolDefinition:
     """A skill exposed to the AI as a callable tool."""
     name: str
     description: str
-    input_schema: dict
+    input_schema: dict[str, Any]
 
 
 @dataclass
 class ToolCall:
     """AI's request to invoke a specific tool."""
     tool_name: str
-    tool_params: dict
+    tool_params: dict[str, Any]
     tool_use_id: str  # For correlating tool results back to AI
 
 
@@ -53,7 +53,7 @@ class AIProvider(ABC):
         self,
         model: str,
         system: str,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
         max_tokens: int = 4096,
     ) -> AIResponse:
@@ -77,10 +77,10 @@ class AIProvider(ABC):
         self,
         model: str,
         system: str,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
         tool_use_id: str,
-        tool_result: dict,
+        tool_result: dict[str, Any],
         max_tokens: int = 4096,
     ) -> AIResponse:
         """

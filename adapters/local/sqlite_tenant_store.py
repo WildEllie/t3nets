@@ -21,7 +21,7 @@ class SQLiteTenantStore(TenantStore):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tenants (
@@ -327,41 +327,41 @@ class SQLiteTenantStore(TenantStore):
             if inv.is_valid()
         ]
 
-    def _row_to_invitation(self, row: tuple) -> Invitation:
+    def _row_to_invitation(self, row: tuple[object, ...]) -> Invitation:
         return Invitation(
-            invite_code=row[0],
-            tenant_id=row[1],
-            email=row[2],
-            role=row[3],
-            status=row[4],
-            invited_by=row[5],
-            created_at=row[6],
-            expires_at=row[7],
-            accepted_at=row[8],
+            invite_code=str(row[0]),
+            tenant_id=str(row[1]),
+            email=str(row[2]),
+            role=str(row[3]),
+            status=str(row[4]),
+            invited_by=str(row[5]),
+            created_at=str(row[6]),
+            expires_at=str(row[7]),
+            accepted_at=str(row[8]) if row[8] is not None else "",
         )
 
     # --- Helpers ---
 
-    def _row_to_tenant(self, row: tuple) -> Tenant:
-        settings_dict = json.loads(row[4])
+    def _row_to_tenant(self, row: tuple[object, ...]) -> Tenant:
+        settings_dict = json.loads(str(row[4]))
         settings = TenantSettings(**settings_dict)
         return Tenant(
-            tenant_id=row[0],
-            name=row[1],
-            status=row[2],
-            created_at=row[3],
+            tenant_id=str(row[0]),
+            name=str(row[1]),
+            status=str(row[2]),
+            created_at=str(row[3]),
             settings=settings,
         )
 
-    def _row_to_user(self, row: tuple) -> TenantUser:
+    def _row_to_user(self, row: tuple[object, ...]) -> TenantUser:
         return TenantUser(
-            user_id=row[0],
-            tenant_id=row[1],
-            email=row[2],
-            display_name=row[3],
-            role=row[4],
-            channel_identities=json.loads(row[5]),
-            cognito_sub=row[6] if len(row) > 6 else "",
-            last_login=row[7] if len(row) > 7 else "",
-            avatar_url=row[8] if len(row) > 8 else "",
+            user_id=str(row[0]),
+            tenant_id=str(row[1]),
+            email=str(row[2]),
+            display_name=str(row[3]),
+            role=str(row[4]),
+            channel_identities=json.loads(str(row[5])),
+            cognito_sub=str(row[6]) if len(row) > 6 else "",
+            last_login=str(row[7]) if len(row) > 7 else "",
+            avatar_url=str(row[8]) if len(row) > 8 else "",
         )

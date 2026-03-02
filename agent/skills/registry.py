@@ -3,10 +3,10 @@ Skill Registry — manages available skills and converts them to Claude tool def
 """
 
 import importlib
-import yaml
+import yaml  # type: ignore[import-untyped]
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from agent.interfaces.ai_provider import ToolDefinition
 from agent.models.context import RequestContext
@@ -18,7 +18,7 @@ class SkillDefinition:
 
     name: str
     description: str
-    parameters: dict                    # JSON Schema for tool input
+    parameters: dict[str, Any]          # JSON Schema for tool input
     requires_integration: Optional[str] # e.g., "jira", "github"
     supports_raw: bool = False          # Whether --raw debug output is supported
     triggers: list[str] = field(default_factory=list)
@@ -31,7 +31,7 @@ class SkillRegistry:
     for Claude, and resolves workers for execution.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._skills: dict[str, SkillDefinition] = {}
 
     def register(self, skill: SkillDefinition) -> None:
@@ -95,7 +95,7 @@ class SkillRegistry:
         """Get a skill by name."""
         return self._skills.get(skill_name)
 
-    def get_worker(self, skill_name: str) -> Callable:
+    def get_worker(self, skill_name: str) -> Callable[..., Any]:
         """
         Dynamically import and return the skill's worker execute() function.
         Used by the local adapter (DirectBus) to call skills without Lambda.
@@ -109,7 +109,8 @@ class SkillRegistry:
             raise SkillNotFound(
                 f"Skill '{skill_name}' worker module has no execute() function"
             )
-        return module.execute
+        execute: Callable[..., Any] = module.execute
+        return execute
 
     def list_skills(self) -> list[SkillDefinition]:
         """List all registered skills."""

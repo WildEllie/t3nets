@@ -20,6 +20,8 @@ aws = [
 ]
 local = [
     "anthropic>=0.40",
+    "starlette>=0.41",
+    "uvicorn[standard]>=0.32",
 ]
 dashboard = [
     # Dashboard is a separate React app — no Python deps

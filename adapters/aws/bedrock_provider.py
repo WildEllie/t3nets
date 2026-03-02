@@ -5,7 +5,8 @@ Calls Claude via Bedrock. Uses IAM role auth (no API key needed).
 """
 
 import json
-import boto3
+from typing import Any
+import boto3  # type: ignore[import-untyped]
 from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolDefinition, ToolCall
 
 
@@ -24,7 +25,7 @@ class BedrockProvider(AIProvider):
         self,
         model: str,
         system: str,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
         max_tokens: int = 4096,
     ) -> AIResponse:
@@ -36,10 +37,10 @@ class BedrockProvider(AIProvider):
         self,
         model: str,
         system: str,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
         tool_use_id: str,
-        tool_result: dict,
+        tool_result: dict[str, Any],
         max_tokens: int = 4096,
     ) -> AIResponse:
         # Append tool result to messages
@@ -65,10 +66,10 @@ class BedrockProvider(AIProvider):
         self,
         model: str,
         system: str,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         tools: list[ToolDefinition],
         max_tokens: int,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Build Bedrock Converse API request."""
         request = {
             "modelId": model or self.model_id,
@@ -95,7 +96,7 @@ class BedrockProvider(AIProvider):
 
         return request
 
-    def _convert_messages(self, messages: list[dict]) -> list[dict]:
+    def _convert_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Convert our message format to Bedrock Converse format.
         Handles both simple string content and structured content blocks.
@@ -106,7 +107,7 @@ class BedrockProvider(AIProvider):
 
             # Already structured (tool_use, tool_result blocks)
             if isinstance(content, list):
-                bedrock_content = []
+                bedrock_content: list[dict[str, Any]] = []
                 for block in content:
                     if isinstance(block, dict):
                         # Anthropic API format → convert to Bedrock format
@@ -150,7 +151,7 @@ class BedrockProvider(AIProvider):
 
         return converted
 
-    def _parse_response(self, response: dict) -> AIResponse:
+    def _parse_response(self, response: dict[str, Any]) -> AIResponse:
         """Parse Bedrock Converse API response."""
         text_parts = []
         tool_calls = []

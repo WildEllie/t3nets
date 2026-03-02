@@ -15,7 +15,7 @@ Setup:
 
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 from urllib.request import urlopen, Request
 
 from agent.channels.base import ChannelAdapter
@@ -57,7 +57,7 @@ class TeamsAdapter(ChannelAdapter):
             ChannelCapability.TYPING_INDICATOR,
         }
 
-    def parse_inbound(self, raw_event: dict) -> InboundMessage:
+    def parse_inbound(self, raw_event: dict[str, Any]) -> InboundMessage:
         """
         Parse a Bot Framework Activity into an InboundMessage.
 
@@ -158,7 +158,7 @@ class TeamsAdapter(ChannelAdapter):
             return False
 
         # Build the Activity response
-        response_activity = {
+        response_activity: dict[str, Any] = {
             "type": "message",
             "text": message.text,
         }
@@ -208,7 +208,7 @@ class TeamsAdapter(ChannelAdapter):
             logger.error(f"Failed to send Teams response: {e}")
             return False
 
-    def validate_webhook(self, headers: dict, body: bytes) -> bool:
+    def validate_webhook(self, headers: dict[str, Any], body: bytes) -> bool:
         """
         Validate that an incoming webhook is from Microsoft Bot Framework.
 
@@ -253,7 +253,7 @@ class TeamsAdapter(ChannelAdapter):
 
     # --- Helpers ---
 
-    def _strip_bot_mention(self, text: str, activity: dict) -> str:
+    def _strip_bot_mention(self, text: str, activity: dict[str, Any]) -> str:
         """
         Remove @bot mention from message text.
 
@@ -272,19 +272,19 @@ class TeamsAdapter(ChannelAdapter):
         return text
 
     @staticmethod
-    def is_message_activity(activity: dict) -> bool:
+    def is_message_activity(activity: dict[str, Any]) -> bool:
         """Check if an activity is a user message (not system event)."""
         return activity.get("type") == "message" and bool(
             activity.get("text", "").strip()
         )
 
     @staticmethod
-    def is_conversation_update(activity: dict) -> bool:
+    def is_conversation_update(activity: dict[str, Any]) -> bool:
         """Check if this is a conversationUpdate (bot added/removed)."""
         return activity.get("type") == "conversationUpdate"
 
     @staticmethod
-    def is_bot_added(activity: dict) -> bool:
+    def is_bot_added(activity: dict[str, Any]) -> bool:
         """Check if the bot was just added to a conversation."""
         if activity.get("type") != "conversationUpdate":
             return False

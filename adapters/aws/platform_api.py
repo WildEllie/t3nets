@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from agent.models.tenant import Invitation, Tenant, TenantSettings
 from adapters.aws.auth_middleware import extract_auth, AuthError
@@ -22,7 +22,7 @@ DEFAULT_TENANT = "default"
 class PlatformAPI:
     """Handles platform-level API requests (default-tenant admin only)."""
 
-    def __init__(self, tenants, secrets, skills):
+    def __init__(self, tenants: Any, secrets: Any, skills: Any) -> None:
         self.tenants = tenants
         self.secrets = secrets
         self.skills = skills
@@ -31,9 +31,9 @@ class PlatformAPI:
         self,
         method: str,
         path: str,
-        headers: dict,
-        body: dict | None = None,
-    ) -> tuple[dict, int]:
+        headers: dict[str, Any],
+        body: Optional[dict[str, Any]] = None,
+    ) -> tuple[dict[str, Any], int]:
         """Route a platform API request. Returns (response_dict, status_code)."""
         try:
             import asyncio
@@ -70,7 +70,7 @@ class PlatformAPI:
             logger.exception("Platform API error")
             return {"error": str(e)}, 500
 
-    def _list_tenants(self) -> tuple[dict, int]:
+    def _list_tenants(self) -> tuple[dict[str, Any], int]:
         """List all tenants with user counts."""
         import asyncio
 
@@ -91,7 +91,7 @@ class PlatformAPI:
             })
         return {"tenants": result, "count": len(result)}, 200
 
-    def _create_tenant(self, body: dict, headers: dict) -> tuple[dict, int]:
+    def _create_tenant(self, body: dict[str, Any], headers: dict[str, Any]) -> tuple[dict[str, Any], int]:
         """Create a new tenant and send an admin invitation."""
         import asyncio
 
@@ -164,7 +164,7 @@ class PlatformAPI:
             "admin_email": admin_email,
         }, 201
 
-    def _suspend_tenant(self, tenant_id: str) -> tuple[dict, int]:
+    def _suspend_tenant(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """Suspend a tenant (non-default only)."""
         import asyncio
 
@@ -181,7 +181,7 @@ class PlatformAPI:
         logger.info(f"Platform: suspended tenant {tenant_id}")
         return {"tenant_id": tenant_id, "status": "suspended"}, 200
 
-    def _activate_tenant(self, tenant_id: str) -> tuple[dict, int]:
+    def _activate_tenant(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """Activate a suspended tenant."""
         import asyncio
 
@@ -195,7 +195,7 @@ class PlatformAPI:
         logger.info(f"Platform: activated tenant {tenant_id}")
         return {"tenant_id": tenant_id, "status": "active"}, 200
 
-    def _delete_tenant(self, tenant_id: str) -> tuple[dict, int]:
+    def _delete_tenant(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """Tombstone-delete a tenant (non-default only)."""
         import asyncio
 

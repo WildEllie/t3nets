@@ -6,7 +6,7 @@ Implementations: DynamoDBStore (AWS), SQLiteStore (local), etc.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 
 # Avoid circular imports — use string type hints
 # RequestContext is defined in agent.models.context
@@ -26,7 +26,7 @@ class ConversationStore(ABC):
         tenant_id: str,
         conversation_id: str,
         max_turns: int = 20,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         Retrieve conversation history.
 
@@ -47,7 +47,7 @@ class ConversationStore(ABC):
         conversation_id: str,
         user_message: str,
         assistant_message: str,
-        metadata: Optional[dict] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         """
         Save a conversation turn (user message + assistant response).

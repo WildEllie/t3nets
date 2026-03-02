@@ -12,9 +12,10 @@ import json
 import urllib.request
 import base64
 from datetime import datetime
+from typing import Any, cast
 
 
-def execute(params: dict, secrets: dict) -> dict:
+def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
     """
     Skill contract entry point.
 
@@ -52,7 +53,7 @@ def execute(params: dict, secrets: dict) -> dict:
 # --- Internal functions (same logic as your working local script) ---
 
 
-def _jira_request(secrets: dict, endpoint: str) -> dict:
+def _jira_request(secrets: dict[str, Any], endpoint: str) -> dict[str, Any]:
     """Make authenticated request to Jira Cloud REST API."""
     url = f"{secrets['url'].rstrip('/')}/rest/agile/1.0/{endpoint}"
     credentials = base64.b64encode(
@@ -64,10 +65,10 @@ def _jira_request(secrets: dict, endpoint: str) -> dict:
     req.add_header("Content-Type", "application/json")
 
     with urllib.request.urlopen(req) as response:
-        return json.loads(response.read().decode())
+        return cast(dict[str, Any], json.loads(response.read().decode()))
 
 
-def _get_active_sprint(secrets: dict):
+def _get_active_sprint(secrets: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     """Get currently active sprint for the board."""
     data = _jira_request(secrets, f"board/{secrets['board_id']}/sprint?state=active")
     sprints = data.get("values", [])
@@ -76,7 +77,7 @@ def _get_active_sprint(secrets: dict):
     return sprints[0], None
 
 
-def _get_sprint_issues(secrets: dict, sprint_id: int) -> list[dict]:
+def _get_sprint_issues(secrets: dict[str, Any], sprint_id: int) -> list[dict[str, Any]]:
     """Get all issues in the sprint."""
     issues = []
     start_at = 0
@@ -96,7 +97,7 @@ def _get_sprint_issues(secrets: dict, sprint_id: int) -> list[dict]:
     return issues
 
 
-def _parse_issues(issues: list[dict]) -> list[dict]:
+def _parse_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Parse Jira issues into clean structure."""
     parsed = []
     for issue in issues:
@@ -118,7 +119,7 @@ def _parse_issues(issues: list[dict]) -> list[dict]:
     return parsed
 
 
-def _build_report(sprint: dict, issues: list[dict]) -> dict:
+def _build_report(sprint: dict[str, Any], issues: list[dict[str, Any]]) -> dict[str, Any]:
     """Build status report for Claude to interpret."""
     today = datetime.now()
     end_date = sprint.get("endDate", "")[:10]
@@ -131,7 +132,7 @@ def _build_report(sprint: dict, issues: list[dict]) -> dict:
         except ValueError:
             pass
 
-    categories = {"To Do": [], "In Progress": [], "Done": []}
+    categories: dict[str, list[dict[str, Any]]] = {"To Do": [], "In Progress": [], "Done": []}
     for issue in issues:
         cat = issue["status_category"]
         categories.setdefault(cat, []).append(issue)
@@ -173,19 +174,19 @@ def _build_report(sprint: dict, issues: list[dict]) -> dict:
     }
 
 
-def _get_status(secrets: dict) -> dict:
+def _get_status(secrets: dict[str, Any]) -> dict[str, Any]:
     sprint, error = _get_active_sprint(secrets)
-    if error:
-        return {"error": error}
+    if error or sprint is None:
+        return {"error": error or "No active sprint found"}
     issues = _get_sprint_issues(secrets, sprint["id"])
     parsed = _parse_issues(issues)
     return _build_report(sprint, parsed)
 
 
-def _get_blockers(secrets: dict) -> dict:
+def _get_blockers(secrets: dict[str, Any]) -> dict[str, Any]:
     sprint, error = _get_active_sprint(secrets)
-    if error:
-        return {"error": error}
+    if error or sprint is None:
+        return {"error": error or "No active sprint found"}
     issues = _get_sprint_issues(secrets, sprint["id"])
     parsed = _parse_issues(issues)
     return {
@@ -194,10 +195,10 @@ def _get_blockers(secrets: dict) -> dict:
     }
 
 
-def _get_mine(secrets: dict, assignee_email: str) -> dict:
+def _get_mine(secrets: dict[str, Any], assignee_email: str) -> dict[str, Any]:
     sprint, error = _get_active_sprint(secrets)
-    if error:
-        return {"error": error}
+    if error or sprint is None:
+        return {"error": error or "No active sprint found"}
     issues = _get_sprint_issues(secrets, sprint["id"])
     parsed = _parse_issues(issues)
     return {

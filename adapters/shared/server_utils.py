@@ -1,10 +1,11 @@
 """Shared server utilities — constants and pure functions used by both local and AWS servers."""
 
 import json
+from typing import Any
 
 # Integration field schemas — defines the config form per integration type.
 # Used by GET /api/integrations to tell the frontend which fields to render.
-INTEGRATION_SCHEMAS: dict = {
+INTEGRATION_SCHEMAS: dict[str, Any] = {
     "jira": {
         "label": "Jira",
         "fields": [
@@ -112,12 +113,12 @@ INTEGRATION_SCHEMAS: dict = {
 }
 
 
-def _format_raw_json(data: dict) -> str:  # type: ignore[type-arg]
+def _format_raw_json(data: dict[str, Any]) -> str:
     """Format raw JSON for dashboard display."""
     return json.dumps(data, indent=2, default=str)
 
 
-def _strip_metadata(messages: list[dict]) -> list[dict]:  # type: ignore[type-arg]
+def _strip_metadata(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Strip metadata from conversation history before sending to the AI provider."""
     return [{"role": m["role"], "content": m["content"]} for m in messages]
 

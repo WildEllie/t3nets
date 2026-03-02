@@ -6,7 +6,7 @@ Implementations: SecretsManagerProvider (AWS), EnvSecretsProvider (local), etc.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 
 
 class SecretsProvider(ABC):
@@ -20,7 +20,7 @@ class SecretsProvider(ABC):
     """
 
     @abstractmethod
-    async def get(self, tenant_id: str, integration_name: str) -> dict:
+    async def get(self, tenant_id: str, integration_name: str) -> dict[str, Any]:
         """
         Retrieve secrets for a tenant's integration.
 
@@ -42,7 +42,7 @@ class SecretsProvider(ABC):
         self,
         tenant_id: str,
         integration_name: str,
-        secrets: dict,
+        secrets: dict[str, Any],
     ) -> None:
         """
         Store or update secrets for a tenant's integration.
