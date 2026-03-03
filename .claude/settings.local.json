@@ -6,7 +6,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(python -m pytest:*)",
-      "Bash(ruff check:*)"
+      "Bash(ruff check:*)",
+      "Bash(terraform version:*)"
     ]
   }
 }

@@ -194,6 +194,14 @@ async def platform_page(request: Request) -> Response:
     return _file_response("platform.html", "adapters/local")
 
 
+async def serve_logo(request: Request) -> Response:
+    base = Path(__file__).parent.parent.parent
+    path = base / "adapters/local/logo.png"
+    if path.exists():
+        return FileResponse(str(path), media_type="image/png")
+    return Response(status_code=404, content="logo not found")
+
+
 # ---------------------------------------------------------------------------
 # SSE endpoint
 # ---------------------------------------------------------------------------
@@ -1560,6 +1568,7 @@ routes = [
     # Static pages
     Route("/", homepage),
     Route("/chat", homepage),
+    Route("/logo.png", serve_logo),
     Route("/health", health_page),
     Route("/settings", settings_page),
     Route("/onboard", onboard_page),

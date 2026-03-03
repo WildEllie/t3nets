@@ -256,10 +256,11 @@ S3_BUCKET=$(cd "${TF_DIR}" && terraform output -raw s3_bucket_name 2>/dev/null |
 CF_DISTRIBUTION_ID=$(cd "${TF_DIR}" && terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
 
 if [ -n "${S3_BUCKET}" ]; then
-    echo "→ Uploading HTML to S3 (${S3_BUCKET})..."
+    echo "→ Uploading static assets to S3 (${S3_BUCKET})..."
     aws s3 sync adapters/local/ "s3://${S3_BUCKET}/" \
         --exclude "*" \
         --include "*.html" \
+        --include "*.png" \
         --delete \
         --region "${REGION}"
     echo ""

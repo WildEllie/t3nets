@@ -31,6 +31,8 @@
         }
 
         .nav-brand {
+            display: flex;
+            align-items: center;
             font-size: 16px;
             font-weight: 700;
             color: #fff;
@@ -221,7 +223,7 @@
 </head>
 <body>
     <nav>
-        <a href="/" class="nav-brand">T3nets <span class="nav-badge platform" id="platform-badge">...</span><span class="nav-badge stage" id="stage-badge">...</span></a><span class="nav-tenant-name" id="nav-tenant-name" style="display:none;"></span>
+        <a href="/" class="nav-brand"><img src="/logo.png" alt="T3nets" style="height:28px;display:block;"> <span class="nav-badge platform" id="platform-badge">...</span><span class="nav-badge stage" id="stage-badge">...</span></a><span class="nav-tenant-name" id="nav-tenant-name" style="display:none;"></span>
         <div class="nav-links">
             <a href="/chat">Chat</a>
             <a href="/health" class="active">Health</a>

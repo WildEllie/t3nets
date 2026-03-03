@@ -14,7 +14,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+" /></a>
-  <a href="docs/aws-infrastructure.md"><img src="https://img.shields.io/badge/cloud-AWS-FF9900.svg?logo=amazonaws&logoColor=white" alt="AWS" /></a>
+  <a href="docs/aws-infrastructure.md"><img src="https://img.shields.io/badge/cloud-AWS%20%7C%20GCP%20%7C%20Azure-FF9900.svg?logo=amazonaws&logoColor=white" alt="Multi-cloud" /></a>
 </p>
 
 ---
@@ -52,10 +52,6 @@ You (Dashboard / Teams / Telegram) → T3nets → Claude AI → Your Tools → A
 
 ## Architecture
 
-<p align="center">
-  <img src="docs/architecture-diagram.svg" alt="T3nets Architecture" width="900" />
-</p>
-
 ### Three-Tier Hybrid Routing
 
 The routing engine is the core differentiator. Every inbound message cascades through three cost tiers:
@@ -64,7 +60,7 @@ The routing engine is the core differentiator. Every inbound message cascades th
 |------|--------|------|---------|---------|
 | **1** | Regex pattern matching | **$0** | <1ms | "hi", "thanks", "help" |
 | **2** | Rule-matched skill trigger | **~$0.01** | 1 API call | "sprint status", "create a ticket" |
-| **3** | Full Claude AI with tools | **~$0.02-0.05** | 2 API calls | "summarize what changed this week and flag risks" |
+| **3** | Full Claude AI with tools | **~$0.02-0.05** | 2 API calls | "summarise what changed this week and flag risks" |
 
 Most team traffic hits Tier 1 and 2. Claude only fires when it's genuinely needed.
 
@@ -93,7 +89,7 @@ docker compose up
 
 ---
 
-## Deploy on AWS
+## Deploy to the Cloud
 
 Production-grade Terraform infrastructure: VPC, ECS Fargate, API Gateway, DynamoDB, Bedrock, Secrets Manager.
 
@@ -105,6 +101,8 @@ terraform init && terraform apply -var-file=environments/dev.tfvars
 ./scripts/seed.sh
 ./scripts/deploy.sh
 ```
+
+AWS is the reference implementation. GCP and Azure adapters are in progress — see [adapters/gcp/](adapters/gcp/) and [adapters/azure/](adapters/azure/).
 
 See [AWS Infrastructure Guide](docs/aws-infrastructure.md) for full deployment details.
 
@@ -159,7 +157,9 @@ t3nets/
 │   └── models/               # Shared data models
 ├── adapters/                 # Cloud-specific implementations
 │   ├── local/                # Anthropic API, SQLite, .env, dev server + UI
-│   └── aws/                  # Bedrock, DynamoDB, Secrets Manager, ECS server
+│   ├── aws/                  # Bedrock, DynamoDB, Secrets Manager, ECS server
+│   ├── gcp/                  # GCP (in progress)
+│   └── azure/                # Azure (in progress)
 ├── infra/aws/                # Terraform modules
 ├── scripts/                  # Deploy & seed scripts
 └── docs/                     # Architecture docs, decision log, roadmap
@@ -181,12 +181,11 @@ t3nets/
 | 4 | Done | Invitation flow — link-based invites, join page, team management |
 | 4.5 | Done | Session management — silent refresh, idle expiry, role-based access |
 | 4.6 | Done | Platform admin — tenant lifecycle (create, suspend, delete) |
-| 5 | Planned | AI-Generated Rule Engine — AI creates per-tenant regex from skill metadata |
-| 6 | Planned | Expand skills — GitHub Issues, Google Calendar, Email triage |
-| 7 | Planned | Email delivery — SES invitations, tenant branding |
-| 8 | Planned | Practices — team experience bundles (skills + pages as uploadable ZIPs) |
-| 9 | Planned | Dashboard & UX — SPA, dark mode, mobile responsive |
-| 10 | Planned | Long-term memory, more channels, public release |
+| 5 | Planned | Expand skills — GitHub Issues, Google Calendar, Email triage |
+| 6 | Planned | Email delivery — SES invitations, tenant branding |
+| 7 | Planned | Practices — team experience bundles (skills + pages as uploadable ZIPs) |
+| 8 | Planned | Dashboard & UX — SPA, dark mode, mobile responsive |
+| 9 | Planned | Long-term memory, more channels, public release |
 
 Full roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 
@@ -213,3 +212,50 @@ Contributions welcome. Open an issue to discuss what you'd like to change, or su
 ## License
 
 [MIT](LICENSE)
+
+---
+
+## The Meaning Behind t3nets
+
+**t3nets = Trusted, Tooling, Tenant Networks**
+
+At its core, t3nets represents the convergence of three foundational layers:
+
+### 1. Tenant
+
+Multi-tenant by design. t3nets is built to serve multiple teams within an organisation, multiple organisations within a SaaS environment, and isolated environments — local, containerised, or cloud. Tenancy isn't an afterthought; it's a first-class architectural principle.
+
+### 2. Tools
+
+A platform to manage, orchestrate, and govern tools, skills, capabilities, and AI-augmented workflows. t3nets becomes the control plane for organisational intelligence.
+
+### 3. Trust
+
+Open source. Deploy anywhere. Cloud-agnostic. Infrastructure as Code.
+
+Trust comes from transparency (OSS), portability (local → container → AWS/GCP/Azure), infrastructure ownership (no lock-in), and reproducibility. When AI is orchestrating skills and tools across tenants, trust isn't optional.
+
+---
+
+### Why "Networks"?
+
+t3nets is a mesh of networked, connected intelligence:
+
+- Networks of tenants
+- Networks of tools
+- Networks of AI-driven skills
+- Networks of environments
+- Networks across clouds
+
+Not just a platform — an orchestrated mesh of capabilities.
+
+### Why the "3"?
+
+The "3" signals structured architecture and intentional depth:
+
+- 3 layers — Tenant / Tooling / Trust
+- 3 deployment modes — Local / Container / Cloud
+- 3 major cloud targets — AWS / GCP / Azure
+- 3 operational domains — People / Tools / AI
+
+Not just a name — a system philosophy.

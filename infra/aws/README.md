@@ -6,7 +6,7 @@
 2. **Terraform** >= 1.5 installed
 3. **Docker** running
 4. **Bedrock model access** — request access to Claude in the AWS console:
-   - Go to Amazon Bedrock → Model access → Request access to Anthropic Claude models
+  - Go to Amazon Bedrock → Model access → Request access to Anthropic Claude models
 
 ## First-Time Setup
 
@@ -106,8 +106,9 @@ Internet
 
 ## Cost Breakdown (dev)
 
-| Resource         | ~Monthly Cost |
-|-----------------|---------------|
+
+| Resource        | ~Monthly Cost |
+| --------------- | ------------- |
 | NAT Gateway     | $32           |
 | ECS Fargate     | $5-10         |
 | DynamoDB        | $0-2          |
@@ -117,8 +118,10 @@ Internet
 | CloudWatch      | $0-1          |
 | **Total**       | **~$35-50**   |
 
+
 ## Cost Optimization Tips
 
 - **NAT Gateway** is the biggest cost. For non-production, you could use a NAT instance instead (~$4/month).
 - DynamoDB PAY_PER_REQUEST keeps costs near zero for low traffic.
 - Fargate 0.25 vCPU / 512MB is the minimum — sufficient for development.
+
