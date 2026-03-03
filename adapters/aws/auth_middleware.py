@@ -58,7 +58,7 @@ def extract_auth(headers: Any) -> AuthContext:
     Raises:
         AuthError: If no valid auth is present.
     """
-    auth_header = headers.get("Authorization", "")
+    auth_header = headers.get("Authorization") or headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         raise AuthError("Missing or invalid Authorization header")
 

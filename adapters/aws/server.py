@@ -175,7 +175,7 @@ def _resolve_model(tenant: Any) -> tuple[str, str]:
     return BEDROCK_MODEL_ID, model.short_name
 
 
-def _get_auth_info(request: Request) -> tuple[str, str]:
+async def _get_auth_info(request: Request) -> tuple[str, str]:
     """Extract (tenant_id, user_email) from JWT in Authorization header."""
     if not COGNITO_USER_POOL_ID:
         return DEFAULT_TENANT, ""
@@ -183,9 +183,7 @@ def _get_auth_info(request: Request) -> tuple[str, str]:
         auth = extract_auth(request.headers)
         email = auth.email
         try:
-            user = asyncio.get_event_loop().run_until_complete(
-                tenants.get_user_by_cognito_sub(auth.user_id)
-            )
+            user = await tenants.get_user_by_cognito_sub(auth.user_id)
             if user:
                 logger.info(
                     f"Resolved tenant '{user.tenant_id}' from DynamoDB "
@@ -207,10 +205,10 @@ def _file_response(filename: str, search_dir: str | None = None) -> Response:
     return Response(status_code=404, content=f"{filename} not found")
 
 
-def _extract_user_key(request: Request) -> str:
-    """Extract user identity from JWT query param or Authorization header."""
+def _extract_user_key(request: Request, body_token: str = "") -> str:
+    """Extract user identity from JWT query param, Authorization header, or body token."""
     user_key = DEFAULT_TENANT
-    token = request.query_params.get("token")
+    token = request.query_params.get("token") or body_token
     if not token:
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
@@ -263,7 +261,14 @@ async def _dispatch_ws_event(request: Request, ws_route: str) -> Response:
 async def _handle_ws_connect(request: Request, connection_id: str) -> Response:
     if not connection_id or not ws_manager:
         return JSONResponse({"error": "WebSocket not configured"}, status_code=400)
-    user_key = _extract_user_key(request)
+    # WS Lambda proxy forwards the token in the POST body: {"token": "..."}
+    body_token = ""
+    try:
+        body = await request.json()
+        body_token = body.get("token", "")
+    except Exception:
+        pass
+    user_key = _extract_user_key(request, body_token)
     ws_manager.register(user_key, connection_id)
     logger.info(f"WS $connect: {connection_id[:12]} user={user_key}")
     return JSONResponse({"status": "connected"})
@@ -707,7 +712,7 @@ async def handle_auth_confirm_reset(request: Request) -> Response:
 
 async def handle_settings_get(request: Request) -> Response:
     try:
-        tenant_id, _ = _get_auth_info(request)
+        tenant_id, _ = await _get_auth_info(request)
         tenant = await tenants.get_tenant(tenant_id)
         s = tenant.settings
         available_skills = [
@@ -741,7 +746,7 @@ async def handle_settings_get(request: Request) -> Response:
 
 async def handle_settings_post(request: Request) -> Response:
     try:
-        tenant_id, _ = _get_auth_info(request)
+        tenant_id, _ = await _get_auth_info(request)
         body = await request.json()
         tenant = await tenants.get_tenant(tenant_id)
         changed = False
@@ -813,7 +818,7 @@ async def handle_settings_post(request: Request) -> Response:
 
 async def handle_history(request: Request) -> Response:
     try:
-        tenant_id, _ = _get_auth_info(request)
+        tenant_id, _ = await _get_auth_info(request)
         history = await memory.get_conversation(tenant_id, "dashboard-default")
         return JSONResponse({"messages": history, "platform": PLATFORM, "stage": STAGE})
     except Exception as e:
@@ -826,7 +831,7 @@ async def handle_history(request: Request) -> Response:
 
 async def handle_integrations_list(request: Request) -> Response:
     try:
-        tenant_id, _ = _get_auth_info(request)
+        tenant_id, _ = await _get_auth_info(request)
         connected = await secrets.list_integrations(tenant_id)
         result = [
             {
@@ -844,7 +849,7 @@ async def handle_integrations_list(request: Request) -> Response:
 
 async def handle_integration_get(request: Request) -> Response:
     try:
-        tenant_id, _ = _get_auth_info(request)
+        tenant_id, _ = await _get_auth_info(request)
         integration_name = request.path_params["name"]
         if integration_name not in INTEGRATION_SCHEMAS:
             return JSONResponse(
@@ -879,7 +884,7 @@ async def handle_integrations_post(request: Request) -> Response:
     try:
         integration_name = request.path_params["name"]
         body = await request.json()
-        tenant_id, _ = _get_auth_info(request)
+        tenant_id, _ = await _get_auth_info(request)
         if tenant_id == DEFAULT_TENANT and body.get("tenant_id"):
             tenant_id = body["tenant_id"]
 
@@ -990,7 +995,7 @@ def _test_jira(creds: dict[str, Any]) -> dict[str, Any]:
 
 async def handle_chat(request: Request) -> Response:
     try:
-        tenant_id, user_email = _get_auth_info(request)
+        tenant_id, user_email = await _get_auth_info(request)
         body = await request.json()
         text = body.get("text", "").strip()
         if not text:
@@ -1194,7 +1199,7 @@ async def _handle_async_skill(
 
 async def handle_clear(request: Request) -> Response:
     try:
-        tenant_id, _ = _get_auth_info(request)
+        tenant_id, _ = await _get_auth_info(request)
         body = await request.json()
         cid = body.get("conversation_id", "default")
         await memory.clear_conversation(tenant_id, cid)

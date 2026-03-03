@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir pyyaml boto3
+RUN pip install --no-cache-dir pyyaml boto3 "starlette>=0.41" "uvicorn[standard]>=0.32"
 
 # Copy application code
 COPY agent/ agent/
