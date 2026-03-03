@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 3, 2026 (AI-generated rule engine plan)
+**Last Updated:** March 3, 2026 (Practices plan + AI-generated rule engine)
 
 ---
 
@@ -226,19 +226,38 @@ Replace hand-maintained regex patterns (170+ rules in `rule_router.py`) with AI-
 - [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
 
 
-### Phase 8: Practices — Skill Bundles & Customization
-- [ ] Define Practice model (name, description, list of skill IDs)
-- [ ] Bundle existing skills into default practices (e.g. "Engineering", "Project Management")
-- [ ] Per-tenant practice selection (assign a practice to a tenant)
-- [ ] Custom practices — allow tenants to create their own practice by selecting skills to add or remove
-- [ ] Practice management UI in dashboard (browse, select, customize, save)
-- [ ] Persist custom practices in DynamoDB / SQLite tenant settings
-- [ ] `POST /api/skills/upload` — accept a skill ZIP (worker.py + skill.yaml), validate, create Lambda + EventBridge rule
-- [ ] `POST /api/practices/upload` — accept a practice bundle ZIP (multiple skill ZIPs), deploy all skills
-- [ ] S3-backed skill storage for uploaded ZIPs
-- [ ] Lambda hot-reload — pull skills from S3 on cold start
+### Phase 8: Practices — Team Experience Bundles
+      ↳ 📐 Full plan: [plan-practices-team-experience-bundles.md](plan-practices-team-experience-bundles.md)
+
+Practices are complete team experience bundles: skills + custom console pages + functionality, uploadable as ZIPs. Pages interact with data through skills (same async EventBus flow as chat). One primary practice per tenant + add-on skills/pages from other practices.
+
+**Phase 8a — Core Practice Framework**
+- [ ] Practice data models (`PracticeDefinition`, `PracticePage`) and `PracticeRegistry`
+- [ ] Built-in engineering practice: move existing skills into `agent/practices/engineering/`
+- [ ] Practice manifest format (`practice.yaml`: skills, pages, integrations, system_prompt_addon)
+- [ ] `POST /api/skill/{name}` — async skill invocation for pages (returns 202, result via WebSocket/SSE)
+- [ ] `GET /api/practices/pages` — pages for tenant's dynamic nav injection
+- [ ] `GET /api/practices` — list installed practices
+- [ ] Practice page serving: `/p/{practice}/{page}` (local: FileResponse; AWS: S3 + CloudFront CDN)
+- [ ] Dynamic nav: practice page links injected after `checkAuth()` in all HTML pages
+- [ ] TenantSettings: `primary_practice`, `addon_skills`, `addon_pages`
+- [ ] Server startup: `PracticeRegistry.load_builtin()` replaces direct `SkillRegistry.load_from_directory()`
+- [ ] **Milestone:** Built-in engineering practice works with pages served at `/p/engineering/sprint`
+
+**Phase 8b — Practice Upload & Management**
+- [ ] `POST /api/practices/upload` — ZIP upload, validation (structure, safety, name uniqueness), extraction
+- [ ] Settings UI: Practices tab (select primary, upload, manage add-ons)
+- [ ] Practice persistence (DynamoDB for AWS, SQLite for local)
+- [ ] S3-backed practice storage for uploaded ZIPs (pages + skills)
 - [ ] Skill versioning and rollback
-- [ ] **Milestone:** Tenants can pick a practice or build a custom one from the skill catalog
+- [ ] **Milestone:** Admin can upload a practice ZIP and activate it for their tenant
+
+**Phase 8c — AWS Deployment**
+- [ ] `deploy.sh`: sync built-in practice pages to S3 under `p/` prefix
+- [ ] CloudFront: `/p/*` cache behavior pointing to S3 origin
+- [ ] ECS task role: S3 GetObject/PutObject for `practices/*` prefix
+- [ ] Lambda hot-reload — pull uploaded practice skills from S3 on cold start
+- [ ] **Milestone:** Practices work end-to-end on AWS
 
 ### Phase 9: Dashboard & UX
 - [x] Markdown rendering in chat responses
