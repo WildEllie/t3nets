@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 3, 2026 (CDN + ASGI migration + mypy)
+**Last Updated:** March 3, 2026 (AI-generated rule engine plan)
 
 ---
 
@@ -185,7 +185,31 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
       ↳ ✅ Completed — see [handoff notes](../handoffs/016-platform-admin-tenant-management.md)
 - [x] **Milestone:** Platform admins can create, suspend, and delete tenants from the dashboard
 
-### Phase 5: Expand Skills
+### Phase 5: AI-Generated Rule Engine
+      ↳ 📐 Full plan: [plan-ai-generated-rule-engine.md](plan-ai-generated-rule-engine.md)
+
+Replace hand-maintained regex patterns (170+ rules in `rule_router.py`) with AI-generated, per-tenant rule sets. The core idea: keep $0 regex routing for known requests, but have AI generate and maintain the rules automatically when skills are enabled/disabled.
+
+**Phase 5a — Core Rule Engine**
+- [ ] Skill trigger storage in DynamoDB (triggers, actions, action_descriptions per skill)
+- [ ] Rule Engine Builder service — AI generates optimized regex rules from skill metadata + tenant's enabled skill combination
+- [ ] Compiled Rule Engine — in-memory compiled regex matching per tenant, loaded from DynamoDB
+- [ ] Router integration — compiled engine as Tier 1 ($0, <1ms), Claude as Tier 2 with disabled-skill awareness
+- [ ] Disabled skill detection — if user requests a disabled skill, respond with "contact your admin" instead of confusion
+- [ ] Rule persistence (SQLite for local, DynamoDB for AWS)
+- [ ] Auto-regeneration — rebuild rules when tenant enables/disables skills
+- [ ] Freeform chat fallback — when no skill matches, AI responds conversationally (general knowledge, small talk)
+- [ ] Training data logging — save Tier 2 unmatched requests for future rule improvement
+- [ ] **Milestone:** Majority of skill-routable messages handled at $0 via AI-generated rules; no hand-maintained regex
+
+**Phase 5b — Admin Training Tools**
+- [ ] Training data API endpoints (list, annotate, delete unmatched examples)
+- [ ] Admin maps unmatched messages to skills from dashboard
+- [ ] Rule recalculation endpoint — admin triggers rebuild incorporating training data
+- [ ] Dashboard UI — training data viewer, skill mapping, performance metrics (hit rate, false positive rate)
+- [ ] **Milestone:** Admins can review unmatched messages and improve routing accuracy over time
+
+### Phase 6: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
       ↳ ✅ Completed — see [handoff notes](../handoffs/001-fix-release-notes-skill.md)
 - [ ] Meeting prep skill (Google Calendar / Outlook)
@@ -194,7 +218,7 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
 
-### Phase 6: Email Delivery
+### Phase 7: Email Delivery
 - [ ] SES domain verification + IAM in Terraform
 - [ ] HTML invite email template with tenant branding
 - [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
@@ -202,7 +226,7 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
 
 
-### Phase 7: Practices — Skill Bundles & Customization
+### Phase 8: Practices — Skill Bundles & Customization
 - [ ] Define Practice model (name, description, list of skill IDs)
 - [ ] Bundle existing skills into default practices (e.g. "Engineering", "Project Management")
 - [ ] Per-tenant practice selection (assign a practice to a tenant)
@@ -216,7 +240,7 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] Skill versioning and rollback
 - [ ] **Milestone:** Tenants can pick a practice or build a custom one from the skill catalog
 
-### Phase 8: Dashboard & UX
+### Phase 9: Dashboard & UX
 - [x] Markdown rendering in chat responses
 - [x] S3 + CloudFront CDN module: private bucket (OAC), path-based routing (`/api/*` → API GW, `/*` → S3), 5-min TTL
       ↳ ✅ Completed — `infra/aws/modules/cdn/`
@@ -228,7 +252,7 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 - [ ] Conversation history browser
 - [ ] Skill configuration UI
 
-### Phase 9: Long-Term Memory & Polish
+### Phase 10: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
 - [ ] Additional channels (Slack, WhatsApp)
 - [ ] OSS contributor guides
