@@ -42,8 +42,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from adapters.local.anthropic_provider import AnthropicProvider
 from adapters.local.direct_bus import DirectBus
 from adapters.local.env_secrets import EnvSecretsProvider
+from adapters.local.sqlite_rule_store import SQLiteRuleStore
 from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
+from adapters.local.sqlite_training_store import SQLiteTrainingStore
 from adapters.shared.server_utils import (
     INTEGRATION_SCHEMAS,
     _format_raw_json,
@@ -63,7 +65,9 @@ from agent.models.ai_models import (
 )
 from agent.models.message import ChannelType
 from agent.models.tenant import Invitation
-from agent.router.rule_router import RuleBasedRouter, strip_raw_flag
+from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
+from agent.router.models import TrainingExample
+from agent.router.rule_engine_builder import RuleEngineBuilder
 from agent.skills.registry import SkillRegistry
 from agent.sse import SSEConnectionManager
 
@@ -80,9 +84,13 @@ tenants: SQLiteTenantStore
 secrets: EnvSecretsProvider
 skills: SkillRegistry
 bus: DirectBus
-rule_router: RuleBasedRouter
+rule_store: SQLiteRuleStore
+training_store: SQLiteTrainingStore
 error_handler: ErrorHandler
 started_at: float = 0.0
+
+# Per-tenant compiled rule engines (keyed by tenant_id)
+_compiled_engines: dict[str, CompiledRuleEngine] = {}
 
 DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
@@ -153,6 +161,7 @@ def _extract_user_key(request: Request) -> str:
 # SSE bridge
 # ---------------------------------------------------------------------------
 
+
 class _QueueBridge:
     """File-like object that forwards write() calls into an asyncio.Queue."""
 
@@ -173,6 +182,7 @@ class _QueueBridge:
 # ---------------------------------------------------------------------------
 # Static page routes
 # ---------------------------------------------------------------------------
+
 
 async def homepage(request: Request) -> Response:
     return _file_response("chat.html", "adapters/local")
@@ -205,6 +215,7 @@ async def serve_logo(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # SSE endpoint
 # ---------------------------------------------------------------------------
+
 
 async def sse_endpoint(request: Request) -> StreamingResponse:
     """Server-Sent Events push channel."""
@@ -241,6 +252,7 @@ async def sse_endpoint(request: Request) -> StreamingResponse:
 # Health / status
 # ---------------------------------------------------------------------------
 
+
 async def handle_health_api(request: Request) -> Response:
     """Rich health/status JSON endpoint."""
     try:
@@ -258,13 +270,15 @@ async def handle_health_api(request: Request) -> Response:
 
         skills_info = []
         for skill in skills.list_skills():
-            skills_info.append({
-                "name": skill.name,
-                "description": skill.description.strip()[:120],
-                "requires_integration": skill.requires_integration,
-                "supports_raw": skill.supports_raw,
-                "triggers": skill.triggers[:8],
-            })
+            skills_info.append(
+                {
+                    "name": skill.name,
+                    "description": skill.description.strip()[:120],
+                    "requires_integration": skill.requires_integration,
+                    "supports_raw": skill.supports_raw,
+                    "triggers": skill.triggers[:8],
+                }
+            )
 
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
         if len(api_key) > 12:
@@ -317,31 +331,37 @@ async def handle_health_api(request: Request) -> Response:
 # Auth stubs (local dev — always unauthenticated)
 # ---------------------------------------------------------------------------
 
+
 async def handle_auth_config(request: Request) -> Response:
-    return JSONResponse({
-        "enabled": False,
-        "client_id": "",
-        "auth_domain": "",
-        "user_pool_id": "",
-    })
+    return JSONResponse(
+        {
+            "enabled": False,
+            "client_id": "",
+            "auth_domain": "",
+            "user_pool_id": "",
+        }
+    )
 
 
 async def handle_auth_me(request: Request) -> Response:
     tenant = await tenants.get_tenant(DEFAULT_TENANT)
-    return JSONResponse({
-        "authenticated": True,
-        "user_id": "local-admin",
-        "tenant_id": DEFAULT_TENANT,
-        "email": "admin@local.dev",
-        "role": "admin",
-        "tenant_status": tenant.status,
-        "tenant_name": tenant.name,
-    })
+    return JSONResponse(
+        {
+            "authenticated": True,
+            "user_id": "local-admin",
+            "tenant_id": DEFAULT_TENANT,
+            "email": "admin@local.dev",
+            "role": "admin",
+            "tenant_status": tenant.status,
+            "tenant_name": tenant.name,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
+
 
 async def handle_settings_get(request: Request) -> Response:
     """Return current settings and available models."""
@@ -357,22 +377,24 @@ async def handle_settings_get(request: Request) -> Response:
             for sk in skills.list_skills()
         ]
         connected_integrations = await secrets.list_integrations(DEFAULT_TENANT)
-        return JSONResponse({
-            "ai_model": s.ai_model or DEFAULT_MODEL_ID,
-            "provider": PROVIDER,
-            "models": get_models_for_provider(PROVIDER),
-            "platform": os.getenv("T3NETS_PLATFORM", "local"),
-            "stage": os.getenv("T3NETS_STAGE", "dev"),
-            "build": BUILD_NUMBER,
-            "enabled_skills": s.enabled_skills,
-            "available_skills": available_skills,
-            "connected_integrations": connected_integrations,
-            "enabled_channels": s.enabled_channels,
-            "system_prompt_override": s.system_prompt_override,
-            "max_tokens_per_message": s.max_tokens_per_message,
-            "messages_per_day": s.messages_per_day,
-            "max_conversation_history": s.max_conversation_history,
-        })
+        return JSONResponse(
+            {
+                "ai_model": s.ai_model or DEFAULT_MODEL_ID,
+                "provider": PROVIDER,
+                "models": get_models_for_provider(PROVIDER),
+                "platform": os.getenv("T3NETS_PLATFORM", "local"),
+                "stage": os.getenv("T3NETS_STAGE", "dev"),
+                "build": BUILD_NUMBER,
+                "enabled_skills": s.enabled_skills,
+                "available_skills": available_skills,
+                "connected_integrations": connected_integrations,
+                "enabled_channels": s.enabled_channels,
+                "system_prompt_override": s.system_prompt_override,
+                "max_tokens_per_message": s.max_tokens_per_message,
+                "messages_per_day": s.messages_per_day,
+                "max_conversation_history": s.max_conversation_history,
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -383,6 +405,7 @@ async def handle_settings_post(request: Request) -> Response:
         body = await request.json()
         tenant = await tenants.get_tenant(DEFAULT_TENANT)
         changed = False
+        rebuild_skills = False
 
         if "ai_model" in body:
             model_id = body["ai_model"]
@@ -410,6 +433,7 @@ async def handle_settings_post(request: Request) -> Response:
             tenant.settings.enabled_skills = skill_list
             changed = True
             logger.info(f"Enabled skills updated: {skill_list}")
+            rebuild_skills = True
 
         if "system_prompt_override" in body:
             tenant.settings.system_prompt_override = body["system_prompt_override"]
@@ -444,6 +468,8 @@ async def handle_settings_post(request: Request) -> Response:
 
         if changed:
             await tenants.update_tenant(tenant)
+        if rebuild_skills:
+            asyncio.create_task(_rebuild_rules(DEFAULT_TENANT))
         return JSONResponse({"ok": True})
 
     except Exception as e:
@@ -454,11 +480,13 @@ async def handle_history(request: Request) -> Response:
     """Return conversation history for the default conversation."""
     try:
         history = await memory.get_conversation(DEFAULT_TENANT, DEFAULT_CONVERSATION)
-        return JSONResponse({
-            "messages": history,
-            "platform": os.getenv("T3NETS_PLATFORM", "local"),
-            "stage": os.getenv("T3NETS_STAGE", "dev"),
-        })
+        return JSONResponse(
+            {
+                "messages": history,
+                "platform": os.getenv("T3NETS_PLATFORM", "local"),
+                "stage": os.getenv("T3NETS_STAGE", "dev"),
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -467,18 +495,21 @@ async def handle_history(request: Request) -> Response:
 # Integrations
 # ---------------------------------------------------------------------------
 
+
 async def handle_integrations_list(request: Request) -> Response:
     """GET /api/integrations — list all integrations with status and field schemas."""
     try:
         connected = await secrets.list_integrations(DEFAULT_TENANT)
         result = []
         for name, schema in INTEGRATION_SCHEMAS.items():
-            result.append({
-                "name": name,
-                "label": schema["label"],
-                "connected": name in connected,
-                "fields": schema["fields"],
-            })
+            result.append(
+                {
+                    "name": name,
+                    "label": schema["label"],
+                    "connected": name in connected,
+                    "fields": schema["fields"],
+                }
+            )
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -506,13 +537,15 @@ async def handle_integration_get(request: Request) -> Response:
                     config[key] = value
         except Exception:
             pass
-        return JSONResponse({
-            "name": integration_name,
-            "label": schema["label"],
-            "connected": connected,
-            "config": config,
-            "fields": schema["fields"],
-        })
+        return JSONResponse(
+            {
+                "name": integration_name,
+                "label": schema["label"],
+                "connected": connected,
+                "config": config,
+                "fields": schema["fields"],
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -616,8 +649,80 @@ def _test_jira(creds: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Rule engine helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_engine(tenant_id: str) -> CompiledRuleEngine | None:
+    """Return the compiled rule engine for a tenant, or None if not yet built."""
+    return _compiled_engines.get(tenant_id)
+
+
+async def _rebuild_rules(tenant_id: str) -> None:
+    """(Re)build AI-generated routing rules for a tenant and cache the engine."""
+    try:
+        tenant = await tenants.get_tenant(tenant_id)
+        all_skills = skills.list_skills()
+        enabled = [s for s in all_skills if s.name in tenant.settings.enabled_skills]
+        disabled = [s for s in all_skills if s.name not in tenant.settings.enabled_skills]
+
+        # Increment version from the last saved rule set
+        existing = await rule_store.load_rule_set(tenant_id)
+        old_version = existing.version if existing else 0
+
+        # Include recent training data to improve patterns
+        training_data = await training_store.list_examples(tenant_id, limit=50)
+
+        api_model, _ = _resolve_model(tenant)
+        builder = RuleEngineBuilder()
+        rule_set = await builder.build_rules(
+            tenant_id=tenant_id,
+            enabled_skills=enabled,
+            disabled_skills=disabled,
+            ai=ai,
+            model=api_model,
+            training_data=training_data or None,
+        )
+        rule_set.version = old_version + 1
+
+        await rule_store.save_rule_set(rule_set)
+        _compiled_engines[tenant_id] = CompiledRuleEngine(rule_set, skills)
+        logger.info(f"Rules rebuilt for tenant '{tenant_id}' (v{rule_set.version})")
+    except Exception:
+        logger.exception(f"Failed to rebuild rules for tenant '{tenant_id}'")
+
+
+async def _log_training(
+    tenant_id: str,
+    message_text: str,
+    matched_skill: str | None,
+    matched_action: str | None,
+    was_disabled_skill: bool = False,
+) -> None:
+    """Fire-and-forget: log a Tier 2 routing decision as training data."""
+    import uuid as _uuid
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    try:
+        example = TrainingExample(
+            tenant_id=tenant_id,
+            example_id=_uuid.uuid4().hex,
+            message_text=message_text,
+            timestamp=_dt.now(_tz.utc).isoformat(),
+            matched_skill=matched_skill,
+            matched_action=matched_action,
+            was_disabled_skill=was_disabled_skill,
+        )
+        await training_store.log_example(example)
+    except Exception:
+        logger.exception("Failed to log training example")
+
+
+# ---------------------------------------------------------------------------
 # Chat & clear
 # ---------------------------------------------------------------------------
+
 
 async def handle_chat(request: Request) -> Response:
     """Handle a chat message with hybrid routing."""
@@ -656,25 +761,23 @@ Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 When you have data to present, format it clearly with structure."""
 
         # === TIER 0: Conversational ===
-        if not is_raw and rule_router.is_conversational(clean_text):
+        if not is_raw and is_conversational(clean_text):
             logger.info("Route: CONVERSATIONAL (no tools)")
             stats["conversational"] += 1
             messages = history + [{"role": "user", "content": clean_text}]
-            response = await ai.chat(
-                model=active_model, system=system, messages=messages, tools=[]
-            )
+            response = await ai.chat(model=active_model, system=system, messages=messages, tools=[])
             assistant_text = response.text or "Hey! How can I help?"
             total_tokens = response.input_tokens + response.output_tokens
             route_type = "conversational"
 
         else:
-            # === TIER 1: Rule-based routing ===
-            match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+            # === TIER 1: Compiled rule engine ===
+            engine = _get_engine(DEFAULT_TENANT)
+            match = engine.match(clean_text, tenant.settings.enabled_skills) if engine else None
 
             if match:
                 logger.info(
-                    f"Route: RULE-BASED → {match.skill_name}.{match.action} "
-                    f"(confidence={match.confidence:.2f})"
+                    f"Route: RULE-BASED → {match.skill_name}.{match.action}"
                     + (" [RAW]" if is_raw else "")
                 )
                 request_id = f"rule-{conversation_id}"
@@ -691,7 +794,7 @@ When you have data to present, format it clearly with structure."""
                 if not skill_result:
                     skill_result = {"error": "Skill returned no result"}
 
-                if is_raw and rule_router.supports_raw(match.skill_name):
+                if is_raw and engine and engine.supports_raw(match.skill_name):
                     logger.info(f"Returning raw output for {match.skill_name}")
                     stats["raw"] += 1
                     stats["rule_routed"] += 1
@@ -700,7 +803,7 @@ When you have data to present, format it clearly with structure."""
                     route_type = "rule"
                     is_raw_response = True
                 else:
-                    if is_raw and not rule_router.supports_raw(match.skill_name):
+                    if is_raw:
                         logger.info(
                             f"Skill '{match.skill_name}' does not support --raw, "
                             f"falling back to Claude formatting"
@@ -724,7 +827,21 @@ Include risk assessment and actionable suggestions where relevant."""
                     total_tokens = response.input_tokens + response.output_tokens
                     route_type = "rule"
 
-            # === TIER 2: Full Claude routing ===
+            # Check for disabled skill before falling through to Claude
+            elif engine and (disabled_skill := engine.check_disabled_skill(clean_text)):
+                skill_display = disabled_skill.replace("_", " ")
+                logger.info(f"Route: DISABLED SKILL → {disabled_skill}")
+                assistant_text = (
+                    f"The {skill_display} feature isn't enabled for your workspace. "
+                    f"Contact your admin to enable it."
+                )
+                total_tokens = 0
+                route_type = "disabled_skill"
+                asyncio.create_task(
+                    _log_training(DEFAULT_TENANT, clean_text, None, None, was_disabled_skill=True)
+                )
+
+            # === TIER 2: Full Claude routing (freeform chat + skill selection) ===
             else:
                 if is_raw:
                     logger.info("--raw flag ignored: no rule match, using AI routing")
@@ -754,7 +871,16 @@ Include risk assessment and actionable suggestions where relevant."""
                     if not skill_result:
                         skill_result = {"error": "Skill returned no result"}
 
-                    if is_raw and rule_router.supports_raw(tool_call.tool_name):
+                    asyncio.create_task(
+                        _log_training(
+                            DEFAULT_TENANT,
+                            clean_text,
+                            tool_call.tool_name,
+                            tool_call.tool_params.get("action"),
+                        )
+                    )
+
+                    if is_raw and engine and engine.supports_raw(tool_call.tool_name):
                         logger.info(f"Returning raw output for {tool_call.tool_name} (AI-routed)")
                         stats["raw"] += 1
                         assistant_text = _format_raw_json(skill_result)
@@ -794,6 +920,8 @@ Include risk assessment and actionable suggestions where relevant."""
                         )
                         route_type = "ai"
                 else:
+                    # Freeform chat response — no skill matched
+                    asyncio.create_task(_log_training(DEFAULT_TENANT, clean_text, None, None))
                     assistant_text = response.text or "I'm not sure how to help with that."
                     total_tokens = response.input_tokens + response.output_tokens
                     route_type = "ai"
@@ -809,19 +937,24 @@ Include risk assessment and actionable suggestions where relevant."""
             chat_metadata["user_email"] = user_email
         if not is_raw_response:
             await memory.save_turn(
-                DEFAULT_TENANT, conversation_id, clean_text, assistant_text,
+                DEFAULT_TENANT,
+                conversation_id,
+                clean_text,
+                assistant_text,
                 metadata=chat_metadata,
             )
 
-        return JSONResponse({
-            "text": assistant_text,
-            "conversation_id": conversation_id,
-            "tokens": total_tokens,
-            "route": route_type,
-            "raw": is_raw_response,
-            "model": model_short_name,
-            "user_email": user_email,
-        })
+        return JSONResponse(
+            {
+                "text": assistant_text,
+                "conversation_id": conversation_id,
+                "tokens": total_tokens,
+                "route": route_type,
+                "raw": is_raw_response,
+                "model": model_short_name,
+                "user_email": user_email,
+            }
+        )
 
     except Exception as e:
         logger.exception("Chat error")
@@ -845,6 +978,7 @@ async def handle_clear(request: Request) -> Response:
 # Invitations
 # ---------------------------------------------------------------------------
 
+
 async def handle_invitation_validate(request: Request) -> Response:
     """Public: validate an invite code, return tenant name + email."""
     try:
@@ -859,13 +993,15 @@ async def handle_invitation_validate(request: Request) -> Response:
             tenant_name = tenant.name
         except Exception:
             tenant_name = invitation.tenant_id
-        return JSONResponse({
-            "valid": True,
-            "tenant_name": tenant_name,
-            "tenant_id": invitation.tenant_id,
-            "email": invitation.email,
-            "role": invitation.role,
-        })
+        return JSONResponse(
+            {
+                "valid": True,
+                "tenant_name": tenant_name,
+                "tenant_id": invitation.tenant_id,
+                "email": invitation.email,
+                "role": invitation.role,
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -894,13 +1030,16 @@ async def handle_invitation_accept(request: Request) -> Response:
             invitation.status = "accepted"
             invitation.accepted_at = datetime.now(timezone.utc).isoformat()
             await tenants.update_invitation(invitation)
-            return JSONResponse({
-                "accepted": True,
-                "tenant_id": invitation.tenant_id,
-                "already_member": True,
-            })
+            return JSONResponse(
+                {
+                    "accepted": True,
+                    "tenant_id": invitation.tenant_id,
+                    "already_member": True,
+                }
+            )
 
         from agent.models.tenant import TenantUser
+
         user_id = cognito_sub or f"user-{invitation.email.split('@')[0]}"
         user = TenantUser(
             user_id=user_id,
@@ -916,12 +1055,14 @@ async def handle_invitation_accept(request: Request) -> Response:
         invitation.accepted_at = datetime.now(timezone.utc).isoformat()
         await tenants.update_invitation(invitation)
 
-        return JSONResponse({
-            "accepted": True,
-            "tenant_id": invitation.tenant_id,
-            "user_id": user_id,
-            "role": invitation.role,
-        })
+        return JSONResponse(
+            {
+                "accepted": True,
+                "tenant_id": invitation.tenant_id,
+                "user_id": user_id,
+                "role": invitation.role,
+            }
+        )
     except Exception as e:
         logger.exception("Invitation accept error")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -930,6 +1071,7 @@ async def handle_invitation_accept(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # Admin tenant management (local dev — no auth required)
 # ---------------------------------------------------------------------------
+
 
 async def handle_create_tenant(request: Request) -> Response:
     """POST /api/admin/tenants — create a tenant."""
@@ -941,6 +1083,7 @@ async def handle_create_tenant(request: Request) -> Response:
             return JSONResponse({"error": "tenant_id and name are required"}, status_code=400)
 
         from agent.models.tenant import Tenant, TenantSettings, TenantUser
+
         now = datetime.now(timezone.utc).isoformat()
         status = body.get("status", "active")
         tenant = Tenant(
@@ -1014,39 +1157,43 @@ async def _admin_list_invitations(path: str) -> Response:
     parts = path.rstrip("/").split("/")
     tenant_id = parts[4]
     invitations = await tenants.list_invitations(tenant_id)
-    return JSONResponse({
-        "invitations": [
-            {
-                "invite_code": inv.invite_code,
-                "email": inv.email,
-                "role": inv.role,
-                "status": inv.status,
-                "created_at": inv.created_at,
-                "expires_at": inv.expires_at,
-            }
-            for inv in invitations
-        ],
-        "count": len(invitations),
-    })
+    return JSONResponse(
+        {
+            "invitations": [
+                {
+                    "invite_code": inv.invite_code,
+                    "email": inv.email,
+                    "role": inv.role,
+                    "status": inv.status,
+                    "created_at": inv.created_at,
+                    "expires_at": inv.expires_at,
+                }
+                for inv in invitations
+            ],
+            "count": len(invitations),
+        }
+    )
 
 
 async def _admin_list_users(path: str) -> Response:
     parts = path.rstrip("/").split("/")
     tenant_id = parts[4]
     users = await tenants.list_users(tenant_id)
-    return JSONResponse({
-        "users": [
-            {
-                "user_id": u.user_id,
-                "email": u.email,
-                "display_name": u.display_name,
-                "role": u.role,
-                "last_login": u.last_login,
-            }
-            for u in users
-        ],
-        "count": len(users),
-    })
+    return JSONResponse(
+        {
+            "users": [
+                {
+                    "user_id": u.user_id,
+                    "email": u.email,
+                    "display_name": u.display_name,
+                    "role": u.role,
+                    "last_login": u.last_login,
+                }
+                for u in users
+            ],
+            "count": len(users),
+        }
+    )
 
 
 async def _admin_create_invitation(request: Request, path: str, body: dict[str, Any]) -> Response:
@@ -1086,13 +1233,16 @@ async def _admin_create_invitation(request: Request, path: str, body: dict[str, 
     scheme = "http" if "localhost" in host else "https"
     invite_url = f"{scheme}://{host}/login?invite={invitation.invite_code}"
 
-    return JSONResponse({
-        "invite_code": invitation.invite_code,
-        "invite_url": invite_url,
-        "email": email,
-        "role": role,
-        "expires_at": invitation.expires_at,
-    }, status_code=201)
+    return JSONResponse(
+        {
+            "invite_code": invitation.invite_code,
+            "invite_url": invite_url,
+            "email": email,
+            "role": role,
+            "expires_at": invitation.expires_at,
+        },
+        status_code=201,
+    )
 
 
 async def _admin_update_tenant(path: str, body: dict[str, Any]) -> Response:
@@ -1132,6 +1282,7 @@ async def _admin_revoke_invitation(path: str) -> Response:
 # Platform API (local dev — no auth)
 # ---------------------------------------------------------------------------
 
+
 async def handle_platform_list_tenants(request: Request) -> Response:
     try:
         tenant_list = await tenants.list_tenants()
@@ -1142,13 +1293,15 @@ async def handle_platform_list_tenants(request: Request) -> Response:
                 user_count = len(users)
             except Exception:
                 user_count = 0
-            result.append({
-                "tenant_id": t.tenant_id,
-                "name": t.name,
-                "status": t.status,
-                "created_at": t.created_at,
-                "user_count": user_count,
-            })
+            result.append(
+                {
+                    "tenant_id": t.tenant_id,
+                    "name": t.name,
+                    "status": t.status,
+                    "created_at": t.created_at,
+                    "user_count": user_count,
+                }
+            )
         return JSONResponse({"tenants": result, "count": len(result)})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -1157,6 +1310,7 @@ async def handle_platform_list_tenants(request: Request) -> Response:
 async def handle_platform_create_tenant(request: Request) -> Response:
     try:
         import re
+
         body = await request.json()
         tenant_name = body.get("tenant_name", "").strip()
         admin_email = body.get("admin_email", "").strip().lower()
@@ -1169,6 +1323,7 @@ async def handle_platform_create_tenant(request: Request) -> Response:
             )
 
         from agent.models.tenant import Tenant, TenantSettings
+
         slug = re.sub(r"[^a-z0-9-]+", "-", tenant_name.lower()).strip("-")
         if not slug or len(slug) < 2:
             return JSONResponse(
@@ -1212,14 +1367,17 @@ async def handle_platform_create_tenant(request: Request) -> Response:
         scheme = "http" if "localhost" in host else "https"
         invite_url = f"{scheme}://{host}/login?invite={invitation.invite_code}"
 
-        return JSONResponse({
-            "tenant_id": tenant_id,
-            "tenant_name": tenant_name,
-            "invite_code": invitation.invite_code,
-            "invite_url": invite_url,
-            "admin_name": admin_name,
-            "admin_email": admin_email,
-        }, status_code=201)
+        return JSONResponse(
+            {
+                "tenant_id": tenant_id,
+                "tenant_name": tenant_name,
+                "invite_code": invitation.invite_code,
+                "invite_url": invite_url,
+                "admin_name": admin_name,
+                "admin_email": admin_email,
+            },
+            status_code=201,
+        )
     except Exception as e:
         logger.exception("Platform create tenant error")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -1236,9 +1394,7 @@ async def handle_platform_tenant_detail(request: Request) -> Response:
             parts = path.rstrip("/").split("/")
             tenant_id = parts[-1]
             if tenant_id == "default":
-                return JSONResponse(
-                    {"error": "Cannot delete the default tenant"}, status_code=400
-                )
+                return JSONResponse({"error": "Cannot delete the default tenant"}, status_code=400)
             tenant = await tenants.get_tenant(tenant_id)
             tenant.status = "deleted"
             await tenants.update_tenant(tenant)
@@ -1273,6 +1429,7 @@ async def handle_platform_tenant_detail(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # Teams webhook
 # ---------------------------------------------------------------------------
+
 
 async def handle_teams_webhook(request: Request) -> Response:
     """Handle incoming Teams webhook for local development."""
@@ -1314,7 +1471,9 @@ async def _get_teams_adapter_local() -> TeamsAdapter | None:
     return None
 
 
-async def _handle_teams_message_local(teams_adapter: TeamsAdapter, activity: dict[str, Any]) -> None:
+async def _handle_teams_message_local(
+    teams_adapter: TeamsAdapter, activity: dict[str, Any]
+) -> None:
     from agent.models.message import OutboundMessage
 
     message = teams_adapter.parse_inbound(activity)
@@ -1335,35 +1494,53 @@ You are communicating via Microsoft Teams. Keep responses clear and well-formatt
 When you have data to present, format it clearly with structure."""
     history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
 
-    if not is_raw and rule_router.is_conversational(clean_text):
+    teams_engine = _get_engine(tenant_id)
+    if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
         response = await ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
-        match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+        match = (
+            teams_engine.match(clean_text, tenant.settings.enabled_skills) if teams_engine else None
+        )
         if match:
             request_id = f"teams-rule-{conversation_id}"
             await bus.publish_skill_invocation(
-                tenant_id, match.skill_name, match.params,
-                conversation_id, request_id, "teams", message.channel_user_id,
+                tenant_id,
+                match.skill_name,
+                match.params,
+                conversation_id,
+                request_id,
+                "teams",
+                message.channel_user_id,
             )
             skill_result = bus.get_result(request_id) or {"error": "No result"}
             stats["rule_routed"] += 1
-            if is_raw and rule_router.supports_raw(match.skill_name):
+            if is_raw and teams_engine and teams_engine.supports_raw(match.skill_name):
                 stats["raw"] += 1
                 assistant_text = _format_raw_json(skill_result)
                 total_tokens = 0
             else:
                 prompt = (
                     f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                    f'Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly.'
+                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly."
                 )
                 messages = history + [{"role": "user", "content": prompt}]
                 response = await ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
+        elif teams_engine and (disabled_skill := teams_engine.check_disabled_skill(clean_text)):
+            skill_display = disabled_skill.replace("_", " ")
+            assistant_text = (
+                f"The {skill_display} feature isn't enabled for your workspace. "
+                f"Contact your admin to enable it."
+            )
+            total_tokens = 0
+            asyncio.create_task(
+                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
+            )
         else:
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
@@ -1373,10 +1550,23 @@ When you have data to present, format it clearly with structure."""
                 tc = response.tool_calls[0]
                 request_id = f"teams-ai-{conversation_id}"
                 await bus.publish_skill_invocation(
-                    tenant_id, tc.tool_name, tc.tool_params,
-                    conversation_id, request_id, "teams", message.channel_user_id,
+                    tenant_id,
+                    tc.tool_name,
+                    tc.tool_params,
+                    conversation_id,
+                    request_id,
+                    "teams",
+                    message.channel_user_id,
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
+                asyncio.create_task(
+                    _log_training(
+                        tenant_id,
+                        clean_text,
+                        tc.tool_name,
+                        tc.tool_params.get("action"),
+                    )
+                )
                 messages_with_tool = messages + [
                     {
                         "role": "assistant",
@@ -1395,16 +1585,22 @@ When you have data to present, format it clearly with structure."""
                 )
                 assistant_text = final.text or "Got data but couldn't format."
                 total_tokens = (
-                    response.input_tokens + response.output_tokens
-                    + final.input_tokens + final.output_tokens
+                    response.input_tokens
+                    + response.output_tokens
+                    + final.input_tokens
+                    + final.output_tokens
                 )
             else:
+                asyncio.create_task(_log_training(tenant_id, clean_text, None, None))
                 assistant_text = response.text or "Not sure how to help."
                 total_tokens = response.input_tokens + response.output_tokens
 
     stats["total_tokens"] += total_tokens
     await memory.save_turn(
-        tenant_id, conversation_id, clean_text, assistant_text,
+        tenant_id,
+        conversation_id,
+        clean_text,
+        assistant_text,
         metadata={"route": "teams", "model": model_short_name, "tokens": total_tokens},
     )
     outbound = OutboundMessage(
@@ -1419,6 +1615,7 @@ When you have data to present, format it clearly with structure."""
 # ---------------------------------------------------------------------------
 # Telegram webhook
 # ---------------------------------------------------------------------------
+
 
 async def handle_telegram_webhook(request: Request) -> Response:
     """Handle incoming Telegram webhook for local development."""
@@ -1478,36 +1675,52 @@ You are communicating via Telegram. Keep responses concise and well-formatted.
 Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
     history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
 
-    if not is_raw and rule_router.is_conversational(clean_text):
+    tg_engine = _get_engine(tenant_id)
+    if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
         response = await ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
-        match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+        match = tg_engine.match(clean_text, tenant.settings.enabled_skills) if tg_engine else None
         if match:
             request_id = f"tg-rule-{conversation_id}"
             await bus.publish_skill_invocation(
-                tenant_id, match.skill_name, match.params,
-                conversation_id, request_id, "telegram", message.channel_user_id,
+                tenant_id,
+                match.skill_name,
+                match.params,
+                conversation_id,
+                request_id,
+                "telegram",
+                message.channel_user_id,
             )
             skill_result = bus.get_result(request_id) or {"error": "No result"}
             stats["rule_routed"] += 1
-            if is_raw and rule_router.supports_raw(match.skill_name):
+            if is_raw and tg_engine and tg_engine.supports_raw(match.skill_name):
                 stats["raw"] += 1
                 assistant_text = _format_raw_json(skill_result)
                 total_tokens = 0
             else:
                 prompt = (
                     f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                    f'Tool data:\n{json.dumps(skill_result, indent=2)}\n\n'
-                    f'Format this clearly and concisely for Telegram.'
+                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
+                    f"Format this clearly and concisely for Telegram."
                 )
                 messages = history + [{"role": "user", "content": prompt}]
                 response = await ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
+        elif tg_engine and (disabled_skill := tg_engine.check_disabled_skill(clean_text)):
+            skill_display = disabled_skill.replace("_", " ")
+            assistant_text = (
+                f"The {skill_display} feature isn't enabled for your workspace. "
+                f"Contact your admin to enable it."
+            )
+            total_tokens = 0
+            asyncio.create_task(
+                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
+            )
         else:
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
@@ -1517,10 +1730,23 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                 tc = response.tool_calls[0]
                 request_id = f"tg-ai-{conversation_id}"
                 await bus.publish_skill_invocation(
-                    tenant_id, tc.tool_name, tc.tool_params,
-                    conversation_id, request_id, "telegram", message.channel_user_id,
+                    tenant_id,
+                    tc.tool_name,
+                    tc.tool_params,
+                    conversation_id,
+                    request_id,
+                    "telegram",
+                    message.channel_user_id,
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
+                asyncio.create_task(
+                    _log_training(
+                        tenant_id,
+                        clean_text,
+                        tc.tool_name,
+                        tc.tool_params.get("action"),
+                    )
+                )
                 messages_with_tool = messages + [
                     {
                         "role": "assistant",
@@ -1539,16 +1765,22 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                 )
                 assistant_text = final.text or "Got data but couldn't format."
                 total_tokens = (
-                    response.input_tokens + response.output_tokens
-                    + final.input_tokens + final.output_tokens
+                    response.input_tokens
+                    + response.output_tokens
+                    + final.input_tokens
+                    + final.output_tokens
                 )
             else:
+                asyncio.create_task(_log_training(tenant_id, clean_text, None, None))
                 assistant_text = response.text or "Not sure how to help."
                 total_tokens = response.input_tokens + response.output_tokens
 
     stats["total_tokens"] += total_tokens
     await memory.save_turn(
-        tenant_id, conversation_id, clean_text, assistant_text,
+        tenant_id,
+        conversation_id,
+        clean_text,
+        assistant_text,
         metadata={"route": "telegram", "model": model_short_name, "tokens": total_tokens},
     )
     outbound = OutboundMessage(
@@ -1620,9 +1852,20 @@ app = Starlette(routes=routes, middleware=middleware)
 # Initialisation & entry point
 # ---------------------------------------------------------------------------
 
+
 async def init() -> None:
     """Initialize all components."""
-    global ai, memory, tenants, secrets, skills, bus, rule_router, error_handler, started_at
+    global \
+        ai, \
+        memory, \
+        tenants, \
+        secrets, \
+        skills, \
+        bus, \
+        rule_store, \
+        training_store, \
+        error_handler, \
+        started_at
 
     started_at = time.time()
 
@@ -1646,8 +1889,9 @@ async def init() -> None:
     skills.load_from_directory(skills_dir)
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
-    # Rule-based router and error handler
-    rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
+    # Rule and training stores
+    rule_store = SQLiteRuleStore("data/t3nets.db")
+    training_store = SQLiteTrainingStore("data/t3nets.db")
     error_handler = ErrorHandler()
 
     # Direct bus
@@ -1680,6 +1924,19 @@ async def init() -> None:
 
     connected = await secrets.list_integrations("local")
     logger.info(f"Connected integrations: {connected}")
+
+    # Build compiled rule engines for all tenants (load from DB or generate via AI)
+    for t in [tenant, acme]:
+        cached = await rule_store.load_rule_set(t.tenant_id)
+        if cached:
+            _compiled_engines[t.tenant_id] = CompiledRuleEngine(cached, skills)
+            logger.info(
+                f"Loaded rule engine for '{t.tenant_id}' "
+                f"(v{cached.version}, generated {cached.generated_at[:10]})"
+            )
+        else:
+            logger.info(f"No rules cached for '{t.tenant_id}' — generating via AI...")
+            await _rebuild_rules(t.tenant_id)
 
 
 def main() -> None:

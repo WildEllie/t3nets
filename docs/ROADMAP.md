@@ -137,6 +137,17 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
       ↳ 📋 Implementation — see [handoff notes](../handoffs/014-phase-3b-implementation.md)
       ↳ 📋 WebSocket push — see [handoff notes](../handoffs/015-websocket-api-gateway.md)
 
+**Phase 3c: Developer Experience**
+- [x] Migrate both servers to uvicorn ASGI + Starlette: persistent event loop, true async concurrency — no `asyncio.run()` per request
+      ↳ ✅ `adapters/local/dev_server.py`, `adapters/aws/server.py`; `base_handler.py` deleted
+- [x] Auto-reload dev server — uvicorn `--reload` flag available now that both servers use uvicorn
+- [x] Strict mypy compliance — 0 errors across all 60 source files in `agent/` + `adapters/` (284 fixed)
+- [x] License compliance — `THIRD_PARTY_LICENSES` with BSD-3-Clause attribution for uvicorn
+- [ ] CLI tool for scaffolding new skills
+- [ ] Local development docker-compose with hot reload
+- [x] Unit test suite for router, rule engine, skills (tenant isolation, release notes, error handler)
+- [ ] Integration test harness
+
 ### Phase 4: Invitation Flow
       ↳ 📐 Full plan: [plan-invitation-signup-flow.md](plan-invitation-signup-flow.md)
 
@@ -191,16 +202,17 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 Replace hand-maintained regex patterns (170+ rules in `rule_router.py`) with AI-generated, per-tenant rule sets. The core idea: keep $0 regex routing for known requests, but have AI generate and maintain the rules automatically when skills are enabled/disabled.
 
 **Phase 5a — Core Rule Engine**
-- [ ] Skill trigger storage in DynamoDB (triggers, actions, action_descriptions per skill)
-- [ ] Rule Engine Builder service — AI generates optimized regex rules from skill metadata + tenant's enabled skill combination
-- [ ] Compiled Rule Engine — in-memory compiled regex matching per tenant, loaded from DynamoDB
-- [ ] Router integration — compiled engine as Tier 1 ($0, <1ms), Claude as Tier 2 with disabled-skill awareness
-- [ ] Disabled skill detection — if user requests a disabled skill, respond with "contact your admin" instead of confusion
-- [ ] Rule persistence (SQLite for local, DynamoDB for AWS)
-- [ ] Auto-regeneration — rebuild rules when tenant enables/disables skills
-- [ ] Freeform chat fallback — when no skill matches, AI responds conversationally (general knowledge, small talk)
-- [ ] Training data logging — save Tier 2 unmatched requests for future rule improvement
-- [ ] **Milestone:** Majority of skill-routable messages handled at $0 via AI-generated rules; no hand-maintained regex
+      ↳ ✅ Completed
+- [x] Skill trigger storage in DynamoDB (triggers, actions, action_descriptions per skill)
+- [x] Rule Engine Builder service — AI generates optimized regex rules from skill metadata + tenant's enabled skill combination
+- [x] Compiled Rule Engine — in-memory compiled regex matching per tenant, loaded from DynamoDB
+- [x] Router integration — compiled engine as Tier 1 ($0, <1ms), Claude as Tier 2 with disabled-skill awareness
+- [x] Disabled skill detection — if user requests a disabled skill, respond with "contact your admin" instead of confusion
+- [x] Rule persistence (SQLite for local, DynamoDB for AWS)
+- [x] Auto-regeneration — rebuild rules when tenant enables/disables skills
+- [x] Freeform chat fallback — when no skill matches, AI responds conversationally (general knowledge, small talk)
+- [x] Training data logging — save Tier 2 unmatched requests for future rule improvement
+- [x] **Milestone:** Majority of skill-routable messages handled at $0 via AI-generated rules; no hand-maintained regex
 
 **Phase 5b — Admin Training Tools**
 - [ ] Training data API endpoints (list, annotate, delete unmatched examples)
@@ -271,7 +283,19 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] Conversation history browser
 - [ ] Skill configuration UI
 
-### Phase 10: Long-Term Memory & Polish
+### Phase 10: Multi-cloud
+- [ ] Set up another cloud (Azure or GCP)
+- [ ] Update terraform to support deployment for another cloud
+- [ ] Deploy and test
+
+### Phase 11: Email Delivery
+- [ ] SES domain verification + IAM in Terraform
+- [ ] HTML invite email template with tenant branding
+- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
+- [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
+- [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
+
+### Phase 12: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
 - [ ] Additional channels (Slack, WhatsApp)
 - [ ] OSS contributor guides

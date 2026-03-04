@@ -41,6 +41,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from adapters.aws.admin_api import AdminAPI
 from adapters.aws.auth_middleware import AuthError, extract_auth
 from adapters.aws.bedrock_provider import BedrockProvider
+from adapters.aws.dynamo_rule_store import DynamoDBRuleStore
+from adapters.aws.dynamo_training_store import DynamoDBTrainingStore
 from adapters.aws.dynamodb_conversation_store import DynamoDBConversationStore
 from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
 from adapters.aws.event_bridge_bus import EventBridgeBus
@@ -69,7 +71,9 @@ from agent.models.ai_models import (
     get_models_for_provider,
 )
 from agent.models.message import ChannelType
-from agent.router.rule_router import RuleBasedRouter, strip_raw_flag
+from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
+from agent.router.models import TrainingExample
+from agent.router.rule_engine_builder import RuleEngineBuilder
 from agent.skills.registry import SkillRegistry
 from agent.sse import SSEConnectionManager
 
@@ -90,8 +94,12 @@ event_bus: EventBridgeBus | None = None
 pending_store: PendingRequestsStore | None = None
 sqs_poller: SQSResultPoller | None = None
 result_router: AsyncResultRouter | None = None
-rule_router: RuleBasedRouter
+rule_store: DynamoDBRuleStore
+training_store: DynamoDBTrainingStore
 admin_api: AdminAPI
+
+# Per-tenant compiled rule engines (keyed by tenant_id)
+_compiled_engines: dict[str, CompiledRuleEngine] = {}
 platform_api: PlatformAPI
 error_handler: ErrorHandler
 started_at: float = 0.0
@@ -230,6 +238,7 @@ def _extract_user_key(request: Request, body_token: str = "") -> str:
 # WebSocket middleware
 # ---------------------------------------------------------------------------
 
+
 class WebSocketEventMiddleware:
     """Intercept API Gateway WebSocket events (POST with X-WS-Route header)."""
 
@@ -286,6 +295,7 @@ async def _handle_ws_disconnect(request: Request, connection_id: str) -> Respons
 # SSE bridge
 # ---------------------------------------------------------------------------
 
+
 class _QueueBridge:
     def __init__(self, queue: asyncio.Queue[bytes], loop: asyncio.AbstractEventLoop) -> None:
         self._queue = queue
@@ -304,6 +314,7 @@ class _QueueBridge:
 # ---------------------------------------------------------------------------
 # Static pages
 # ---------------------------------------------------------------------------
+
 
 async def homepage(request: Request) -> Response:
     return _file_response("chat.html", "adapters/local")
@@ -336,6 +347,7 @@ async def platform_page(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # SSE endpoint
 # ---------------------------------------------------------------------------
+
 
 async def sse_endpoint(request: Request) -> Response:
     if sse_manager is None:
@@ -374,6 +386,7 @@ async def sse_endpoint(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+
 
 async def handle_health_api(request: Request) -> Response:
     try:
@@ -430,6 +443,7 @@ async def handle_health_api(request: Request) -> Response:
 # Auth endpoints
 # ---------------------------------------------------------------------------
 
+
 async def handle_auth_config(request: Request) -> Response:
     response: dict[str, Any] = {
         "enabled": bool(COGNITO_USER_POOL_ID),
@@ -444,11 +458,13 @@ async def handle_auth_config(request: Request) -> Response:
 
 async def handle_auth_me(request: Request) -> Response:
     if not COGNITO_USER_POOL_ID:
-        return JSONResponse({
-            "authenticated": False,
-            "tenant_id": DEFAULT_TENANT,
-            "tenant_status": "active",
-        })
+        return JSONResponse(
+            {
+                "authenticated": False,
+                "tenant_id": DEFAULT_TENANT,
+                "tenant_status": "active",
+            }
+        )
     try:
         auth = extract_auth(request.headers)
         email = auth.email
@@ -482,17 +498,19 @@ async def handle_auth_me(request: Request) -> Response:
             except Exception:
                 tenant_status = "active"
 
-        return JSONResponse({
-            "authenticated": True,
-            "user_id": auth.user_id,
-            "tenant_id": tenant_id,
-            "email": email,
-            "role": role,
-            "display_name": display_name,
-            "avatar_url": avatar_url,
-            "tenant_status": tenant_status,
-            "tenant_name": tenant_name,
-        })
+        return JSONResponse(
+            {
+                "authenticated": True,
+                "user_id": auth.user_id,
+                "tenant_id": tenant_id,
+                "email": email,
+                "role": role,
+                "display_name": display_name,
+                "avatar_url": avatar_url,
+                "tenant_status": tenant_status,
+                "tenant_name": tenant_name,
+            }
+        )
     except AuthError as e:
         return JSONResponse({"error": e.message}, status_code=e.status)
 
@@ -508,6 +526,7 @@ async def handle_auth_login(request: Request) -> Response:
             return JSONResponse({"error": "Auth not configured"}, status_code=500)
 
         import boto3  # type: ignore[import-untyped]
+
         client = boto3.client("cognito-idp", region_name=AWS_REGION)
         result = client.initiate_auth(
             ClientId=COGNITO_APP_CLIENT_ID,
@@ -522,11 +541,13 @@ async def handle_auth_login(request: Request) -> Response:
                 status_code=403,
             )
         auth_result = result.get("AuthenticationResult", {})
-        return JSONResponse({
-            "id_token": auth_result.get("IdToken", ""),
-            "access_token": auth_result.get("AccessToken", ""),
-            "refresh_token": auth_result.get("RefreshToken", ""),
-        })
+        return JSONResponse(
+            {
+                "id_token": auth_result.get("IdToken", ""),
+                "access_token": auth_result.get("AccessToken", ""),
+                "refresh_token": auth_result.get("RefreshToken", ""),
+            }
+        )
     except Exception as e:
         err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
         if err_code == "NotAuthorizedException":
@@ -559,6 +580,7 @@ async def handle_auth_signup(request: Request) -> Response:
             return JSONResponse({"error": "Auth not configured"}, status_code=500)
 
         import boto3
+
         client = boto3.client("cognito-idp", region_name=AWS_REGION)
         user_attrs = [
             {"Name": "email", "Value": email},
@@ -602,6 +624,7 @@ async def handle_auth_confirm(request: Request) -> Response:
             return JSONResponse({"error": "Auth not configured"}, status_code=500)
 
         import boto3
+
         client = boto3.client("cognito-idp", region_name=AWS_REGION)
         client.confirm_sign_up(
             ClientId=COGNITO_APP_CLIENT_ID, Username=email, ConfirmationCode=code
@@ -628,6 +651,7 @@ async def handle_auth_refresh(request: Request) -> Response:
             return JSONResponse({"error": "Auth not configured"}, status_code=500)
 
         import boto3
+
         client = boto3.client("cognito-idp", region_name=AWS_REGION)
         result = client.initiate_auth(
             ClientId=COGNITO_APP_CLIENT_ID,
@@ -635,10 +659,12 @@ async def handle_auth_refresh(request: Request) -> Response:
             AuthParameters={"REFRESH_TOKEN": refresh_token},
         )
         auth_result = result.get("AuthenticationResult", {})
-        return JSONResponse({
-            "id_token": auth_result.get("IdToken", ""),
-            "access_token": auth_result.get("AccessToken", ""),
-        })
+        return JSONResponse(
+            {
+                "id_token": auth_result.get("IdToken", ""),
+                "access_token": auth_result.get("AccessToken", ""),
+            }
+        )
     except Exception as e:
         logger.exception("Auth refresh error")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -654,6 +680,7 @@ async def handle_auth_forgot_password(request: Request) -> Response:
             return JSONResponse({"error": "Auth not configured"}, status_code=500)
 
         import boto3
+
         client = boto3.client("cognito-idp", region_name=AWS_REGION)
         client.forgot_password(ClientId=COGNITO_APP_CLIENT_ID, Username=email)
         return JSONResponse({"message": "Reset code sent"})
@@ -684,6 +711,7 @@ async def handle_auth_confirm_reset(request: Request) -> Response:
             return JSONResponse({"error": "Auth not configured"}, status_code=500)
 
         import boto3
+
         client = boto3.client("cognito-idp", region_name=AWS_REGION)
         client.confirm_forgot_password(
             ClientId=COGNITO_APP_CLIENT_ID,
@@ -710,6 +738,7 @@ async def handle_auth_confirm_reset(request: Request) -> Response:
 # Settings
 # ---------------------------------------------------------------------------
 
+
 async def handle_settings_get(request: Request) -> Response:
     try:
         tenant_id, _ = await _get_auth_info(request)
@@ -724,22 +753,24 @@ async def handle_settings_get(request: Request) -> Response:
             for sk in skills.list_skills()
         ]
         connected_integrations = await secrets.list_integrations(tenant_id)
-        return JSONResponse({
-            "ai_model": s.ai_model or DEFAULT_MODEL_ID,
-            "provider": PROVIDER,
-            "models": get_models_for_provider(PROVIDER),
-            "platform": PLATFORM,
-            "stage": STAGE,
-            "build": BUILD_NUMBER,
-            "enabled_skills": s.enabled_skills,
-            "available_skills": available_skills,
-            "connected_integrations": connected_integrations,
-            "enabled_channels": s.enabled_channels,
-            "system_prompt_override": s.system_prompt_override,
-            "max_tokens_per_message": s.max_tokens_per_message,
-            "messages_per_day": s.messages_per_day,
-            "max_conversation_history": s.max_conversation_history,
-        })
+        return JSONResponse(
+            {
+                "ai_model": s.ai_model or DEFAULT_MODEL_ID,
+                "provider": PROVIDER,
+                "models": get_models_for_provider(PROVIDER),
+                "platform": PLATFORM,
+                "stage": STAGE,
+                "build": BUILD_NUMBER,
+                "enabled_skills": s.enabled_skills,
+                "available_skills": available_skills,
+                "connected_integrations": connected_integrations,
+                "enabled_channels": s.enabled_channels,
+                "system_prompt_override": s.system_prompt_override,
+                "max_tokens_per_message": s.max_tokens_per_message,
+                "messages_per_day": s.messages_per_day,
+                "max_conversation_history": s.max_conversation_history,
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -750,6 +781,7 @@ async def handle_settings_post(request: Request) -> Response:
         body = await request.json()
         tenant = await tenants.get_tenant(tenant_id)
         changed = False
+        rebuild_skills = False
 
         if "ai_model" in body:
             model_id = body["ai_model"]
@@ -776,6 +808,7 @@ async def handle_settings_post(request: Request) -> Response:
                 )
             tenant.settings.enabled_skills = skill_list
             changed = True
+            rebuild_skills = True
             logger.info(f"Enabled skills updated: {skill_list}")
 
         if "system_prompt_override" in body:
@@ -811,6 +844,8 @@ async def handle_settings_post(request: Request) -> Response:
 
         if changed:
             await tenants.update_tenant(tenant)
+        if rebuild_skills:
+            asyncio.create_task(_rebuild_rules(tenant_id))
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -828,6 +863,7 @@ async def handle_history(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # Integrations
 # ---------------------------------------------------------------------------
+
 
 async def handle_integrations_list(request: Request) -> Response:
     try:
@@ -869,13 +905,15 @@ async def handle_integration_get(request: Request) -> Response:
                     config[key] = value
         except Exception:
             pass
-        return JSONResponse({
-            "name": integration_name,
-            "label": schema["label"],
-            "connected": connected,
-            "config": config,
-            "fields": schema["fields"],
-        })
+        return JSONResponse(
+            {
+                "name": integration_name,
+                "label": schema["label"],
+                "connected": connected,
+                "config": config,
+                "fields": schema["fields"],
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -990,8 +1028,77 @@ def _test_jira(creds: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Rule engine helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_engine(tenant_id: str) -> CompiledRuleEngine | None:
+    """Return the compiled rule engine for a tenant, or None if not yet built."""
+    return _compiled_engines.get(tenant_id)
+
+
+async def _rebuild_rules(tenant_id: str) -> None:
+    """(Re)build AI-generated routing rules for a tenant and cache the engine."""
+    try:
+        tenant = await tenants.get_tenant(tenant_id)
+        all_skills = skills.list_skills()
+        enabled = [s for s in all_skills if s.name in tenant.settings.enabled_skills]
+        disabled = [s for s in all_skills if s.name not in tenant.settings.enabled_skills]
+
+        existing = await rule_store.load_rule_set(tenant_id)
+        old_version = existing.version if existing else 0
+
+        training_data = await training_store.list_examples(tenant_id, limit=50)
+
+        builder = RuleEngineBuilder()
+        rule_set = await builder.build_rules(
+            tenant_id=tenant_id,
+            enabled_skills=enabled,
+            disabled_skills=disabled,
+            ai=ai,
+            model=BEDROCK_MODEL_ID,
+            training_data=training_data or None,
+        )
+        rule_set.version = old_version + 1
+
+        await rule_store.save_rule_set(rule_set)
+        _compiled_engines[tenant_id] = CompiledRuleEngine(rule_set, skills)
+        logger.info(f"Rules rebuilt for tenant '{tenant_id}' (v{rule_set.version})")
+    except Exception:
+        logger.exception(f"Failed to rebuild rules for tenant '{tenant_id}'")
+
+
+async def _log_training(
+    tenant_id: str,
+    message_text: str,
+    matched_skill: str | None,
+    matched_action: str | None,
+    was_disabled_skill: bool = False,
+) -> None:
+    """Fire-and-forget: log a Tier 2 routing decision as training data."""
+    import uuid as _uuid
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    try:
+        example = TrainingExample(
+            tenant_id=tenant_id,
+            example_id=_uuid.uuid4().hex,
+            message_text=message_text,
+            timestamp=_dt.now(_tz.utc).isoformat(),
+            matched_skill=matched_skill,
+            matched_action=matched_action,
+            was_disabled_skill=was_disabled_skill,
+        )
+        await training_store.log_example(example)
+    except Exception:
+        logger.exception("Failed to log training example")
+
+
+# ---------------------------------------------------------------------------
 # Chat & clear
 # ---------------------------------------------------------------------------
+
 
 async def handle_chat(request: Request) -> Response:
     try:
@@ -1016,7 +1123,8 @@ async def handle_chat(request: Request) -> Response:
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 When you have data to present, format it clearly with structure."""
 
-        if not is_raw and rule_router.is_conversational(clean_text):
+        engine = _get_engine(tenant_id)
+        if not is_raw and is_conversational(clean_text):
             stats["conversational"] += 1
             messages = history + [{"role": "user", "content": clean_text}]
             response = await ai.chat(active_model, system, messages, [])
@@ -1024,23 +1132,36 @@ When you have data to present, format it clearly with structure."""
             total_tokens = response.input_tokens + response.output_tokens
             route_type = "conversational"
         else:
-            match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+            match = engine.match(clean_text, tenant.settings.enabled_skills) if engine else None
 
             if match:
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
                     return await _handle_async_skill(
-                        tenant_id, user_email, match.skill_name, match.params,
-                        conversation_id, clean_text, is_raw, "rule", active_model, model_short_name
+                        tenant_id,
+                        user_email,
+                        match.skill_name,
+                        match.params,
+                        conversation_id,
+                        clean_text,
+                        is_raw,
+                        "rule",
+                        active_model,
+                        model_short_name,
                     )
 
                 request_id = f"rule-{conversation_id}"
                 await bus.publish_skill_invocation(
-                    tenant_id, match.skill_name, match.params,
-                    conversation_id, request_id, "dashboard", "user",
+                    tenant_id,
+                    match.skill_name,
+                    match.params,
+                    conversation_id,
+                    request_id,
+                    "dashboard",
+                    "user",
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
 
-                if is_raw and rule_router.supports_raw(match.skill_name):
+                if is_raw and engine and engine.supports_raw(match.skill_name):
                     stats["raw"] += 1
                     stats["rule_routed"] += 1
                     assistant_text = _format_raw_json(skill_result)
@@ -1058,6 +1179,18 @@ When you have data to present, format it clearly with structure."""
                     assistant_text = response.text or "Got data but couldn't format."
                     total_tokens = response.input_tokens + response.output_tokens
                     route_type = "rule"
+            elif engine and (disabled_skill := engine.check_disabled_skill(clean_text)):
+                skill_display = disabled_skill.replace("_", " ")
+                logger.info(f"Route: DISABLED SKILL → {disabled_skill}")
+                assistant_text = (
+                    f"The {skill_display} feature isn't enabled for your workspace. "
+                    f"Contact your admin to enable it."
+                )
+                total_tokens = 0
+                route_type = "disabled_skill"
+                asyncio.create_task(
+                    _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
+                )
             else:
                 stats["ai_routed"] += 1
                 tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
@@ -1069,19 +1202,39 @@ When you have data to present, format it clearly with structure."""
 
                     if USE_ASYNC_SKILLS and event_bus and pending_store:
                         return await _handle_async_skill(
-                            tenant_id, user_email, tc.tool_name, tc.tool_params,
-                            conversation_id, clean_text, is_raw, "ai",
-                            active_model, model_short_name
+                            tenant_id,
+                            user_email,
+                            tc.tool_name,
+                            tc.tool_params,
+                            conversation_id,
+                            clean_text,
+                            is_raw,
+                            "ai",
+                            active_model,
+                            model_short_name,
                         )
 
                     request_id = f"ai-{conversation_id}"
                     await bus.publish_skill_invocation(
-                        tenant_id, tc.tool_name, tc.tool_params,
-                        conversation_id, request_id, "dashboard", "user",
+                        tenant_id,
+                        tc.tool_name,
+                        tc.tool_params,
+                        conversation_id,
+                        request_id,
+                        "dashboard",
+                        "user",
                     )
                     skill_result = bus.get_result(request_id) or {"error": "No result"}
+                    asyncio.create_task(
+                        _log_training(
+                            tenant_id,
+                            clean_text,
+                            tc.tool_name,
+                            tc.tool_params.get("action"),
+                        )
+                    )
 
-                    if is_raw and rule_router.supports_raw(tc.tool_name):
+                    if is_raw and engine and engine.supports_raw(tc.tool_name):
                         stats["raw"] += 1
                         assistant_text = _format_raw_json(skill_result)
                         total_tokens = response.input_tokens + response.output_tokens
@@ -1102,13 +1255,19 @@ When you have data to present, format it clearly with structure."""
                             }
                         ]
                         final = await ai.chat_with_tool_result(
-                            active_model, system, messages_with_tool,
-                            tools, tc.tool_use_id, skill_result,
+                            active_model,
+                            system,
+                            messages_with_tool,
+                            tools,
+                            tc.tool_use_id,
+                            skill_result,
                         )
                         assistant_text = final.text or "Got data but couldn't format."
                         total_tokens = (
-                            response.input_tokens + response.output_tokens
-                            + final.input_tokens + final.output_tokens
+                            response.input_tokens
+                            + response.output_tokens
+                            + final.input_tokens
+                            + final.output_tokens
                         )
                         route_type = "ai"
                 else:
@@ -1132,15 +1291,17 @@ When you have data to present, format it clearly with structure."""
                 tenant_id, conversation_id, clean_text, assistant_text, metadata=chat_metadata
             )
 
-        return JSONResponse({
-            "text": assistant_text,
-            "conversation_id": conversation_id,
-            "tokens": total_tokens,
-            "route": route_type,
-            "raw": is_raw_response,
-            "model": model_short_name,
-            "user_email": user_email,
-        })
+        return JSONResponse(
+            {
+                "text": assistant_text,
+                "conversation_id": conversation_id,
+                "tokens": total_tokens,
+                "route": route_type,
+                "raw": is_raw_response,
+                "model": model_short_name,
+                "user_email": user_email,
+            }
+        )
 
     except Exception as e:
         logger.exception("Chat error")
@@ -1162,6 +1323,7 @@ async def _handle_async_skill(
     model_short_name: str = "",
 ) -> Response:
     import uuid
+
     request_id = f"async-{uuid.uuid4().hex[:12]}"
     user_key = user_email or "anonymous"
     pending_req = PendingRequest(
@@ -1186,15 +1348,17 @@ async def _handle_async_skill(
     logger.info(
         f"Chat: async skill '{skill_name}' dispatched, request={request_id[:8]}, user={user_key}"
     )
-    return JSONResponse({
-        "status": "processing",
-        "request_id": request_id,
-        "conversation_id": conversation_id,
-        "skill": skill_name,
-        "route": route_type,
-        "model": "",
-        "user_email": user_email,
-    })
+    return JSONResponse(
+        {
+            "status": "processing",
+            "request_id": request_id,
+            "conversation_id": conversation_id,
+            "skill": skill_name,
+            "route": route_type,
+            "model": "",
+            "user_email": user_email,
+        }
+    )
 
 
 async def handle_clear(request: Request) -> Response:
@@ -1212,6 +1376,7 @@ async def handle_clear(request: Request) -> Response:
 # Invitations
 # ---------------------------------------------------------------------------
 
+
 async def handle_invitation_validate(request: Request) -> Response:
     try:
         code = request.query_params.get("code", "")
@@ -1225,13 +1390,15 @@ async def handle_invitation_validate(request: Request) -> Response:
             tenant_name = tenant.name
         except Exception:
             tenant_name = invitation.tenant_id
-        return JSONResponse({
-            "valid": True,
-            "tenant_name": tenant_name,
-            "tenant_id": invitation.tenant_id,
-            "email": invitation.email,
-            "role": invitation.role,
-        })
+        return JSONResponse(
+            {
+                "valid": True,
+                "tenant_name": tenant_name,
+                "tenant_id": invitation.tenant_id,
+                "email": invitation.email,
+                "role": invitation.role,
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -1253,12 +1420,15 @@ async def handle_invitation_accept(request: Request) -> Response:
             invitation.status = "accepted"
             invitation.accepted_at = datetime.now(timezone.utc).isoformat()
             await tenants.update_invitation(invitation)
-            return JSONResponse({
-                "accepted": True,
-                "tenant_id": invitation.tenant_id,
-                "already_member": True,
-            })
+            return JSONResponse(
+                {
+                    "accepted": True,
+                    "tenant_id": invitation.tenant_id,
+                    "already_member": True,
+                }
+            )
         from agent.models.tenant import TenantUser
+
         user = TenantUser(
             user_id=auth.user_id,
             tenant_id=invitation.tenant_id,
@@ -1271,12 +1441,14 @@ async def handle_invitation_accept(request: Request) -> Response:
         invitation.status = "accepted"
         invitation.accepted_at = datetime.now(timezone.utc).isoformat()
         await tenants.update_invitation(invitation)
-        return JSONResponse({
-            "accepted": True,
-            "tenant_id": invitation.tenant_id,
-            "user_id": auth.user_id,
-            "role": invitation.role,
-        })
+        return JSONResponse(
+            {
+                "accepted": True,
+                "tenant_id": invitation.tenant_id,
+                "user_id": auth.user_id,
+                "role": invitation.role,
+            }
+        )
     except AuthError as e:
         return JSONResponse({"error": e.message}, status_code=e.status)
     except Exception as e:
@@ -1288,6 +1460,7 @@ async def handle_invitation_accept(request: Request) -> Response:
 # Admin and Platform API delegation (run in thread pool — they use asyncio.run internally)
 # ---------------------------------------------------------------------------
 
+
 async def handle_admin(request: Request) -> Response:
     """Delegate all /api/admin/* routes to AdminAPI (run in thread pool)."""
     method = request.method
@@ -1296,9 +1469,7 @@ async def handle_admin(request: Request) -> Response:
     if method in ("POST", "PUT", "PATCH"):
         body = await request.json()
     headers = dict(request.headers)
-    data, status = await asyncio.to_thread(
-        admin_api.handle_request, method, path, headers, body
-    )
+    data, status = await asyncio.to_thread(admin_api.handle_request, method, path, headers, body)
     return JSONResponse(data, status_code=status)
 
 
@@ -1310,15 +1481,14 @@ async def handle_platform(request: Request) -> Response:
     if method in ("POST", "PUT", "PATCH"):
         body = await request.json()
     headers = dict(request.headers)
-    data, status = await asyncio.to_thread(
-        platform_api.handle_request, method, path, headers, body
-    )
+    data, status = await asyncio.to_thread(platform_api.handle_request, method, path, headers, body)
     return JSONResponse(data, status_code=status)
 
 
 # ---------------------------------------------------------------------------
 # Teams webhook
 # ---------------------------------------------------------------------------
+
 
 async def handle_teams_webhook(request: Request) -> Response:
     try:
@@ -1335,9 +1505,7 @@ async def handle_teams_webhook(request: Request) -> Response:
             return JSONResponse({"error": "Bot not configured"}, status_code=401)
 
         auth_header = request.headers.get("authorization", "")
-        if auth_header and not teams_adapter.validate_webhook(
-            dict(request.headers), body_bytes
-        ):
+        if auth_header and not teams_adapter.validate_webhook(dict(request.headers), body_bytes):
             logger.warning("Teams webhook JWT validation failed")
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -1420,36 +1588,49 @@ You are communicating via Microsoft Teams. Keep responses clear and well-formatt
 When you have data to present, format it clearly with structure."""
     history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
 
-    if not is_raw and rule_router.is_conversational(clean_text):
+    teams_engine = _get_engine(tenant_id)
+    if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
         response = await ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
-        match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+        match = (
+            teams_engine.match(clean_text, tenant.settings.enabled_skills) if teams_engine else None
+        )
         if match:
             if USE_ASYNC_SKILLS and event_bus and pending_store:
                 service_url = teams_adapter._service_urls.get(message.conversation_id, "")
                 _handle_async_channel_skill(
-                    tenant_id=tenant_id, channel="teams",
-                    skill_name=match.skill_name, params=match.params,
+                    tenant_id=tenant_id,
+                    channel="teams",
+                    skill_name=match.skill_name,
+                    params=match.params,
                     conversation_id=conversation_id,
                     reply_target=message.conversation_id,
                     user_key=message.channel_user_id,
-                    user_message=clean_text, is_raw=is_raw, route_type="rule",
-                    model_id=active_model, model_short_name=model_short_name,
+                    user_message=clean_text,
+                    is_raw=is_raw,
+                    route_type="rule",
+                    model_id=active_model,
+                    model_short_name=model_short_name,
                     service_url=service_url,
                 )
                 return
 
             request_id = f"teams-rule-{conversation_id}"
             await bus.publish_skill_invocation(
-                tenant_id, match.skill_name, match.params,
-                conversation_id, request_id, "teams", message.channel_user_id,
+                tenant_id,
+                match.skill_name,
+                match.params,
+                conversation_id,
+                request_id,
+                "teams",
+                message.channel_user_id,
             )
             skill_result = bus.get_result(request_id) or {"error": "No result"}
-            if is_raw and rule_router.supports_raw(match.skill_name):
+            if is_raw and teams_engine and teams_engine.supports_raw(match.skill_name):
                 stats["raw"] += 1
                 stats["rule_routed"] += 1
                 assistant_text = _format_raw_json(skill_result)
@@ -1464,6 +1645,16 @@ When you have data to present, format it clearly with structure."""
                 response = await ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
+        elif teams_engine and (disabled_skill := teams_engine.check_disabled_skill(clean_text)):
+            skill_display = disabled_skill.replace("_", " ")
+            assistant_text = (
+                f"The {skill_display} feature isn't enabled for your workspace. "
+                f"Contact your admin to enable it."
+            )
+            total_tokens = 0
+            asyncio.create_task(
+                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
+            )
         else:
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
@@ -1474,24 +1665,42 @@ When you have data to present, format it clearly with structure."""
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
                     service_url = teams_adapter._service_urls.get(message.conversation_id, "")
                     _handle_async_channel_skill(
-                        tenant_id=tenant_id, channel="teams",
-                        skill_name=tc.tool_name, params=tc.tool_params,
+                        tenant_id=tenant_id,
+                        channel="teams",
+                        skill_name=tc.tool_name,
+                        params=tc.tool_params,
                         conversation_id=conversation_id,
                         reply_target=message.conversation_id,
                         user_key=message.channel_user_id,
-                        user_message=clean_text, is_raw=is_raw, route_type="ai",
-                        model_id=active_model, model_short_name=model_short_name,
+                        user_message=clean_text,
+                        is_raw=is_raw,
+                        route_type="ai",
+                        model_id=active_model,
+                        model_short_name=model_short_name,
                         service_url=service_url,
                     )
                     return
 
                 request_id = f"teams-ai-{conversation_id}"
                 await bus.publish_skill_invocation(
-                    tenant_id, tc.tool_name, tc.tool_params,
-                    conversation_id, request_id, "teams", message.channel_user_id,
+                    tenant_id,
+                    tc.tool_name,
+                    tc.tool_params,
+                    conversation_id,
+                    request_id,
+                    "teams",
+                    message.channel_user_id,
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
-                if is_raw and rule_router.supports_raw(tc.tool_name):
+                asyncio.create_task(
+                    _log_training(
+                        tenant_id,
+                        clean_text,
+                        tc.tool_name,
+                        tc.tool_params.get("action"),
+                    )
+                )
+                if is_raw and teams_engine and teams_engine.supports_raw(tc.tool_name):
                     stats["raw"] += 1
                     assistant_text = _format_raw_json(skill_result)
                     total_tokens = response.input_tokens + response.output_tokens
@@ -1510,23 +1719,37 @@ When you have data to present, format it clearly with structure."""
                         }
                     ]
                     final = await ai.chat_with_tool_result(
-                        active_model, system, messages_with_tool,
-                        tools, tc.tool_use_id, skill_result,
+                        active_model,
+                        system,
+                        messages_with_tool,
+                        tools,
+                        tc.tool_use_id,
+                        skill_result,
                     )
                     assistant_text = final.text or "Got data but couldn't format."
                     total_tokens = (
-                        response.input_tokens + response.output_tokens
-                        + final.input_tokens + final.output_tokens
+                        response.input_tokens
+                        + response.output_tokens
+                        + final.input_tokens
+                        + final.output_tokens
                     )
             else:
+                asyncio.create_task(_log_training(tenant_id, clean_text, None, None))
                 assistant_text = response.text or "Not sure how to help."
                 total_tokens = response.input_tokens + response.output_tokens
 
     stats["total_tokens"] += total_tokens
     await memory.save_turn(
-        tenant_id, conversation_id, clean_text, assistant_text,
-        metadata={"route": "teams", "model": model_short_name, "tokens": total_tokens,
-                  "channel": "teams"},
+        tenant_id,
+        conversation_id,
+        clean_text,
+        assistant_text,
+        metadata={
+            "route": "teams",
+            "model": model_short_name,
+            "tokens": total_tokens,
+            "channel": "teams",
+        },
     )
     outbound = OutboundMessage(
         channel=ChannelType.TEAMS,
@@ -1576,6 +1799,7 @@ def _handle_async_channel_skill(
     service_url: str = "",
 ) -> None:
     import uuid
+
     request_id = f"async-{channel}-{uuid.uuid4().hex[:12]}"
     pending_req = PendingRequest(
         request_id=request_id,
@@ -1600,14 +1824,14 @@ def _handle_async_channel_skill(
     )
     stats[f"{route_type}_routed"] += 1
     logger.info(
-        f"{channel.capitalize()}: async skill '{skill_name}' dispatched, "
-        f"request={request_id[:8]}"
+        f"{channel.capitalize()}: async skill '{skill_name}' dispatched, request={request_id[:8]}"
     )
 
 
 # ---------------------------------------------------------------------------
 # Telegram webhook
 # ---------------------------------------------------------------------------
+
 
 async def handle_telegram_webhook(request: Request) -> Response:
     try:
@@ -1678,35 +1902,46 @@ You are communicating via Telegram. Keep responses concise and well-formatted.
 Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
     history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
 
-    if not is_raw and rule_router.is_conversational(clean_text):
+    tg_engine = _get_engine(tenant_id)
+    if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
         response = await ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
-        match = rule_router.match(clean_text, tenant.settings.enabled_skills)
+        match = tg_engine.match(clean_text, tenant.settings.enabled_skills) if tg_engine else None
         if match:
             if USE_ASYNC_SKILLS and event_bus and pending_store:
                 _handle_async_channel_skill(
-                    tenant_id=tenant_id, channel="telegram",
-                    skill_name=match.skill_name, params=match.params,
+                    tenant_id=tenant_id,
+                    channel="telegram",
+                    skill_name=match.skill_name,
+                    params=match.params,
                     conversation_id=conversation_id,
                     reply_target=message.conversation_id,
                     user_key=message.channel_user_id,
-                    user_message=clean_text, is_raw=is_raw, route_type="rule",
-                    model_id=active_model, model_short_name=model_short_name,
+                    user_message=clean_text,
+                    is_raw=is_raw,
+                    route_type="rule",
+                    model_id=active_model,
+                    model_short_name=model_short_name,
                 )
                 return
 
             request_id = f"tg-rule-{conversation_id}"
             await bus.publish_skill_invocation(
-                tenant_id, match.skill_name, match.params,
-                conversation_id, request_id, "telegram", message.channel_user_id,
+                tenant_id,
+                match.skill_name,
+                match.params,
+                conversation_id,
+                request_id,
+                "telegram",
+                message.channel_user_id,
             )
             skill_result = bus.get_result(request_id) or {"error": "No result"}
             stats["rule_routed"] += 1
-            if is_raw and rule_router.supports_raw(match.skill_name):
+            if is_raw and tg_engine and tg_engine.supports_raw(match.skill_name):
                 stats["raw"] += 1
                 assistant_text = _format_raw_json(skill_result)
                 total_tokens = 0
@@ -1720,6 +1955,16 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                 response = await ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
+        elif tg_engine and (disabled_skill := tg_engine.check_disabled_skill(clean_text)):
+            skill_display = disabled_skill.replace("_", " ")
+            assistant_text = (
+                f"The {skill_display} feature isn't enabled for your workspace. "
+                f"Contact your admin to enable it."
+            )
+            total_tokens = 0
+            asyncio.create_task(
+                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
+            )
         else:
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
@@ -1729,22 +1974,40 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                 tc = response.tool_calls[0]
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
                     _handle_async_channel_skill(
-                        tenant_id=tenant_id, channel="telegram",
-                        skill_name=tc.tool_name, params=tc.tool_params,
+                        tenant_id=tenant_id,
+                        channel="telegram",
+                        skill_name=tc.tool_name,
+                        params=tc.tool_params,
                         conversation_id=conversation_id,
                         reply_target=message.conversation_id,
                         user_key=message.channel_user_id,
-                        user_message=clean_text, is_raw=is_raw, route_type="ai",
-                        model_id=active_model, model_short_name=model_short_name,
+                        user_message=clean_text,
+                        is_raw=is_raw,
+                        route_type="ai",
+                        model_id=active_model,
+                        model_short_name=model_short_name,
                     )
                     return
 
                 request_id = f"tg-ai-{conversation_id}"
                 await bus.publish_skill_invocation(
-                    tenant_id, tc.tool_name, tc.tool_params,
-                    conversation_id, request_id, "telegram", message.channel_user_id,
+                    tenant_id,
+                    tc.tool_name,
+                    tc.tool_params,
+                    conversation_id,
+                    request_id,
+                    "telegram",
+                    message.channel_user_id,
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
+                asyncio.create_task(
+                    _log_training(
+                        tenant_id,
+                        clean_text,
+                        tc.tool_name,
+                        tc.tool_params.get("action"),
+                    )
+                )
                 messages_with_tool = messages + [
                     {
                         "role": "assistant",
@@ -1759,21 +2022,31 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                     }
                 ]
                 final = await ai.chat_with_tool_result(
-                    active_model, system, messages_with_tool,
-                    tools, tc.tool_use_id, skill_result,
+                    active_model,
+                    system,
+                    messages_with_tool,
+                    tools,
+                    tc.tool_use_id,
+                    skill_result,
                 )
                 assistant_text = final.text or "Got data but couldn't format."
                 total_tokens = (
-                    response.input_tokens + response.output_tokens
-                    + final.input_tokens + final.output_tokens
+                    response.input_tokens
+                    + response.output_tokens
+                    + final.input_tokens
+                    + final.output_tokens
                 )
             else:
+                asyncio.create_task(_log_training(tenant_id, clean_text, None, None))
                 assistant_text = response.text or "Not sure how to help."
                 total_tokens = response.input_tokens + response.output_tokens
 
     stats["total_tokens"] += total_tokens
     await memory.save_turn(
-        tenant_id, conversation_id, clean_text, assistant_text,
+        tenant_id,
+        conversation_id,
+        clean_text,
+        assistant_text,
         metadata={"route": "telegram", "model": model_short_name, "tokens": total_tokens},
     )
     outbound = OutboundMessage(
@@ -1849,9 +2122,10 @@ app = Starlette(routes=routes, middleware=middleware)
 # Initialisation & entry point
 # ---------------------------------------------------------------------------
 
+
 async def init() -> None:
     global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
-    global sqs_poller, result_router, rule_router, admin_api, platform_api
+    global sqs_poller, result_router, rule_store, training_store, admin_api, platform_api
     global error_handler, started_at
 
     started_at = time.time()
@@ -1880,7 +2154,8 @@ async def init() -> None:
     skills = skills_obj
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
-    rule_router = RuleBasedRouter(skills, confidence_threshold=0.5)
+    rule_store = DynamoDBRuleStore(tenants_table, region=region)
+    training_store = DynamoDBTrainingStore(tenants_table, region=region)
     bus = DirectBus(skills, secrets)
     admin_api = AdminAPI(tenants, secrets, skills)
     platform_api = PlatformAPI(tenants, secrets, skills)
@@ -1929,6 +2204,7 @@ async def init() -> None:
         logger.info(f"Tenant '{DEFAULT_TENANT}' exists")
     except Exception:
         from agent.models.tenant import Tenant, TenantSettings
+
         now = datetime.now(timezone.utc).isoformat()
         tenant = Tenant(
             tenant_id=DEFAULT_TENANT,

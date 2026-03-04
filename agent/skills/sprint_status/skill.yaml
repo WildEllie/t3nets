@@ -17,6 +17,11 @@ triggers:
 requires_integration: jira
 supports_raw: true
 
+action_descriptions:
+  status: "Full sprint overview with progress metrics, velocity, risk assessment, and remaining work"
+  blockers: "Only blocked or flagged items that are impeding progress"
+  mine: "Tickets assigned to a specific person — great for standup prep"
+
 parameters:
   type: object
   properties:

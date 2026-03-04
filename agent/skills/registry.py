@@ -3,10 +3,11 @@ Skill Registry — manages available skills and converts them to Claude tool def
 """
 
 import importlib
-import yaml  # type: ignore[import-untyped]
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+import yaml  # type: ignore[import-untyped]
 
 from agent.interfaces.ai_provider import ToolDefinition
 from agent.models.context import RequestContext
@@ -18,11 +19,12 @@ class SkillDefinition:
 
     name: str
     description: str
-    parameters: dict[str, Any]          # JSON Schema for tool input
-    requires_integration: Optional[str] # e.g., "jira", "github"
-    supports_raw: bool = False          # Whether --raw debug output is supported
+    parameters: dict[str, Any]  # JSON Schema for tool input
+    requires_integration: Optional[str]  # e.g., "jira", "github"
+    supports_raw: bool = False  # Whether --raw debug output is supported
     triggers: list[str] = field(default_factory=list)
-    worker_module: str = ""             # Python module path for the worker
+    action_descriptions: dict[str, str] = field(default_factory=dict)  # action → description
+    worker_module: str = ""  # Python module path for the worker
 
 
 class SkillRegistry:
@@ -64,6 +66,7 @@ class SkillRegistry:
                 requires_integration=config.get("requires_integration"),
                 supports_raw=config.get("supports_raw", False),
                 triggers=config.get("triggers", []),
+                action_descriptions=config.get("action_descriptions", {}),
                 worker_module=config.get(
                     "worker_module",
                     f"agent.skills.{config['name']}.worker",
@@ -106,9 +109,7 @@ class SkillRegistry:
 
         module = importlib.import_module(skill.worker_module)
         if not hasattr(module, "execute"):
-            raise SkillNotFound(
-                f"Skill '{skill_name}' worker module has no execute() function"
-            )
+            raise SkillNotFound(f"Skill '{skill_name}' worker module has no execute() function")
         execute: Callable[..., Any] = module.execute
         return execute
 

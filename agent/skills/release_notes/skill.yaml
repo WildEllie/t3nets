@@ -22,6 +22,10 @@ triggers:
 requires_integration: jira
 supports_raw: true
 
+action_descriptions:
+  list_releases: "Show all fix versions for the project (released and unreleased)"
+  summarize: "Pull all issues for a specific release and return structured data for release notes generation"
+
 parameters:
   type: object
   properties:
