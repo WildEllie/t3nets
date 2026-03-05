@@ -72,6 +72,7 @@ from agent.models.ai_models import (
 )
 from agent.models.message import ChannelType
 from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
+from agent.router.rule_router import RuleBasedRouter
 from agent.router.models import TrainingExample
 from agent.router.rule_engine_builder import RuleEngineBuilder
 from agent.skills.registry import SkillRegistry
@@ -100,6 +101,8 @@ admin_api: AdminAPI
 
 # Per-tenant compiled rule engines (keyed by tenant_id)
 _compiled_engines: dict[str, CompiledRuleEngine] = {}
+# Fallback trigger-based router used when no compiled engine exists for a tenant
+_fallback_router: RuleBasedRouter | None = None
 platform_api: PlatformAPI
 error_handler: ErrorHandler
 started_at: float = 0.0
@@ -342,6 +345,10 @@ async def onboard_page(request: Request) -> Response:
 
 async def platform_page(request: Request) -> Response:
     return _file_response("platform.html", "adapters/local")
+
+
+async def training_page(request: Request) -> Response:
+    return _file_response("training.html", "adapters/local")
 
 
 # ---------------------------------------------------------------------------
@@ -1090,7 +1097,11 @@ async def _log_training(
             matched_action=matched_action,
             was_disabled_skill=was_disabled_skill,
         )
+        logger.info(
+            f"Training: logging example for tenant={tenant_id} skill={matched_skill} msg={message_text[:40]!r}"
+        )
         await training_store.log_example(example)
+        logger.info(f"Training: logged example {example.example_id}")
     except Exception:
         logger.exception("Failed to log training example")
 
@@ -1132,7 +1143,8 @@ When you have data to present, format it clearly with structure."""
             total_tokens = response.input_tokens + response.output_tokens
             route_type = "conversational"
         else:
-            match = engine.match(clean_text, tenant.settings.enabled_skills) if engine else None
+            router = engine or _fallback_router
+            match = router.match(clean_text, tenant.settings.enabled_skills) if router else None
 
             if match:
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
@@ -1348,6 +1360,10 @@ async def _handle_async_skill(
     logger.info(
         f"Chat: async skill '{skill_name}' dispatched, request={request_id[:8]}, user={user_key}"
     )
+    if route_type == "ai":
+        asyncio.create_task(
+            _log_training(tenant_id, user_message, skill_name, params.get("action"))
+        )
     return JSONResponse(
         {
             "status": "processing",
@@ -1461,14 +1477,46 @@ async def handle_invitation_accept(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 
 
+async def handle_rules_admin(request: Request) -> Response:
+    """POST /api/admin/rules/rebuild and GET /api/admin/rules/status."""
+    method = request.method
+    path = str(request.url.path)
+    tenant_id, _ = await _get_auth_info(request)
+
+    if method == "POST" and path.endswith("/rebuild"):
+        asyncio.create_task(_rebuild_rules(tenant_id))
+        return JSONResponse({"rebuilding": True, "tenant_id": tenant_id})
+
+    if method == "GET" and path.endswith("/status"):
+        rule_set = await rule_store.load_rule_set(tenant_id)
+        engine = _compiled_engines.get(tenant_id)
+        return JSONResponse(
+            {
+                "tenant_id": tenant_id,
+                "version": rule_set.version if rule_set else 0,
+                "generated_at": rule_set.generated_at if rule_set else None,
+                "skill_count": len(rule_set.rules) if rule_set else 0,
+                "engine_loaded": engine is not None,
+            }
+        )
+
+    return JSONResponse({"error": "Not found"}, status_code=404)
+
+
 async def handle_admin(request: Request) -> Response:
     """Delegate all /api/admin/* routes to AdminAPI (run in thread pool)."""
     method = request.method
     path = str(request.url.path)
     body = None
-    if method in ("POST", "PUT", "PATCH"):
-        body = await request.json()
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
     headers = dict(request.headers)
+    # Resolve tenant_id server-side (avoids a second DynamoDB lookup inside AdminAPI)
+    tenant_id, _ = await _get_auth_info(request)
+    headers["x-tenant-id"] = tenant_id
     data, status = await asyncio.to_thread(admin_api.handle_request, method, path, headers, body)
     return JSONResponse(data, status_code=status)
 
@@ -1596,8 +1644,9 @@ When you have data to present, format it clearly with structure."""
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
+        teams_router = teams_engine or _fallback_router
         match = (
-            teams_engine.match(clean_text, tenant.settings.enabled_skills) if teams_engine else None
+            teams_router.match(clean_text, tenant.settings.enabled_skills) if teams_router else None
         )
         if match:
             if USE_ASYNC_SKILLS and event_bus and pending_store:
@@ -1910,7 +1959,8 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
-        match = tg_engine.match(clean_text, tenant.settings.enabled_skills) if tg_engine else None
+        tg_router = tg_engine or _fallback_router
+        match = tg_router.match(clean_text, tenant.settings.enabled_skills) if tg_router else None
         if match:
             if USE_ASYNC_SKILLS and event_bus and pending_store:
                 _handle_async_channel_skill(
@@ -2072,6 +2122,7 @@ routes = [
     Route("/callback", callback_page),
     Route("/onboard", onboard_page),
     Route("/platform", platform_page),
+    Route("/training", training_page),
     # API
     Route("/api/events", sse_endpoint),
     Route("/api/health", handle_health_api),
@@ -2101,6 +2152,7 @@ routes = [
         methods=["POST"],
     ),
     # Admin and Platform (delegated to API objects via thread pool)
+    Route("/api/admin/rules/{rest:path}", handle_rules_admin),
     Route("/api/admin/{rest:path}", handle_admin),
     Route("/api/platform/{rest:path}", handle_platform),
 ]
@@ -2126,7 +2178,7 @@ app = Starlette(routes=routes, middleware=middleware)
 async def init() -> None:
     global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
     global sqs_poller, result_router, rule_store, training_store, admin_api, platform_api
-    global error_handler, started_at
+    global error_handler, started_at, _fallback_router
 
     started_at = time.time()
 
@@ -2154,10 +2206,12 @@ async def init() -> None:
     skills = skills_obj
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
+    _fallback_router = RuleBasedRouter(skills)
+
     rule_store = DynamoDBRuleStore(tenants_table, region=region)
     training_store = DynamoDBTrainingStore(tenants_table, region=region)
     bus = DirectBus(skills, secrets)
-    admin_api = AdminAPI(tenants, secrets, skills)
+    admin_api = AdminAPI(tenants, secrets, skills, training_store)
     platform_api = PlatformAPI(tenants, secrets, skills)
     error_handler = ErrorHandler()
 
@@ -2218,6 +2272,25 @@ async def init() -> None:
 
     connected = await secrets.list_integrations(DEFAULT_TENANT)
     logger.info(f"Connected integrations: {connected}")
+
+    # Load compiled rule engines for all tenants from DynamoDB
+    try:
+        all_tenants = await tenants.list_tenants()
+        for t in all_tenants:
+            cached = await rule_store.load_rule_set(t.tenant_id)
+            if cached:
+                _compiled_engines[t.tenant_id] = CompiledRuleEngine(cached, skills)
+                logger.info(
+                    f"Loaded rule engine for '{t.tenant_id}' "
+                    f"(v{cached.version}, generated {cached.generated_at[:10]})"
+                )
+            else:
+                logger.info(
+                    f"No rule set found for tenant '{t.tenant_id}' — "
+                    "AI routing will be used until rules are built via /api/admin/rules/rebuild"
+                )
+    except Exception:
+        logger.exception("Failed to load rule engines at startup — AI routing will be used")
 
 
 def main() -> None:

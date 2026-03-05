@@ -46,6 +46,46 @@ class DynamoDBTrainingStore(TrainingStore):
             ConditionExpression="attribute_not_exists(pk) OR attribute_not_exists(sk)",
         )
 
+    def _find_sk(self, tenant_id: str, example_id: str) -> Optional[str]:
+        """Query for the SK of a specific example_id (needed for update/delete)."""
+        response = self.table.query(
+            KeyConditionExpression=(
+                Key("pk").eq(f"TENANT#{tenant_id}") & Key("sk").begins_with("TRAINING#")
+            ),
+            FilterExpression="example_id = :eid",
+            ExpressionAttributeValues={":eid": example_id},
+            ProjectionExpression="sk",
+        )
+        items = response.get("Items", [])
+        if not items:
+            return None
+        return str(items[0]["sk"])
+
+    async def annotate_example(
+        self,
+        tenant_id: str,
+        example_id: str,
+        skill: str,
+        action: str,
+    ) -> bool:
+        sk = self._find_sk(tenant_id, example_id)
+        if not sk:
+            return False
+        update_expr = "SET admin_override_skill = :s, admin_override_action = :a"
+        self.table.update_item(
+            Key={"pk": f"TENANT#{tenant_id}", "sk": sk},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues={":s": skill or "", ":a": action or ""},
+        )
+        return True
+
+    async def delete_example(self, tenant_id: str, example_id: str) -> bool:
+        sk = self._find_sk(tenant_id, example_id)
+        if not sk:
+            return False
+        self.table.delete_item(Key={"pk": f"TENANT#{tenant_id}", "sk": sk})
+        return True
+
     async def list_examples(
         self,
         tenant_id: str,
@@ -72,6 +112,8 @@ class DynamoDBTrainingStore(TrainingStore):
                     matched_action=item.get("matched_action"),
                     was_disabled_skill=bool(item.get("was_disabled_skill", False)),
                     confidence=confidence,
+                    admin_override_skill=item.get("admin_override_skill") or None,
+                    admin_override_action=item.get("admin_override_action") or None,
                 )
             )
         return examples

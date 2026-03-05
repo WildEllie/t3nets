@@ -61,6 +61,32 @@ class SQLiteTrainingStore(TrainingStore):
                 ),
             )
 
+    async def annotate_example(
+        self,
+        tenant_id: str,
+        example_id: str,
+        skill: str,
+        action: str,
+    ) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE training_examples
+                SET admin_override_skill = ?, admin_override_action = ?
+                WHERE example_id = ? AND tenant_id = ?
+            """,
+                (skill or None, action or None, example_id, tenant_id),
+            )
+        return cursor.rowcount > 0
+
+    async def delete_example(self, tenant_id: str, example_id: str) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM training_examples WHERE example_id = ? AND tenant_id = ?",
+                (example_id, tenant_id),
+            )
+        return cursor.rowcount > 0
+
     async def list_examples(
         self,
         tenant_id: str,

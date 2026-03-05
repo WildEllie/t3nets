@@ -31,3 +31,19 @@ class TrainingStore(ABC):
         Used by Phase 5b admin tools and rule recalculation.
         """
         ...
+
+    @abstractmethod
+    async def annotate_example(
+        self,
+        tenant_id: str,
+        example_id: str,
+        skill: str,
+        action: str,
+    ) -> bool:
+        """Set admin_override_skill + admin_override_action. Returns False if not found."""
+        ...
+
+    @abstractmethod
+    async def delete_example(self, tenant_id: str, example_id: str) -> bool:
+        """Remove a training example. Returns False if not found."""
+        ...

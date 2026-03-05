@@ -1,0 +1,1077 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>T3nets — Training</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #0f0f0f;
+        color: #e0e0e0;
+        min-height: 100vh;
+      }
+
+      nav {
+        background: #1a1a1a;
+        border-bottom: 1px solid #2a2a2a;
+        padding: 0 24px;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        height: 48px;
+        min-height: 48px;
+        flex-shrink: 0;
+      }
+
+      .nav-brand {
+        display: flex;
+        align-items: center;
+        font-size: 16px;
+        font-weight: 700;
+        color: #fff;
+        margin-right: 24px;
+        text-decoration: none;
+      }
+
+      .nav-badge {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-weight: 600;
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+      .nav-badge.platform {
+        background: #22c55e;
+        color: #000;
+      }
+      .nav-badge.stage {
+        background: #3b82f6;
+        color: #fff;
+      }
+
+      .nav-tenant-name {
+        font-size: 13px;
+        font-weight: 500;
+        color: #888;
+        margin-left: 12px;
+        padding-left: 12px;
+        border-left: 1px solid #333;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 0;
+        height: 100%;
+      }
+
+      .nav-links a {
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        color: #888;
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 500;
+        height: 100%;
+        border-bottom: 2px solid transparent;
+        transition: all 0.15s;
+      }
+
+      .nav-links a:hover {
+        color: #ccc;
+        background: #ffffff08;
+      }
+      .nav-links a.active {
+        color: #fff;
+        border-bottom-color: #3b82f6;
+      }
+
+      .nav-right {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .nav-btn {
+        background: none;
+        border: 1px solid #333;
+        color: #888;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .nav-btn:hover {
+        border-color: #555;
+        color: #ccc;
+      }
+
+      .nav-user-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: #ccc;
+      }
+      .nav-user-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #2a2a2a;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: #888;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .nav-user-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .nav-user-email {
+        font-size: 12px;
+        color: #666;
+      }
+
+      /* Page layout */
+      .page-content {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 28px 24px;
+      }
+
+      .page-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        gap: 16px;
+      }
+
+      .page-header h1 {
+        font-size: 20px;
+        font-weight: 600;
+        color: #fff;
+        margin-bottom: 4px;
+      }
+
+      .page-header p {
+        font-size: 13px;
+        color: #666;
+      }
+
+      /* Stats row */
+      .stats-row {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+      }
+
+      .stat-card {
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 10px;
+        padding: 14px 18px;
+        min-width: 120px;
+      }
+
+      .stat-card .label {
+        font-size: 11px;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        margin-bottom: 6px;
+      }
+
+      .stat-card .value {
+        font-size: 22px;
+        font-weight: 700;
+        color: #fff;
+      }
+
+      .stat-card .value.blue {
+        color: #3b82f6;
+      }
+      .stat-card .value.green {
+        color: #22c55e;
+      }
+      .stat-card .value.amber {
+        color: #f59e0b;
+      }
+      .stat-card .value.red {
+        color: #ef4444;
+      }
+
+      /* Filters + rebuild row */
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .filter-btn {
+        background: none;
+        border: 1px solid #333;
+        color: #888;
+        padding: 5px 14px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .filter-btn:hover {
+        border-color: #555;
+        color: #ccc;
+      }
+      .filter-btn.active {
+        border-color: #3b82f6;
+        color: #3b82f6;
+        background: #1e1e2e;
+      }
+
+      .rebuild-btn {
+        margin-left: auto;
+        background: #3b82f6;
+        border: none;
+        color: #fff;
+        padding: 7px 16px;
+        border-radius: 7px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .rebuild-btn:hover {
+        background: #2563eb;
+      }
+      .rebuild-btn:disabled {
+        background: #1e3a5f;
+        color: #4a7ab5;
+        cursor: not-allowed;
+      }
+
+      /* Rules status */
+      .rules-status {
+        font-size: 12px;
+        color: #666;
+      }
+      .rules-status .version {
+        color: #888;
+        font-weight: 500;
+      }
+
+      /* Table */
+      .table-wrap {
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead th {
+        background: #141414;
+        padding: 10px 14px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: 600;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        border-bottom: 1px solid #2a2a2a;
+      }
+
+      tbody tr {
+        border-bottom: 1px solid #222;
+        transition: background 0.1s;
+      }
+      tbody tr:last-child {
+        border-bottom: none;
+      }
+      tbody tr:hover {
+        background: #ffffff04;
+      }
+
+      tbody td {
+        padding: 12px 14px;
+        font-size: 13px;
+        vertical-align: top;
+      }
+
+      .td-time {
+        color: #666;
+        font-size: 12px;
+        white-space: nowrap;
+        width: 80px;
+      }
+
+      .td-message {
+        color: #ccc;
+        max-width: 300px;
+        word-break: break-word;
+      }
+
+      .td-skill {
+        width: 180px;
+      }
+
+      .skill-tag {
+        display: inline-block;
+        background: #1e2d45;
+        color: #60a5fa;
+        border-radius: 5px;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-family: "SF Mono", "Fira Code", Menlo, monospace;
+      }
+
+      .skill-tag.none {
+        background: #222;
+        color: #555;
+      }
+
+      .skill-tag.disabled {
+        background: #2d1a1a;
+        color: #f87171;
+      }
+
+      .td-annotation {
+        width: 280px;
+      }
+
+      .annotation-form {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .skill-select {
+        flex: 1;
+        background: #111;
+        border: 1px solid #2a2a2a;
+        color: #ccc;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .skill-select:focus {
+        outline: none;
+        border-color: #3b82f6;
+      }
+
+      .save-btn {
+        background: #1e3a5f;
+        border: 1px solid #2563eb;
+        color: #60a5fa;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+      }
+      .save-btn:hover {
+        background: #2563eb;
+        color: #fff;
+      }
+      .save-btn.saved {
+        background: #14532d;
+        border-color: #16a34a;
+        color: #4ade80;
+      }
+
+      .td-actions {
+        width: 60px;
+        text-align: right;
+      }
+
+      .delete-btn {
+        background: none;
+        border: none;
+        color: #444;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 4px 6px;
+        border-radius: 4px;
+        transition: all 0.15s;
+      }
+      .delete-btn:hover {
+        color: #ef4444;
+        background: #2d1a1a;
+      }
+
+      /* Empty state */
+      .empty-state {
+        padding: 48px 24px;
+        text-align: center;
+        color: #555;
+      }
+
+      .empty-state p {
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+      .empty-state small {
+        font-size: 12px;
+        color: #444;
+      }
+
+      /* Loading */
+      .loading {
+        padding: 32px;
+        text-align: center;
+        color: #555;
+        font-size: 13px;
+      }
+
+      /* Toast */
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 10px;
+        padding: 12px 18px;
+        font-size: 13px;
+        color: #ccc;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        z-index: 1000;
+        opacity: 0;
+        transform: translateY(8px);
+        transition: all 0.2s;
+        pointer-events: none;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .toast.success {
+        border-color: #16a34a;
+        color: #4ade80;
+      }
+      .toast.error {
+        border-color: #dc2626;
+        color: #f87171;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <a href="/" class="nav-brand"
+        ><img
+          src="/logo.png"
+          alt="T3nets"
+          style="height: 28px; display: block"
+        />
+        <span class="nav-badge platform" id="platform-badge">...</span
+        ><span class="nav-badge stage" id="stage-badge">...</span></a
+      ><span
+        class="nav-tenant-name"
+        id="nav-tenant-name"
+        style="display: none"
+      ></span>
+      <div class="nav-links" id="nav-links">
+        <a href="/chat">Chat</a>
+        <a href="/health">Health</a>
+        <a href="/settings">Settings</a>
+        <a href="/training" class="active">Training</a>
+      </div>
+      <div class="nav-right">
+        <div class="nav-user-info" id="user-info" style="display: none">
+          <div class="nav-user-avatar" id="user-avatar"></div>
+          <span id="user-display-name"></span>
+        </div>
+        <span
+          class="nav-user-email"
+          id="user-email"
+          style="display: none"
+        ></span>
+        <button
+          class="nav-btn"
+          id="logout-btn"
+          style="display: none"
+          onclick="logout()"
+        >
+          Logout
+        </button>
+      </div>
+    </nav>
+
+    <div class="page-content">
+      <div class="page-header">
+        <div>
+          <h1>Training Data</h1>
+          <p>Annotate AI-routed examples to improve Tier 1 rule accuracy.</p>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card">
+          <div class="label">Total logged</div>
+          <div class="value" id="stat-total">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Skill invoked</div>
+          <div class="value blue" id="stat-rule">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Freeform</div>
+          <div class="value amber" id="stat-ai">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Annotated</div>
+          <div class="value green" id="stat-annotated">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Disabled skill</div>
+          <div class="value red" id="stat-disabled">—</div>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <button
+          class="filter-btn active"
+          id="filter-all"
+          onclick="setFilter('all')"
+        >
+          All
+        </button>
+        <button
+          class="filter-btn"
+          id="filter-unannotated"
+          onclick="setFilter('unannotated')"
+        >
+          Unannotated only
+        </button>
+        <div class="rules-status" id="rules-status"></div>
+        <button class="rebuild-btn" id="rebuild-btn" onclick="triggerRebuild()">
+          Rebuild Rules
+        </button>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap">
+        <div class="loading" id="loading-state">Loading training examples…</div>
+        <div id="empty-state" class="empty-state" style="display: none">
+          <p>No training examples yet.</p>
+          <small
+            >Send a message through the chat that requires AI routing to
+            generate examples.</small
+          >
+        </div>
+        <table id="examples-table" style="display: none">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Message</th>
+              <th>Auto-matched skill</th>
+              <th>Admin annotation</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="examples-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      let allExamples = [];
+      let availableSkills = [];
+      let currentFilter = "all";
+
+      // --- Init ---
+      async function init() {
+        await Promise.all([loadSettings(), loadExamples(), loadRulesStatus()]);
+      }
+
+      async function loadSettings() {
+        try {
+          const r = await fetch("/api/settings", { headers: authHeaders() });
+          if (!r.ok) return;
+          const data = await r.json();
+          availableSkills = (data.available_skills || []).map((s) => s.name);
+          document.getElementById("platform-badge").textContent =
+            data.platform || "local";
+          document.getElementById("stage-badge").textContent =
+            data.stage || "dev";
+          if (data.tenant_name) {
+            const el = document.getElementById("nav-tenant-name");
+            el.textContent = data.tenant_name;
+            el.style.display = "";
+          }
+        } catch (e) {}
+      }
+
+      async function loadExamples() {
+        document.getElementById("loading-state").style.display = "";
+        document.getElementById("examples-table").style.display = "none";
+        document.getElementById("empty-state").style.display = "none";
+
+        try {
+          const r = await fetch("/api/admin/training?limit=100", {
+            headers: authHeaders(),
+          });
+          const data = await r.json();
+          if (!r.ok)
+            throw new Error(
+              `${r.status}: ${data.error || data.message || r.statusText}`,
+            );
+          allExamples = data.examples || [];
+          updateStats();
+          renderTable();
+        } catch (e) {
+          showToast("Failed to load examples: " + e.message, "error");
+          document.getElementById("loading-state").textContent =
+            "Error: " + e.message;
+        }
+      }
+
+      async function loadRulesStatus() {
+        try {
+          const r = await fetch("/api/admin/rules/status", {
+            headers: authHeaders(),
+          });
+          if (!r.ok) return;
+          const data = await r.json();
+          const el = document.getElementById("rules-status");
+          if (data.version) {
+            const dt = data.generated_at
+              ? new Date(data.generated_at).toLocaleString()
+              : "unknown";
+            el.innerHTML = `Rules <span class="version">v${data.version}</span> · ${data.skill_count} skills · rebuilt ${dt}`;
+          } else {
+            el.textContent = "No rules built yet";
+          }
+        } catch (e) {}
+      }
+
+      // --- Stats ---
+      function updateStats() {
+        const total = allExamples.length;
+        const annotated = allExamples.filter(
+          (e) => e.admin_override_skill,
+        ).length;
+        const disabled = allExamples.filter((e) => e.was_disabled_skill).length;
+        // ai-routed = has matched_skill (Claude picked it), rule-routed not stored in examples
+        // Actually: training examples are only logged for AI-routed messages; matched_skill
+        // is the skill Claude picked, or null for freeform.
+        const withSkill = allExamples.filter(
+          (e) => e.matched_skill && !e.was_disabled_skill,
+        ).length;
+        const freeform = allExamples.filter(
+          (e) => !e.matched_skill && !e.was_disabled_skill,
+        ).length;
+
+        document.getElementById("stat-total").textContent = total;
+        document.getElementById("stat-rule").textContent = withSkill;
+        document.getElementById("stat-ai").textContent = freeform;
+        document.getElementById("stat-annotated").textContent = annotated;
+        document.getElementById("stat-disabled").textContent = disabled;
+      }
+
+      // --- Filter ---
+      function setFilter(f) {
+        currentFilter = f;
+        document
+          .getElementById("filter-all")
+          .classList.toggle("active", f === "all");
+        document
+          .getElementById("filter-unannotated")
+          .classList.toggle("active", f === "unannotated");
+        renderTable();
+      }
+
+      // --- Render table ---
+      function renderTable() {
+        const loading = document.getElementById("loading-state");
+        const table = document.getElementById("examples-table");
+        const empty = document.getElementById("empty-state");
+        const tbody = document.getElementById("examples-tbody");
+
+        loading.style.display = "none";
+
+        let rows = allExamples;
+        if (currentFilter === "unannotated") {
+          rows = rows.filter((e) => !e.admin_override_skill);
+        }
+
+        if (rows.length === 0) {
+          table.style.display = "none";
+          empty.style.display = "";
+          return;
+        }
+
+        table.style.display = "";
+        empty.style.display = "none";
+        tbody.innerHTML = "";
+
+        for (const ex of rows) {
+          const tr = document.createElement("tr");
+          tr.id = `row-${ex.example_id}`;
+          tr.innerHTML = `
+                    <td class="td-time">${timeAgo(ex.timestamp)}</td>
+                    <td class="td-message">${escHtml(ex.message_text)}</td>
+                    <td class="td-skill">${skillTag(ex)}</td>
+                    <td class="td-annotation">${annotationForm(ex)}</td>
+                    <td class="td-actions">
+                        <button class="delete-btn" title="Delete" onclick="deleteExample('${ex.example_id}')">✕</button>
+                    </td>
+                `;
+          tbody.appendChild(tr);
+        }
+      }
+
+      function skillTag(ex) {
+        if (ex.was_disabled_skill) {
+          return '<span class="skill-tag disabled">disabled skill</span>';
+        }
+        if (!ex.matched_skill) {
+          return '<span class="skill-tag none">— freeform</span>';
+        }
+        const action = ex.matched_action
+          ? `<span style="color:#6b7280">/${ex.matched_action}</span>`
+          : "";
+        return `<span class="skill-tag">${escHtml(ex.matched_skill)}${action}</span>`;
+      }
+
+      function annotationForm(ex) {
+        const current = ex.admin_override_skill || "";
+        const opts = availableSkills
+          .map(
+            (s) =>
+              `<option value="${escHtml(s)}" ${s === current ? "selected" : ""}>${escHtml(s)}</option>`,
+          )
+          .join("");
+        const savedClass = current ? " saved" : "";
+        return `
+                <div class="annotation-form">
+                    <select class="skill-select" id="sel-${ex.example_id}" onchange="onSkillChange('${ex.example_id}')">
+                        <option value="" ${!current ? "selected" : ""}>— (no skill / freeform)</option>
+                        ${opts}
+                    </select>
+                    <button class="save-btn${savedClass}" id="save-${ex.example_id}" onclick="saveAnnotation('${ex.example_id}')">
+                        ${current ? "Saved" : "Save"}
+                    </button>
+                </div>
+            `;
+      }
+
+      function onSkillChange(exampleId) {
+        const btn = document.getElementById(`save-${exampleId}`);
+        btn.classList.remove("saved");
+        btn.textContent = "Save";
+      }
+
+      async function saveAnnotation(exampleId) {
+        const sel = document.getElementById(`sel-${exampleId}`);
+        const skill = sel.value;
+        const btn = document.getElementById(`save-${exampleId}`);
+        btn.disabled = true;
+        btn.textContent = "…";
+
+        try {
+          const r = await fetch(`/api/admin/training/${exampleId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify({ skill, action: "" }),
+          });
+          if (!r.ok) throw new Error(await r.text());
+          // Update local state
+          const ex = allExamples.find((e) => e.example_id === exampleId);
+          if (ex) ex.admin_override_skill = skill;
+          btn.classList.add("saved");
+          btn.textContent = "Saved";
+          updateStats();
+          showToast("Annotation saved", "success");
+        } catch (e) {
+          showToast("Save failed: " + e.message, "error");
+          btn.textContent = "Save";
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function deleteExample(exampleId) {
+        if (!confirm("Delete this training example?")) return;
+        try {
+          const r = await fetch(`/api/admin/training/${exampleId}`, {
+            method: "DELETE",
+            headers: authHeaders(),
+          });
+          if (!r.ok) throw new Error(await r.text());
+          allExamples = allExamples.filter((e) => e.example_id !== exampleId);
+          updateStats();
+          renderTable();
+          showToast("Example deleted", "success");
+        } catch (e) {
+          showToast("Delete failed: " + e.message, "error");
+        }
+      }
+
+      async function triggerRebuild() {
+        const btn = document.getElementById("rebuild-btn");
+        btn.disabled = true;
+        btn.textContent = "Rebuilding…";
+        try {
+          const r = await fetch("/api/admin/rules/rebuild", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+          });
+          if (!r.ok) throw new Error(await r.text());
+          showToast(
+            "Rule rebuild started — this may take a few seconds",
+            "success",
+          );
+          // Poll status after a delay
+          setTimeout(async () => {
+            await loadRulesStatus();
+            btn.disabled = false;
+            btn.textContent = "Rebuild Rules";
+          }, 5000);
+        } catch (e) {
+          showToast("Rebuild failed: " + e.message, "error");
+          btn.disabled = false;
+          btn.textContent = "Rebuild Rules";
+        }
+      }
+
+      // --- Auth helpers ---
+      function authHeaders() {
+        const token = localStorage.getItem("t3nets_id_token");
+        return token ? { Authorization: "Bearer " + token } : {};
+      }
+
+      function logout() {
+        localStorage.removeItem("t3nets_id_token");
+        localStorage.removeItem("t3nets_access_token");
+        localStorage.removeItem("t3nets_refresh_token");
+        window.location.href = "/login";
+      }
+
+      async function tryRefreshToken() {
+        const refreshToken = localStorage.getItem("t3nets_refresh_token");
+        if (!refreshToken) return false;
+        try {
+          const resp = await fetch("/api/auth/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          if (!resp.ok) return false;
+          const data = await resp.json();
+          if (data.id_token)
+            localStorage.setItem("t3nets_id_token", data.id_token);
+          if (data.access_token)
+            localStorage.setItem("t3nets_access_token", data.access_token);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      const SessionManager = {
+        lastActivity: Date.now(),
+        _refreshTimer: null,
+        _expiredTimer: null,
+        IDLE_MS: 10 * 60 * 1000,
+        REFRESH_BEFORE_MS: 5 * 60 * 1000,
+        init() {
+          ["mousemove", "mousedown", "keydown", "scroll", "touchstart"].forEach(
+            (ev) =>
+              document.addEventListener(
+                ev,
+                () => {
+                  this.lastActivity = Date.now();
+                },
+                { passive: true },
+              ),
+          );
+          this.schedule();
+        },
+        _getExp() {
+          const token = localStorage.getItem("t3nets_id_token");
+          if (!token) return null;
+          try {
+            const b64 = token
+              .split(".")[1]
+              .replace(/-/g, "+")
+              .replace(/_/g, "/");
+            return JSON.parse(atob(b64)).exp * 1000;
+          } catch {
+            return null;
+          }
+        },
+        schedule() {
+          clearTimeout(this._refreshTimer);
+          clearTimeout(this._expiredTimer);
+          const exp = this._getExp();
+          if (!exp) return;
+          const msLeft = exp - Date.now();
+          if (msLeft <= 0) {
+            this._showExpired();
+            return;
+          }
+          const msToWindow = msLeft - this.REFRESH_BEFORE_MS;
+          if (msToWindow > 0)
+            this._refreshTimer = setTimeout(
+              () => this._onRefreshWindow(),
+              msToWindow,
+            );
+          else this._onRefreshWindow();
+          this._expiredTimer = setTimeout(() => this._showExpired(), msLeft);
+        },
+        async _onRefreshWindow() {
+          const active = Date.now() - this.lastActivity < this.IDLE_MS;
+          if (active) {
+            const ok = await tryRefreshToken();
+            if (ok) {
+              this.schedule();
+              return;
+            }
+          }
+        },
+        _showExpired() {
+          localStorage.removeItem("t3nets_id_token");
+          localStorage.removeItem("t3nets_access_token");
+          window.location.href = "/login";
+        },
+      };
+
+      async function checkAuth() {
+        try {
+          const resp = await fetch("/api/auth/config");
+          const config = await resp.json();
+          if (config.enabled) {
+            const token = localStorage.getItem("t3nets_id_token");
+            if (!token) {
+              window.location.href = "/login";
+              return;
+            }
+            document.getElementById("logout-btn").style.display =
+              "inline-block";
+            try {
+              const meResp = await fetch("/api/auth/me", {
+                headers: authHeaders(),
+              });
+              if (meResp.ok) {
+                const me = await meResp.json();
+                if (me.tenant_name) {
+                  const tn = document.getElementById("nav-tenant-name");
+                  tn.textContent = me.tenant_name;
+                  tn.style.display = "inline";
+                }
+                const displayName = me.display_name || me.email || "";
+                const avatarUrl = me.avatar_url || "";
+                if (displayName) {
+                  document.getElementById("user-display-name").textContent =
+                    displayName;
+                  const avatarEl = document.getElementById("user-avatar");
+                  if (avatarUrl) {
+                    avatarEl.innerHTML = `<img src="${avatarUrl}" alt="">`;
+                  } else {
+                    avatarEl.textContent = displayName.charAt(0).toUpperCase();
+                  }
+                  document.getElementById("user-info").style.display = "flex";
+                } else if (me.email) {
+                  const emailEl = document.getElementById("user-email");
+                  emailEl.textContent = me.email;
+                  emailEl.style.display = "inline";
+                }
+                if (me.tenant_id === "default" && me.role === "admin") {
+                  const pl = document.createElement("a");
+                  pl.href = "/platform";
+                  pl.textContent = "Platform";
+                  document.querySelector(".nav-links").appendChild(pl);
+                }
+              }
+            } catch (e) {
+              /* /api/auth/me not available */
+            }
+          } else {
+            try {
+              const meResp = await fetch("/api/auth/me");
+              if (meResp.ok) {
+                const me = await meResp.json();
+                if (me.tenant_name) {
+                  const tn = document.getElementById("nav-tenant-name");
+                  tn.textContent = me.tenant_name;
+                  tn.style.display = "inline";
+                }
+                if (me.tenant_id === "default" && me.role === "admin") {
+                  const pl = document.createElement("a");
+                  pl.href = "/platform";
+                  pl.textContent = "Platform";
+                  document.querySelector(".nav-links").appendChild(pl);
+                }
+              }
+            } catch (e) {
+              /* /api/auth/me not available */
+            }
+          }
+        } catch (e) {
+          /* auth not available */
+        }
+        SessionManager.init();
+      }
+
+      // --- Utilities ---
+      function escHtml(s) {
+        return String(s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function timeAgo(iso) {
+        if (!iso) return "—";
+        const d = new Date(iso);
+        if (isNaN(d)) return "—";
+        const secs = Math.floor((Date.now() - d) / 1000);
+        if (secs < 60) return secs + "s ago";
+        if (secs < 3600) return Math.floor(secs / 60) + "m ago";
+        if (secs < 86400) return Math.floor(secs / 3600) + "h ago";
+        return Math.floor(secs / 86400) + "d ago";
+      }
+
+      function showToast(msg, type = "") {
+        const t = document.getElementById("toast");
+        t.textContent = msg;
+        t.className = "toast show" + (type ? " " + type : "");
+        clearTimeout(t._timer);
+        t._timer = setTimeout(() => {
+          t.className = "toast";
+        }, 3000);
+      }
+
+      checkAuth();
+      init();
+    </script>
+  </body>
+</html>

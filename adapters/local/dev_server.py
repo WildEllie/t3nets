@@ -204,6 +204,10 @@ async def platform_page(request: Request) -> Response:
     return _file_response("platform.html", "adapters/local")
 
 
+async def training_page(request: Request) -> Response:
+    return _file_response("training.html", "adapters/local")
+
+
 async def serve_logo(request: Request) -> Response:
     base = Path(__file__).parent.parent.parent
     path = base / "adapters/local/logo.png"
@@ -1427,6 +1431,96 @@ async def handle_platform_tenant_detail(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# Training data admin handlers (local dev — no strict auth)
+# ---------------------------------------------------------------------------
+
+
+async def handle_training_admin(request: Request) -> Response:
+    """Handle /api/admin/training and /api/admin/training/{id} routes."""
+    method = request.method
+    path = str(request.url.path)
+    parts = path.rstrip("/").split("/")
+    # parts: ['', 'api', 'admin', 'training', maybe id]
+    example_id = parts[4] if len(parts) > 4 else ""
+
+    try:
+        if method == "GET" and not example_id:
+            limit = int(request.query_params.get("limit", "50"))
+            unannotated = request.query_params.get("unannotated", "false").lower() == "true"
+            examples = await training_store.list_examples(DEFAULT_TENANT, limit=limit)
+            if unannotated:
+                examples = [e for e in examples if not e.admin_override_skill]
+            return JSONResponse(
+                {
+                    "examples": [
+                        {
+                            "example_id": e.example_id,
+                            "message_text": e.message_text,
+                            "timestamp": e.timestamp,
+                            "matched_skill": e.matched_skill,
+                            "matched_action": e.matched_action,
+                            "was_disabled_skill": e.was_disabled_skill,
+                            "confidence": e.confidence,
+                            "admin_override_skill": e.admin_override_skill,
+                            "admin_override_action": e.admin_override_action,
+                        }
+                        for e in examples
+                    ],
+                    "count": len(examples),
+                }
+            )
+
+        elif method == "PATCH" and example_id:
+            body = await request.json()
+            skill = body.get("skill", "")
+            action = body.get("action", "")
+            found = await training_store.annotate_example(DEFAULT_TENANT, example_id, skill, action)
+            if not found:
+                return JSONResponse({"error": "Example not found"}, status_code=404)
+            return JSONResponse({"example_id": example_id, "annotated": True})
+
+        elif method == "DELETE" and example_id:
+            found = await training_store.delete_example(DEFAULT_TENANT, example_id)
+            if not found:
+                return JSONResponse({"error": "Example not found"}, status_code=404)
+            return JSONResponse({"example_id": example_id, "deleted": True})
+
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    except Exception as e:
+        logger.exception("Training admin error")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_rules_admin(request: Request) -> Response:
+    """Handle /api/admin/rules/rebuild and /api/admin/rules/status."""
+    method = request.method
+    path = str(request.url.path)
+
+    try:
+        if method == "POST" and path.endswith("/rebuild"):
+            asyncio.create_task(_rebuild_rules(DEFAULT_TENANT))
+            return JSONResponse({"rebuilding": True, "tenant_id": DEFAULT_TENANT})
+
+        if method == "GET" and path.endswith("/status"):
+            rule_set = await rule_store.load_rule_set(DEFAULT_TENANT)
+            engine = _compiled_engines.get(DEFAULT_TENANT)
+            return JSONResponse(
+                {
+                    "tenant_id": DEFAULT_TENANT,
+                    "version": rule_set.version if rule_set else 0,
+                    "generated_at": rule_set.generated_at if rule_set else None,
+                    "skill_count": len(rule_set.rules) if rule_set else 0,
+                    "engine_loaded": engine is not None,
+                }
+            )
+
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    except Exception as e:
+        logger.exception("Rules admin error")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
 # Teams webhook
 # ---------------------------------------------------------------------------
 
@@ -1805,6 +1899,7 @@ routes = [
     Route("/settings", settings_page),
     Route("/onboard", onboard_page),
     Route("/platform", platform_page),
+    Route("/training", training_page),
     # API
     Route("/api/events", sse_endpoint),
     Route("/api/health", handle_health_api),
@@ -1832,6 +1927,9 @@ routes = [
     Route("/api/platform/tenants", handle_platform_create_tenant, methods=["POST"]),
     Route("/api/platform/tenants/{rest:path}", handle_platform_tenant_detail),
     # Admin routes
+    Route("/api/admin/rules/{rest:path}", handle_rules_admin),
+    Route("/api/admin/training/{example_id}", handle_training_admin),
+    Route("/api/admin/training", handle_training_admin),
     Route("/api/admin/tenants", handle_create_tenant, methods=["POST"]),
     Route("/api/admin/tenants/{rest:path}", handle_admin_tenant_detail),
 ]

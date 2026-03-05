@@ -22,10 +22,11 @@ logger = logging.getLogger("t3nets.admin")
 class AdminAPI:
     """Handles admin-level API requests for tenant management."""
 
-    def __init__(self, tenants: Any, secrets: Any, skills: Any) -> None:
+    def __init__(self, tenants: Any, secrets: Any, skills: Any, training_store: Any = None) -> None:
         self.tenants = tenants
         self.secrets = secrets
         self.skills = skills
+        self.training_store = training_store
 
     def handle_request(
         self,
@@ -46,6 +47,23 @@ class AdminAPI:
             # For now, any authenticated user with a tenant can access admin.
             # TODO: add role-based access (admin claim in JWT)
 
+            # Training endpoints — tenant_id injected by server via X-Tenant-Id header
+            _tenant_id = headers.get("x-tenant-id") or headers.get("X-Tenant-Id", "")
+            if method == "GET" and path == "/api/admin/training":
+                if not _tenant_id:
+                    return {"error": "Tenant not found for user"}, 404
+                return self._list_training(_tenant_id, 50, False)
+            elif method == "PATCH" and path.startswith("/api/admin/training/"):
+                if not _tenant_id:
+                    return {"error": "Tenant not found for user"}, 404
+                example_id = path.rstrip("/").split("/")[-1]
+                return self._annotate_training(_tenant_id, example_id, body or {})
+            elif method == "DELETE" and path.startswith("/api/admin/training/"):
+                if not _tenant_id:
+                    return {"error": "Tenant not found for user"}, 404
+                example_id = path.rstrip("/").split("/")[-1]
+                return self._delete_training(_tenant_id, example_id)
+
             if method == "GET" and path == "/api/admin/tenants":
                 return self._list_tenants()
             elif method == "GET" and path.startswith("/api/admin/tenants/"):
@@ -61,9 +79,7 @@ class AdminAPI:
                 parts = path.rstrip("/").split("/")
                 if len(parts) > 5 and parts[5] == "invitations":
                     tenant_id = parts[4]
-                    return self._create_invitation(
-                        tenant_id, body or {}, headers
-                    )
+                    return self._create_invitation(tenant_id, body or {}, headers)
                 return {"error": "Not found"}, 404
             elif method == "DELETE" and path.startswith("/api/admin/tenants/"):
                 parts = path.rstrip("/").split("/")
@@ -89,6 +105,7 @@ class AdminAPI:
     def _list_tenants(self) -> tuple[dict[str, Any], int]:
         """List all tenants."""
         import asyncio
+
         tenant_list = asyncio.run(self.tenants.list_tenants())
         return {
             "tenants": [
@@ -108,6 +125,7 @@ class AdminAPI:
     def _get_tenant(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """Get a single tenant with full details."""
         import asyncio
+
         try:
             tenant = asyncio.run(self.tenants.get_tenant(tenant_id))
         except Exception:
@@ -130,7 +148,9 @@ class AdminAPI:
             "integrations": list(connected),
         }, 200
 
-    def _create_tenant(self, body: dict[str, Any], headers: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    def _create_tenant(
+        self, body: dict[str, Any], headers: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
         """Create a new tenant, optionally with a first admin user.
 
         This endpoint uses relaxed auth: the user may not have a tenant_id
@@ -147,6 +167,7 @@ class AdminAPI:
 
         # Validate tenant_id format (URL-safe: lowercase, numbers, hyphens)
         import re
+
         if not re.match(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$", tenant_id) or len(tenant_id) < 3:
             return {
                 "error": "tenant_id must be 3+ chars, lowercase letters/numbers/hyphens only"
@@ -237,7 +258,10 @@ class AdminAPI:
     # --- Invitation management ---
 
     def _create_invitation(
-        self, tenant_id: str, body: dict[str, Any], headers: dict[str, Any],
+        self,
+        tenant_id: str,
+        body: dict[str, Any],
+        headers: dict[str, Any],
     ) -> tuple[dict[str, Any], int]:
         """Create an invitation to join a tenant."""
         import asyncio
@@ -322,6 +346,72 @@ class AdminAPI:
         logger.info(f"Revoked invitation {invite_code}")
 
         return {"revoked": True, "invite_code": invite_code}, 200
+
+    def _resolve_tenant_id(self, user_id: str) -> Optional[str]:
+        """Resolve the caller's tenant_id from their cognito sub via DynamoDB."""
+        import asyncio
+
+        try:
+            user = asyncio.run(self.tenants.get_user_by_cognito_sub(user_id))
+            return user.tenant_id if user else None
+        except Exception:
+            return None
+
+    # --- Training data ---
+
+    def _list_training(
+        self, tenant_id: str, limit: int, unannotated: bool
+    ) -> tuple[dict[str, Any], int]:
+        import asyncio
+
+        if not self.training_store:
+            return {"examples": [], "count": 0}, 200
+        examples = asyncio.run(self.training_store.list_examples(tenant_id, limit=limit))
+        if unannotated:
+            examples = [e for e in examples if not e.admin_override_skill]
+        return {
+            "examples": [
+                {
+                    "example_id": e.example_id,
+                    "message_text": e.message_text,
+                    "timestamp": e.timestamp,
+                    "matched_skill": e.matched_skill,
+                    "matched_action": e.matched_action,
+                    "was_disabled_skill": e.was_disabled_skill,
+                    "confidence": e.confidence,
+                    "admin_override_skill": e.admin_override_skill,
+                    "admin_override_action": e.admin_override_action,
+                }
+                for e in examples
+            ],
+            "count": len(examples),
+        }, 200
+
+    def _annotate_training(
+        self, tenant_id: str, example_id: str, body: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        import asyncio
+
+        if not self.training_store:
+            return {"error": "Training store not configured"}, 500
+        skill = body.get("skill", "")
+        action = body.get("action", "")
+        found = asyncio.run(
+            self.training_store.annotate_example(tenant_id, example_id, skill, action)
+        )
+        if not found:
+            return {"error": "Example not found"}, 404
+        return {"example_id": example_id, "annotated": True}, 200
+
+    def _delete_training(self, tenant_id: str, example_id: str) -> tuple[dict[str, Any], int]:
+        import asyncio
+
+        if not self.training_store:
+            return {"error": "Training store not configured"}, 500
+        found = asyncio.run(self.training_store.delete_example(tenant_id, example_id))
+        if not found:
+            return {"error": "Example not found"}, 404
+        return {"example_id": example_id, "deleted": True}, 200
 
     def _list_users(self, tenant_id: str) -> tuple[dict[str, Any], int]:
         """List all users in a tenant."""
