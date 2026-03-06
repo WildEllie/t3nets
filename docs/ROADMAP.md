@@ -202,7 +202,7 @@ Two-path signup: existing flow creates a new tenant; invited users join an exist
 Replace hand-maintained regex patterns (170+ rules in `rule_router.py`) with AI-generated, per-tenant rule sets. The core idea: keep $0 regex routing for known requests, but have AI generate and maintain the rules automatically when skills are enabled/disabled.
 
 **Phase 5a — Core Rule Engine**
-      ↳ ✅ Completed
+      ↳ ✅ Completed — see [handoff notes](../handoffs/020-phase-5a-ai-generated-rule-engine.md)
 - [x] Skill trigger storage in DynamoDB (triggers, actions, action_descriptions per skill)
 - [x] Rule Engine Builder service — AI generates optimized regex rules from skill metadata + tenant's enabled skill combination
 - [x] Compiled Rule Engine — in-memory compiled regex matching per tenant, loaded from DynamoDB

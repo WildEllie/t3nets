@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from agent.skills.registry import SkillRegistry, SkillDefinition
+from agent.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,9 @@ class RuleSet:
 # First match wins, so put specific patterns before general ones.
 
 SKILL_ACTION_RULES: dict[str, list[tuple[str, str]]] = {
+    "ping": [
+        (r".*", "ping"),  # single action — any match routes here
+    ],
     "sprint_status": [
         # Blockers
         (r"\bblock(ed|er|ing|s)?\b", "blockers"),
@@ -97,21 +100,6 @@ SKILL_ACTION_RULES: dict[str, list[tuple[str, str]]] = {
         # Fallback
         (r"\brelease\b", "summarize"),
     ],
-    "meeting_prep": [
-        (r"\b(next|upcoming)\s+meeting\b", "prepare"),
-        (r"\bmeeting\b.*\b(prep|prepare|brief|ready)\b", "prepare"),
-        (r"\bbrief\s*(me|ing)\b", "prepare"),
-        (r"\bagenda\b", "agenda"),
-        (r"\btopics?\b.*\bmeeting\b", "agenda"),
-    ],
-    "email_triage": [
-        (r"\b(urgent|important|priority)\b.*\b(email|message|mail)\b", "priority"),
-        (r"\b(email|message|mail)\b.*\b(urgent|important|priority)\b", "priority"),
-        (r"\binbox\b", "summary"),
-        (r"\b(unread|new)\b.*\b(email|message|mail)\b", "summary"),
-        (r"\bemail\b", "summary"),
-        (r"\bmail\b", "summary"),
-    ],
 }
 
 # --- Skill detection patterns (broader than action rules) ---
@@ -119,6 +107,13 @@ SKILL_ACTION_RULES: dict[str, list[tuple[str, str]]] = {
 # Action rules above determine WHICH action within the skill.
 
 SKILL_PATTERNS: dict[str, list[str]] = {
+    "ping": [
+        r"\bping\b",
+        r"\btest\s*model\b",
+        r"\bare\s*you\s*alive\b",
+        r"\bhealth\s*check\b",
+        r"\bmodel\s*test\b",
+    ],
     "sprint_status": [
         r"\bsprint\b",
         r"\bblock(ed|er|ing|s)?\b",
@@ -159,17 +154,6 @@ SKILL_PATTERNS: dict[str, list[str]] = {
         r"\bsummariz\w*\b.*\brelease\b",
         r"\brelease\b.*\bsummar\w*\b",
         r"\brelease\b(?!\s*(status|ready|readiness)\b)",
-    ],
-    "meeting_prep": [
-        r"\bmeeting\b",
-        r"\bagenda\b",
-        r"\bbrief(ing)?\b",
-        r"\b(next|upcoming)\s+(call|sync|standup|meeting)\b",
-    ],
-    "email_triage": [
-        r"\b(inbox|email|mail)\b",
-        r"\bunread\b",
-        r"\b(urgent|important)\s+(email|message)\b",
     ],
 }
 
