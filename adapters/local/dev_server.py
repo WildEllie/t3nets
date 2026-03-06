@@ -91,6 +91,15 @@ started_at: float = 0.0
 
 # Per-tenant compiled rule engines (keyed by tenant_id)
 _compiled_engines: dict[str, CompiledRuleEngine] = {}
+_bg_tasks: set[asyncio.Task[None]] = set()  # strong refs to fire-and-forget tasks
+
+
+def _fire_and_forget(coro: asyncio.coroutines.CoroutineType) -> None:  # type: ignore[type-arg]
+    """Schedule a coroutine as a background task, retaining a strong reference
+    so the GC cannot collect it before it completes."""
+    task: asyncio.Task[None] = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
 
 DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
@@ -473,7 +482,7 @@ async def handle_settings_post(request: Request) -> Response:
         if changed:
             await tenants.update_tenant(tenant)
         if rebuild_skills:
-            asyncio.create_task(_rebuild_rules(DEFAULT_TENANT))
+            _fire_and_forget(_rebuild_rules(DEFAULT_TENANT))
         return JSONResponse({"ok": True})
 
     except Exception as e:
@@ -841,7 +850,7 @@ Include risk assessment and actionable suggestions where relevant."""
                 )
                 total_tokens = 0
                 route_type = "disabled_skill"
-                asyncio.create_task(
+                _fire_and_forget(
                     _log_training(DEFAULT_TENANT, clean_text, None, None, was_disabled_skill=True)
                 )
 
@@ -875,7 +884,7 @@ Include risk assessment and actionable suggestions where relevant."""
                     if not skill_result:
                         skill_result = {"error": "Skill returned no result"}
 
-                    asyncio.create_task(
+                    _fire_and_forget(
                         _log_training(
                             DEFAULT_TENANT,
                             clean_text,
@@ -925,7 +934,7 @@ Include risk assessment and actionable suggestions where relevant."""
                         route_type = "ai"
                 else:
                     # Freeform chat response — no skill matched
-                    asyncio.create_task(_log_training(DEFAULT_TENANT, clean_text, None, None))
+                    _fire_and_forget(_log_training(DEFAULT_TENANT, clean_text, None, None))
                     assistant_text = response.text or "I'm not sure how to help with that."
                     total_tokens = response.input_tokens + response.output_tokens
                     route_type = "ai"
@@ -1498,7 +1507,7 @@ async def handle_rules_admin(request: Request) -> Response:
 
     try:
         if method == "POST" and path.endswith("/rebuild"):
-            asyncio.create_task(_rebuild_rules(DEFAULT_TENANT))
+            _fire_and_forget(_rebuild_rules(DEFAULT_TENANT))
             return JSONResponse({"rebuilding": True, "tenant_id": DEFAULT_TENANT})
 
         if method == "GET" and path.endswith("/status"):
@@ -1632,7 +1641,7 @@ When you have data to present, format it clearly with structure."""
                 f"Contact your admin to enable it."
             )
             total_tokens = 0
-            asyncio.create_task(
+            _fire_and_forget(
                 _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
             )
         else:
@@ -1653,7 +1662,7 @@ When you have data to present, format it clearly with structure."""
                     message.channel_user_id,
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
-                asyncio.create_task(
+                _fire_and_forget(
                     _log_training(
                         tenant_id,
                         clean_text,
@@ -1685,7 +1694,7 @@ When you have data to present, format it clearly with structure."""
                     + final.output_tokens
                 )
             else:
-                asyncio.create_task(_log_training(tenant_id, clean_text, None, None))
+                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
                 assistant_text = response.text or "Not sure how to help."
                 total_tokens = response.input_tokens + response.output_tokens
 
@@ -1812,7 +1821,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                 f"Contact your admin to enable it."
             )
             total_tokens = 0
-            asyncio.create_task(
+            _fire_and_forget(
                 _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
             )
         else:
@@ -1833,7 +1842,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                     message.channel_user_id,
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
-                asyncio.create_task(
+                _fire_and_forget(
                     _log_training(
                         tenant_id,
                         clean_text,
@@ -1865,7 +1874,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                     + final.output_tokens
                 )
             else:
-                asyncio.create_task(_log_training(tenant_id, clean_text, None, None))
+                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
                 assistant_text = response.text or "Not sure how to help."
                 total_tokens = response.input_tokens + response.output_tokens
 
