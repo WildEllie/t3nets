@@ -104,7 +104,7 @@ _compiled_engines: dict[str, CompiledRuleEngine] = {}
 _bg_tasks: set[asyncio.Task[None]] = set()  # strong refs to fire-and-forget tasks
 
 
-def _fire_and_forget(coro: asyncio.coroutines.CoroutineType) -> None:  # type: ignore[type-arg]
+def _fire_and_forget(coro: Any) -> None:  # type: ignore[type-arg]
     """Schedule a coroutine as a background task, retaining a strong reference
     so the GC cannot collect it before it completes."""
     task: asyncio.Task[None] = asyncio.create_task(coro)
