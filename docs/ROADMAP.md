@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 7, 2026 (Phase 5c Ollama integration completed)
+**Last Updated:** March 7, 2026 (Phase 5c Ollama integration complete)
 
 ---
 
@@ -232,7 +232,9 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 - [x] Dev server wiring: `OLLAMA_API_URL` env var, fallback when no `ANTHROPIC_API_KEY`
 - [x] AWS server wiring: `OLLAMA_API_URL` env var, ECS sidecar container support
 - [x] Settings UI: Ollama models with "Free" badge in model selector
-- [x] Docker Compose: Ollama sidecar service with persistent volume
+- [x] Docker Compose: Ollama sidecar with persistent volume + `docker-compose.ollama.yml` override for automatic wiring
+- [x] Terraform: Ollama sidecar in ECS task definition (`use_ollama` feature flag, `ollama_model`, `ollama_memory_mb`)
+- [x] Security: ECS sidecar shares task network namespace (localhost) — no SG changes needed; Docker Compose uses internal DNS
 - [x] Tier 1 formatting with free model: optional `tier1_formatting_model` in `TenantSettings`
 - [x] Unit tests for OllamaProvider (mock HTTP, tool call mapping)
 - [x] **Milestone:** Free models selectable for any tenant; zero-cost local dev without API key

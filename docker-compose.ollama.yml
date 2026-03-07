@@ -1,0 +1,31 @@
+# Ollama override — wires OLLAMA_API_URL and adds health-based startup ordering.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up
+#
+# This override:
+#   1. Removes the [ollama] profile so the service starts automatically
+#   2. Adds a health check to the ollama service
+#   3. Sets OLLAMA_API_URL=http://ollama:11434 in the router
+#   4. Makes the router wait for Ollama to be healthy before starting
+#
+# To pull a model after first start:
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull llama3.2:3b
+
+services:
+  ollama:
+    profiles: []  # Remove profile restriction — starts with the rest of the stack
+    healthcheck:
+      test: ["CMD", "/bin/ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  router:
+    environment:
+      # Point router at the ollama service (Docker internal DNS resolves by service name)
+      OLLAMA_API_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy

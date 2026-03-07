@@ -220,6 +220,20 @@ else
     echo ""
 fi
 
+# --- Pull Ollama model in sidecar (if enabled) ---
+USE_OLLAMA_FLAG="${USE_OLLAMA:-false}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:3b}"
+if [ "$USE_OLLAMA_FLAG" = "true" ]; then
+    echo "═══════════════════════════════════════"
+    echo "  Ollama sidecar enabled"
+    echo "  Model: ${OLLAMA_MODEL}"
+    echo "═══════════════════════════════════════"
+    echo "→ Ollama sidecar will pull '${OLLAMA_MODEL}' automatically on container start."
+    echo "  Model download happens inside the task — first cold start may take several minutes."
+    echo "  Monitor progress: aws logs tail /ecs/${NAME_PREFIX}-ollama --follow --region ${REGION}"
+    echo ""
+fi
+
 # --- Update ECS service (force new deployment) ---
 echo "→ Updating ECS service..."
 aws ecs update-service \

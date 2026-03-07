@@ -140,6 +140,11 @@ module "compute" {
 
   # DynamoDB-backed WebSocket connection registry (cross-task fan-out)
   ws_connections_table_name = module.data.ws_connections_table_name
+
+  # Phase 5c: Ollama sidecar
+  use_ollama       = var.use_ollama
+  ollama_model     = var.ollama_model
+  ollama_memory_mb = var.ollama_memory_mb
 }
 
 # --- WebSocket API (real-time push, replaces SSE for AWS) ---

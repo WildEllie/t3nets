@@ -3,7 +3,9 @@
 # Or for Python-only local dev: python -m adapters.local.dev_server
 #
 # To use Ollama (free AI, no API key needed):
-#   docker compose --profile ollama up
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up
+#   # First time: pull a model inside the container:
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull llama3.2:3b
 #
 # To use Anthropic API:
 #   Set ANTHROPIC_API_KEY in .env, then: docker compose up
@@ -16,6 +18,12 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "/bin/ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   router:
     build:

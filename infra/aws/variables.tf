@@ -59,3 +59,21 @@ variable "use_async_skills" {
   type        = bool
   default     = false
 }
+
+variable "use_ollama" {
+  description = "Feature flag: run Ollama as a sidecar container in the ECS task for free local AI"
+  type        = bool
+  default     = false
+}
+
+variable "ollama_model" {
+  description = "Ollama model to pull on container startup (e.g. llama3.2:3b, llama3.1:8b, mistral:7b)"
+  type        = string
+  default     = "llama3.2:3b"
+}
+
+variable "ollama_memory_mb" {
+  description = "Memory (MB) allocated to the Ollama sidecar container. Task total = router_memory + ollama_memory_mb"
+  type        = number
+  default     = 4096
+}
