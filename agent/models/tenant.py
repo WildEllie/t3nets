@@ -14,6 +14,7 @@ class TenantSettings:
     # AI
     ai_provider: str = "bedrock"
     ai_model: str = ""  # set from BEDROCK_MODEL_ID at deploy time
+    tier1_formatting_model: str = ""  # optional: free model for Tier 1 result formatting
     system_prompt_override: str = ""
     max_tokens_per_message: int = 4096
 

@@ -6,8 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from agent.models.tenant import Tenant, TenantUser
 from agent.models.message import ChannelType
+from agent.models.tenant import Tenant, TenantUser
 
 
 @dataclass
@@ -22,9 +22,7 @@ class RequestContext:
     channel: ChannelType
     conversation_id: str
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @property
     def tenant_id(self) -> str:
@@ -36,4 +34,7 @@ class RequestContext:
 
     def log_prefix(self) -> str:
         """For structured logging."""
-        return f"[{self.tenant_id}:{self.user.display_name}:{self.channel.value}:{self.request_id[:8]}]"
+        return (
+            f"[{self.tenant_id}:{self.user.display_name}"
+            f":{self.channel.value}:{self.request_id[:8]}]"
+        )

@@ -221,6 +221,21 @@ Replace hand-maintained regex patterns (170+ rules in `rule_router.py`) with AI-
 - [ ] Dashboard UI — training data viewer, skill mapping, performance metrics (hit rate, false positive rate)
 - [ ] **Milestone:** Admins can review unmatched messages and improve routing accuracy over time
 
+**Phase 5c — Ollama Integration (Free AI Models)**
+      ↳ 📐 Full plan: [plan-ollama-integration.md](plan-ollama-integration.md)
+
+Add Ollama as a third AI provider, enabling zero-cost local development and free model selection for any tenant. Ollama runs as a separate container/process and exposes an OpenAI-compatible API with tool use support.
+
+- [ ] `OllamaProvider` adapter implementing `AIProvider` (OpenAI-compatible API, `urllib` only)
+- [ ] Model registry entries: Llama 3.2 3B, Llama 3.1 8B, Mistral 7B, Qwen 2.5 7B
+- [ ] Dev server wiring: `OLLAMA_API_URL` env var, fallback when no `ANTHROPIC_API_KEY`
+- [ ] AWS server wiring: `OLLAMA_API_URL` env var, ECS sidecar container support
+- [ ] Settings UI: Ollama models with "Free" badge in model selector
+- [ ] Docker Compose: Ollama sidecar service with persistent volume
+- [ ] Tier 1 formatting with free model: optional `tier1_formatting_model` in `TenantSettings`
+- [ ] Unit tests for OllamaProvider (mock HTTP, tool call mapping)
+- [ ] **Milestone:** Free models selectable for any tenant; zero-cost local dev without API key
+
 ### Phase 6: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
       ↳ ✅ Completed — see [handoff notes](../handoffs/001-fix-release-notes-skill.md)
@@ -317,6 +332,7 @@ Practices are complete team experience bundles: skills + custom console pages + 
 
 ### AI & Models
 - [x] Centralized model registry with per-provider resolution
+- [ ] Ollama / OpenAI-compatible provider for free local models (see Phase 5c)
 - [ ] Per-tenant model selection
 - [ ] Per-tier model configuration (conversational / formatting / routing models)
 - [ ] Bedrock Intelligent Prompt Routing evaluation
@@ -374,6 +390,7 @@ All project docs in `docs/`:
 | `decision-log.md` | Architecture Decision Records (ADRs) |
 | `dynamodb-schema.md` | Table schemas, key patterns, query examples |
 | `hybrid-routing.md` | Three-tier routing architecture deep-dive |
+| `plan-ollama-integration.md` | Ollama free AI model integration plan |
 
 ---
 

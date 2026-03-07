@@ -237,6 +237,8 @@
         .model-tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
         .model-tag.bedrock-only { background: #78350f; color: #fbbf24; }
         .model-tag.current { background: #065f46; color: #6ee7b7; }
+        .model-tag.free { background: #1e3a5f; color: #93c5fd; }
+        .model-tag.unavailable { background: #374151; color: #9ca3af; }
 
         /* --- Skills --- */
         .skill-list {
@@ -947,8 +949,10 @@
                 if (isDisabled) div.classList.add('disabled');
 
                 let tagHtml = '';
+                const isOllamaModel = ['llama-3.2-3b','llama-3.1-8b','mistral-7b','qwen-2.5-7b'].includes(model.id);
                 if (isSelected) tagHtml = '<span class="model-tag current">Current</span>';
-                else if (isDisabled) tagHtml = '<span class="model-tag bedrock-only">Bedrock only</span>';
+                else if (isDisabled) tagHtml = `<span class="model-tag unavailable">${provider === 'ollama' ? 'Cloud only' : 'Not available'}</span>`;
+                if (!isDisabled && isOllamaModel) tagHtml += '<span class="model-tag free">Free</span>';
 
                 div.innerHTML = `
                     <div class="model-radio"></div>

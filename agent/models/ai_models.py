@@ -16,7 +16,8 @@ class AIModel:
     display_name: str  # full name for settings page
     anthropic_id: str  # Anthropic API model ID ("" if unsupported)
     bedrock_id: str  # base Bedrock model ID, no region prefix ("" if unsupported)
-    providers: list[str] = field(default_factory=list)  # ["anthropic", "bedrock"]
+    ollama_id: str = ""  # Ollama model tag, e.g. "llama3.1:8b" ("" if unsupported)
+    providers: list[str] = field(default_factory=list)  # ["anthropic", "bedrock", "ollama"]
 
 
 AVAILABLE_MODELS: dict[str, AIModel] = {
@@ -68,6 +69,43 @@ AVAILABLE_MODELS: dict[str, AIModel] = {
         bedrock_id="meta.llama3-2-1b-instruct-v1:0",
         providers=["bedrock"],
     ),
+    # --- Ollama models (free, local) ---
+    "llama-3.2-3b": AIModel(
+        id="llama-3.2-3b",
+        short_name="Llama 3.2 3B",
+        display_name="Meta Llama 3.2 3B",
+        anthropic_id="",
+        bedrock_id="",
+        ollama_id="llama3.2:3b",
+        providers=["ollama"],
+    ),
+    "llama-3.1-8b": AIModel(
+        id="llama-3.1-8b",
+        short_name="Llama 3.1 8B",
+        display_name="Meta Llama 3.1 8B",
+        anthropic_id="",
+        bedrock_id="",
+        ollama_id="llama3.1:8b",
+        providers=["ollama"],
+    ),
+    "mistral-7b": AIModel(
+        id="mistral-7b",
+        short_name="Mistral 7B",
+        display_name="Mistral 7B",
+        anthropic_id="",
+        bedrock_id="",
+        ollama_id="mistral:7b",
+        providers=["ollama"],
+    ),
+    "qwen-2.5-7b": AIModel(
+        id="qwen-2.5-7b",
+        short_name="Qwen 2.5 7B",
+        display_name="Qwen 2.5 7B",
+        anthropic_id="",
+        bedrock_id="",
+        ollama_id="qwen2.5:7b",
+        providers=["ollama"],
+    ),
 }
 
 DEFAULT_MODEL_ID = "claude-sonnet-4-5"
@@ -91,6 +129,8 @@ def get_model_for_provider(model_id: str, provider: str) -> str:
         return model.anthropic_id
     if provider == "bedrock":
         return model.bedrock_id
+    if provider == "ollama":
+        return model.ollama_id
     return ""
 
 
@@ -101,10 +141,12 @@ def get_models_for_provider(provider: str) -> list[dict[str, object]]:
     """
     result = []
     for model in AVAILABLE_MODELS.values():
-        result.append({
-            "id": model.id,
-            "short_name": model.short_name,
-            "display_name": model.display_name,
-            "available": provider in model.providers,
-        })
+        result.append(
+            {
+                "id": model.id,
+                "short_name": model.short_name,
+                "display_name": model.display_name,
+                "available": provider in model.providers,
+            }
+        )
     return result
