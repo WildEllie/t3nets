@@ -45,7 +45,7 @@ class OllamaProvider(AIProvider):
         if tools:
             body["tools"] = [self._tool_to_openai(t) for t in tools]
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._call_api, body)
 
     async def chat_with_tool_result(
@@ -79,7 +79,7 @@ class OllamaProvider(AIProvider):
         if tools:
             body["tools"] = [self._tool_to_openai(t) for t in tools]
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._call_api, body)
 
     def _convert_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
