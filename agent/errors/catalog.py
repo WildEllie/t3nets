@@ -258,6 +258,34 @@ ERROR_PATTERNS: list[tuple[re.Pattern[str], FriendlyError]] = [
         ),
     ),
 
+    # ── Ollama (local free AI) ────────────────────────────────────────────
+
+    (
+        re.compile(r"Ollama model '([^']+)' not found|not found.*ollama pull", re.IGNORECASE),
+        FriendlyError(
+            message=(
+                "The selected AI model isn't downloaded yet. "
+                "Pull it with: ollama pull <model-name> "
+                "(e.g. ollama pull llama3.1:8b), then try again."
+            ),
+            severity=ErrorSeverity.CONFIG,
+            error_code="OLLAMA_MODEL_MISSING",
+            action="Run: ollama pull <model-name>",
+        ),
+    ),
+    (
+        re.compile(r"Cannot reach Ollama|Is Ollama running", re.IGNORECASE),
+        FriendlyError(
+            message=(
+                "I can't connect to the local AI model (Ollama). "
+                "Make sure Ollama is running: ollama serve"
+            ),
+            severity=ErrorSeverity.CONFIG,
+            error_code="OLLAMA_UNREACHABLE",
+            action="Run: ollama serve",
+        ),
+    ),
+
     # ── Anthropic Direct API (local dev) ──────────────────────────────────
 
     (
