@@ -2088,7 +2088,7 @@ def main() -> None:
     logger.info("  ╚══════════════════════════════════════╝")
     logger.info("")
 
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning", timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

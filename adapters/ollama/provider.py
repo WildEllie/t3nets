@@ -174,7 +174,7 @@ class OllamaProvider(AIProvider):
         req.add_header("Content-Type", "application/json")
 
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 result = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             error_body = e.read().decode()
@@ -185,9 +185,7 @@ class OllamaProvider(AIProvider):
                     f"Ollama model '{model_name}' not found. "
                     f"Pull it first: ollama pull {model_name}"
                 ) from e
-            raise ConnectionError(
-                f"Ollama API returned HTTP {e.code}: {error_body[:200]}"
-            ) from e
+            raise ConnectionError(f"Ollama API returned HTTP {e.code}: {error_body[:200]}") from e
         except urllib.error.URLError as e:
             logger.error(f"Ollama connection error: {e}")
             raise ConnectionError(
