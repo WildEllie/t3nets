@@ -46,6 +46,7 @@ from adapters.local.sqlite_rule_store import SQLiteRuleStore
 from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
 from adapters.local.sqlite_training_store import SQLiteTrainingStore
+from adapters.ollama.provider import OllamaProvider
 from adapters.shared.server_utils import (
     INTEGRATION_SCHEMAS,
     _format_raw_json,
@@ -59,6 +60,7 @@ from agent.channels.telegram import TelegramAdapter
 from agent.errors.handler import ErrorHandler
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
+    AIModel,
     get_model,
     get_model_for_provider,
     get_models_for_provider,
@@ -78,7 +80,7 @@ logging.basicConfig(
 logger = logging.getLogger("t3nets.dev")
 
 # --- Global state (initialized in main) ---
-ai: AnthropicProvider
+ai: AnthropicProvider | OllamaProvider
 memory: SQLiteConversationStore
 tenants: SQLiteTenantStore
 secrets: EnvSecretsProvider
@@ -104,7 +106,8 @@ def _fire_and_forget(coro: Any) -> None:  # type: ignore[type-arg]
 
 DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
-PROVIDER = "anthropic"
+OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "")
+PROVIDER = "ollama" if OLLAMA_API_URL else "anthropic"
 
 # Build number — read from version.txt at startup
 _version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
@@ -125,16 +128,23 @@ sse_manager = SSEConnectionManager()
 
 
 def _resolve_model(tenant: Any) -> tuple[str, str]:
-    """Resolve the tenant's ai_model setting to an Anthropic API model ID and short name."""
+    """Resolve the tenant's ai_model setting to a provider-specific model ID and short name."""
     model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
     model = get_model(model_id)
-    if not model:
-        logger.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL_ID}")
-        model_id = DEFAULT_MODEL_ID
+    if not model or PROVIDER not in model.providers:
+        # Fall back to first model available for current provider
+        fallback = DEFAULT_MODEL_ID if PROVIDER == "anthropic" else "llama-3.1-8b"
+        logger.warning(
+            f"Model '{model_id}' not available for {PROVIDER}, falling back to {fallback}"
+        )
+        model_id = fallback
         model = get_model(model_id)
-    assert model is not None, f"Default model {DEFAULT_MODEL_ID} not found in registry"
+    assert model is not None, f"Fallback model {model_id} not found in registry"
     api_id = get_model_for_provider(model_id, PROVIDER)
-    return api_id or model.anthropic_id, model.short_name
+    if not api_id:
+        # Last resort: use anthropic_id for anthropic, ollama_id for ollama
+        api_id = model.ollama_id if PROVIDER == "ollama" else model.anthropic_id
+    return api_id, model.short_name
 
 
 def _file_response(filename: str, search_dir: str | None = None) -> Response:
@@ -1984,14 +1994,19 @@ async def init() -> None:
     # Load .env
     secrets = EnvSecretsProvider(".env")
 
-    # Check for API key
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        logger.error("ANTHROPIC_API_KEY not set. Copy .env.example to .env and add your key.")
-        sys.exit(1)
-
-    # Initialize adapters
-    ai = AnthropicProvider(api_key)
+    # Initialize AI provider
+    if OLLAMA_API_URL:
+        logger.info(f"Using Ollama provider at {OLLAMA_API_URL}")
+        ai = OllamaProvider(base_url=OLLAMA_API_URL)
+    else:
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            logger.error(
+                "No AI provider configured. Set ANTHROPIC_API_KEY or OLLAMA_API_URL "
+                "in .env. For free local AI: ollama serve & set OLLAMA_API_URL=http://localhost:11434"
+            )
+            sys.exit(1)
+        ai = AnthropicProvider(api_key)
     memory = SQLiteConversationStore("data/t3nets.db")
     tenants = SQLiteTenantStore("data/t3nets.db")
 
@@ -2019,8 +2034,13 @@ async def init() -> None:
         name="Dev",
         enabled_skills=skills.list_skill_names(),
     )
-    if not tenant.settings.ai_model:
-        tenant.settings.ai_model = DEFAULT_MODEL_ID
+    default = "llama-3.1-8b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
+    if (
+        not tenant.settings.ai_model
+        or PROVIDER
+        not in (get_model(tenant.settings.ai_model) or AIModel("", "", "", "", "")).providers
+    ):
+        tenant.settings.ai_model = default
         await tenants.update_tenant(tenant)
     logger.info(f"Tenant: {tenant.name} (skills: {tenant.settings.enabled_skills})")
 

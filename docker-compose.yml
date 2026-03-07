@@ -1,8 +1,22 @@
 # Local development stack
 # Run: docker compose up
 # Or for Python-only local dev: python -m adapters.local.dev_server
+#
+# To use Ollama (free AI, no API key needed):
+#   docker compose --profile ollama up
+#
+# To use Anthropic API:
+#   Set ANTHROPIC_API_KEY in .env, then: docker compose up
 
 services:
+  ollama:
+    image: ollama/ollama
+    profiles: [ollama]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
   router:
     build:
       context: .
@@ -11,10 +25,14 @@ services:
       - "8080:8080"
     environment:
       - T3NETS_ENV=local
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_API_URL=${OLLAMA_API_URL:-}
     volumes:
       - ./agent:/app/agent          # Hot reload
       - ./adapters:/app/adapters    # Hot reload
       - ./data:/app/data            # SQLite + local files
     env_file:
       - .env
+
+volumes:
+  ollama_data:

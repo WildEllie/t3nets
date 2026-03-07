@@ -53,6 +53,7 @@ from adapters.aws.secrets_manager import SecretsManagerProvider
 from adapters.aws.sqs_poller import SQSResultPoller
 from adapters.aws.ws_connections import WebSocketConnectionManager
 from adapters.local.direct_bus import DirectBus
+from adapters.ollama.provider import OllamaProvider
 from adapters.shared.server_utils import (
     INTEGRATION_SCHEMAS,
     _format_raw_json,
@@ -85,7 +86,7 @@ logging.basicConfig(
 logger = logging.getLogger("t3nets.aws")
 
 # --- Global state ---
-ai: BedrockProvider
+ai: BedrockProvider | OllamaProvider
 memory: DynamoDBConversationStore
 tenants: DynamoDBTenantStore
 secrets: SecretsManagerProvider
@@ -121,7 +122,8 @@ USE_ASYNC_SKILLS = os.environ.get("USE_ASYNC_SKILLS", "false").lower() == "true"
 
 DEFAULT_TENANT = "default"
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
-PROVIDER = "bedrock"
+OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "")
+PROVIDER = "ollama" if OLLAMA_API_URL else "bedrock"
 PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")
 STAGE = os.environ.get("T3NETS_STAGE", "dev")
 WS_API_ENDPOINT = os.environ.get("WS_API_ENDPOINT", "")
@@ -180,14 +182,22 @@ def _bedrock_geo_prefix() -> str:
 
 
 def _resolve_model(tenant: Any) -> tuple[str, str]:
-    """Resolve tenant's ai_model to a Bedrock inference profile ID and short name."""
+    """Resolve tenant's ai_model to a provider-specific model ID and short name."""
     model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
     model = get_model(model_id)
-    if not model:
-        logger.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL_ID}")
-        model_id = DEFAULT_MODEL_ID
+    if not model or PROVIDER not in model.providers:
+        fallback = "llama-3.1-8b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
+        logger.warning(
+            f"Model '{model_id}' not available for {PROVIDER}, falling back to {fallback}"
+        )
+        model_id = fallback
         model = get_model(model_id)
-    assert model is not None, f"Default model {DEFAULT_MODEL_ID} not found in registry"
+    assert model is not None, f"Fallback model {model_id} not found in registry"
+
+    if PROVIDER == "ollama":
+        ollama_id = get_model_for_provider(model_id, "ollama")
+        return ollama_id or model.ollama_id, model.short_name
+
     bedrock_id = get_model_for_provider(model_id, PROVIDER)
     if bedrock_id:
         geo = _bedrock_geo_prefix()
@@ -2204,15 +2214,24 @@ async def init() -> None:
     tenants_table = os.getenv("DYNAMODB_TENANTS_TABLE")
     secrets_prefix = os.getenv("SECRETS_PREFIX")
 
-    if not all([conversations_table, tenants_table, secrets_prefix, BEDROCK_MODEL_ID]):
+    if not all([conversations_table, tenants_table, secrets_prefix]):
         logger.error(
-            "Missing required env vars: DYNAMODB_CONVERSATIONS_TABLE, DYNAMODB_TENANTS_TABLE, "
-            "SECRETS_PREFIX, BEDROCK_MODEL_ID"
+            "Missing required env vars: DYNAMODB_CONVERSATIONS_TABLE, "
+            "DYNAMODB_TENANTS_TABLE, SECRETS_PREFIX"
         )
         sys.exit(1)
 
     assert conversations_table and tenants_table and secrets_prefix  # narrowed above
-    ai = BedrockProvider(region=region, model_id=BEDROCK_MODEL_ID)
+
+    # Initialize AI provider
+    if OLLAMA_API_URL:
+        logger.info(f"Using Ollama provider at {OLLAMA_API_URL}")
+        ai = OllamaProvider(base_url=OLLAMA_API_URL)
+    else:
+        if not BEDROCK_MODEL_ID:
+            logger.error("BEDROCK_MODEL_ID required when not using OLLAMA_API_URL")
+            sys.exit(1)
+        ai = BedrockProvider(region=region, model_id=BEDROCK_MODEL_ID)
     memory = DynamoDBConversationStore(conversations_table, region=region)
     tenants = DynamoDBTenantStore(tenants_table, region=region)
     secrets = SecretsManagerProvider(secrets_prefix, region=region)
