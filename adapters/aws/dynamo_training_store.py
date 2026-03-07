@@ -8,6 +8,7 @@ Schema (stored in the tenants table, single-table design):
 Sorted by SK so list_examples() can use a range query without a scan.
 """
 
+import asyncio
 from typing import Optional
 
 import boto3  # type: ignore[import-untyped]
@@ -41,9 +42,9 @@ class DynamoDBTrainingStore(TrainingStore):
         if example.confidence is not None:
             item["confidence"] = str(example.confidence)  # DynamoDB decimal-safe
 
-        self.table.put_item(
+        await asyncio.to_thread(
+            self.table.put_item,
             Item=item,
-            ConditionExpression="attribute_not_exists(pk) OR attribute_not_exists(sk)",
         )
 
     def _find_sk(self, tenant_id: str, example_id: str) -> Optional[str]:
@@ -86,11 +87,8 @@ class DynamoDBTrainingStore(TrainingStore):
         self.table.delete_item(Key={"pk": f"TENANT#{tenant_id}", "sk": sk})
         return True
 
-    async def list_examples(
-        self,
-        tenant_id: str,
-        limit: int = 100,
-    ) -> list[TrainingExample]:
+    def _list_examples_sync(self, tenant_id: str, limit: int) -> list[TrainingExample]:
+        """Synchronous DynamoDB query — call via asyncio.to_thread from async contexts."""
         response = self.table.query(
             KeyConditionExpression=(
                 Key("pk").eq(f"TENANT#{tenant_id}") & Key("sk").begins_with("TRAINING#")
@@ -117,3 +115,10 @@ class DynamoDBTrainingStore(TrainingStore):
                 )
             )
         return examples
+
+    async def list_examples(
+        self,
+        tenant_id: str,
+        limit: int = 100,
+    ) -> list[TrainingExample]:
+        return await asyncio.to_thread(self._list_examples_sync, tenant_id, limit)

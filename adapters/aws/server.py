@@ -2162,8 +2162,8 @@ routes = [
     ),
     # Admin and Platform (delegated to API objects via thread pool)
     Route("/api/admin/rules/{rest:path}", handle_rules_admin),
-    Route("/api/admin/{rest:path}", handle_admin),
-    Route("/api/platform/{rest:path}", handle_platform),
+    Route("/api/admin/{rest:path}", handle_admin, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    Route("/api/platform/{rest:path}", handle_platform, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
 ]
 
 middleware = [

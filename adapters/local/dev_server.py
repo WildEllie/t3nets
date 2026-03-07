@@ -1937,8 +1937,8 @@ routes = [
     Route("/api/platform/tenants/{rest:path}", handle_platform_tenant_detail),
     # Admin routes
     Route("/api/admin/rules/{rest:path}", handle_rules_admin),
-    Route("/api/admin/training/{example_id}", handle_training_admin),
-    Route("/api/admin/training", handle_training_admin),
+    Route("/api/admin/training/{example_id}", handle_training_admin, methods=["GET", "PATCH", "DELETE"]),
+    Route("/api/admin/training", handle_training_admin, methods=["GET"]),
     Route("/api/admin/tenants", handle_create_tenant, methods=["POST"]),
     Route("/api/admin/tenants/{rest:path}", handle_admin_tenant_detail),
 ]
