@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 3, 2026 (Practices plan + AI-generated rule engine)
+**Last Updated:** March 7, 2026 (Phase 5c Ollama integration completed)
 
 ---
 
@@ -223,18 +223,19 @@ Replace hand-maintained regex patterns (170+ rules in `rule_router.py`) with AI-
 
 **Phase 5c — Ollama Integration (Free AI Models)**
       ↳ 📐 Full plan: [plan-ollama-integration.md](plan-ollama-integration.md)
+      ↳ ✅ Completed — see [handoff notes](../handoffs/021-phase-5c-ollama-integration.md)
 
 Add Ollama as a third AI provider, enabling zero-cost local development and free model selection for any tenant. Ollama runs as a separate container/process and exposes an OpenAI-compatible API with tool use support.
 
-- [ ] `OllamaProvider` adapter implementing `AIProvider` (OpenAI-compatible API, `urllib` only)
-- [ ] Model registry entries: Llama 3.2 3B, Llama 3.1 8B, Mistral 7B, Qwen 2.5 7B
-- [ ] Dev server wiring: `OLLAMA_API_URL` env var, fallback when no `ANTHROPIC_API_KEY`
-- [ ] AWS server wiring: `OLLAMA_API_URL` env var, ECS sidecar container support
-- [ ] Settings UI: Ollama models with "Free" badge in model selector
-- [ ] Docker Compose: Ollama sidecar service with persistent volume
-- [ ] Tier 1 formatting with free model: optional `tier1_formatting_model` in `TenantSettings`
-- [ ] Unit tests for OllamaProvider (mock HTTP, tool call mapping)
-- [ ] **Milestone:** Free models selectable for any tenant; zero-cost local dev without API key
+- [x] `OllamaProvider` adapter implementing `AIProvider` (OpenAI-compatible API, `urllib` only)
+- [x] Model registry entries: Llama 3.2 3B, Llama 3.1 8B, Mistral 7B, Qwen 2.5 7B
+- [x] Dev server wiring: `OLLAMA_API_URL` env var, fallback when no `ANTHROPIC_API_KEY`
+- [x] AWS server wiring: `OLLAMA_API_URL` env var, ECS sidecar container support
+- [x] Settings UI: Ollama models with "Free" badge in model selector
+- [x] Docker Compose: Ollama sidecar service with persistent volume
+- [x] Tier 1 formatting with free model: optional `tier1_formatting_model` in `TenantSettings`
+- [x] Unit tests for OllamaProvider (mock HTTP, tool call mapping)
+- [x] **Milestone:** Free models selectable for any tenant; zero-cost local dev without API key
 
 ### Phase 6: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
@@ -332,7 +333,7 @@ Practices are complete team experience bundles: skills + custom console pages + 
 
 ### AI & Models
 - [x] Centralized model registry with per-provider resolution
-- [ ] Ollama / OpenAI-compatible provider for free local models (see Phase 5c)
+- [x] Ollama / OpenAI-compatible provider for free local models (see Phase 5c)
 - [ ] Per-tenant model selection
 - [ ] Per-tier model configuration (conversational / formatting / routing models)
 - [ ] Bedrock Intelligent Prompt Routing evaluation
