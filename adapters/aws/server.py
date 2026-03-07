@@ -72,9 +72,9 @@ from agent.models.ai_models import (
 )
 from agent.models.message import ChannelType
 from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
-from agent.router.rule_router import RuleBasedRouter
 from agent.router.models import TrainingExample
 from agent.router.rule_engine_builder import RuleEngineBuilder
+from agent.router.rule_router import RuleBasedRouter
 from agent.skills.registry import SkillRegistry
 from agent.sse import SSEConnectionManager
 
@@ -110,6 +110,8 @@ def _fire_and_forget(coro: Any) -> None:  # type: ignore[type-arg]
     task: asyncio.Task[None] = asyncio.create_task(coro)
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
+
+
 # Fallback trigger-based router used when no compiled engine exists for a tenant
 _fallback_router: RuleBasedRouter | None = None
 platform_api: PlatformAPI
@@ -1107,7 +1109,8 @@ async def _log_training(
             was_disabled_skill=was_disabled_skill,
         )
         logger.info(
-            f"Training: logging example for tenant={tenant_id} skill={matched_skill} msg={message_text[:40]!r}"
+            f"Training: logging example for tenant={tenant_id} skill={matched_skill} "
+            f"msg={message_text[:40]!r}"
         )
         await training_store.log_example(example)
         logger.info(f"Training: logged example {example.example_id}")
@@ -1295,6 +1298,7 @@ When you have data to present, format it clearly with structure."""
                     assistant_text = response.text or "Not sure how to help."
                     total_tokens = response.input_tokens + response.output_tokens
                     route_type = "ai"
+                    _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
 
         stats["total_tokens"] += total_tokens
         roundtrip_sec = round(time.time() - request_start, 1)
@@ -1370,9 +1374,7 @@ async def _handle_async_skill(
         f"Chat: async skill '{skill_name}' dispatched, request={request_id[:8]}, user={user_key}"
     )
     if route_type == "ai":
-        _fire_and_forget(
-            _log_training(tenant_id, user_message, skill_name, params.get("action"))
-        )
+        _fire_and_forget(_log_training(tenant_id, user_message, skill_name, params.get("action")))
     return JSONResponse(
         {
             "status": "processing",
@@ -2161,9 +2163,15 @@ routes = [
         methods=["POST"],
     ),
     # Admin and Platform (delegated to API objects via thread pool)
-    Route("/api/admin/rules/{rest:path}", handle_rules_admin),
-    Route("/api/admin/{rest:path}", handle_admin, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
-    Route("/api/platform/{rest:path}", handle_platform, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    Route("/api/admin/rules/{rest:path}", handle_rules_admin, methods=["GET", "POST"]),
+    Route(
+        "/api/admin/{rest:path}", handle_admin, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
+    ),
+    Route(
+        "/api/platform/{rest:path}",
+        handle_platform,
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    ),
 ]
 
 middleware = [
