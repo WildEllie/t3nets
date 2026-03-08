@@ -11,24 +11,11 @@
 #   Set ANTHROPIC_API_KEY in .env, then: docker compose up
 
 services:
-  ollama:
-    image: ollama/ollama
-    profiles: [ollama]
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "/bin/ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
   router:
     build:
       context: .
       dockerfile: Dockerfile.router
+    command: ["python", "-m", "adapters.local.dev_server"]
     ports:
       - "8080:8080"
     environment:
@@ -41,6 +28,3 @@ services:
       - ./data:/app/data            # SQLite + local files
     env_file:
       - .env
-
-volumes:
-  ollama_data:

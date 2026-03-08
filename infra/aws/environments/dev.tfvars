@@ -10,9 +10,8 @@ bedrock_model_id = "anthropic.claude-sonnet-4-5-20250929-v1:0"
 # Phase 3b: Async skill execution via EventBridge + Lambda + SQS
 use_async_skills = true
 
-# Phase 5c: Ollama sidecar — free local AI in ECS (Llama 3.2 3B, ~2 GB RAM)
-use_ollama    = true
-ollama_model  = "llama3.2:3b"
+# Phase 5c: Ollama sidecar — disabled on AWS (Bedrock Llama 3.2 1B is cheaper at low volume)
+use_ollama = false
 
 # Cognito callback URLs — localhost for local dev, API Gateway for deployed app
 cognito_callback_urls = [

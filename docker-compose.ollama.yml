@@ -14,7 +14,11 @@
 
 services:
   ollama:
-    profiles: []  # Remove profile restriction — starts with the rest of the stack
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
     healthcheck:
       test: ["CMD", "/bin/ollama", "list"]
       interval: 15s
@@ -29,3 +33,6 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+
+volumes:
+  ollama_data:
