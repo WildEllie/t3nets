@@ -186,7 +186,7 @@ def _resolve_model(tenant: Any) -> tuple[str, str]:
     model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
     model = get_model(model_id)
     if not model or PROVIDER not in model.providers:
-        fallback = "llama-3.1-8b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
+        fallback = "llama-3.2-3b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
         logger.warning(
             f"Model '{model_id}' not available for {PROVIDER}, falling back to {fallback}"
         )

@@ -949,7 +949,7 @@
                 if (isDisabled) div.classList.add('disabled');
 
                 let tagHtml = '';
-                const isOllamaModel = ['llama-3.2-3b','llama-3.1-8b','mistral-7b','qwen-2.5-7b'].includes(model.id);
+                const isOllamaModel = ['llama-3.2-3b'].includes(model.id);
                 if (isSelected) tagHtml = '<span class="model-tag current">Current</span>';
                 else if (isDisabled) {
                     const unavailLabel = provider === 'ollama' ? 'Cloud only'

@@ -70,6 +70,8 @@ AVAILABLE_MODELS: dict[str, AIModel] = {
         providers=["bedrock"],
     ),
     # --- Ollama models (free, local) ---
+    # Only models that fit within the sidecar's 4 GB RAM budget (~2 GB loaded).
+    # 7B/8B models (4-5 GB) exceed the sidecar limit and will OOM the container.
     "llama-3.2-3b": AIModel(
         id="llama-3.2-3b",
         short_name="Llama 3.2 3B",
@@ -77,33 +79,6 @@ AVAILABLE_MODELS: dict[str, AIModel] = {
         anthropic_id="",
         bedrock_id="",
         ollama_id="llama3.2:3b",
-        providers=["ollama"],
-    ),
-    "llama-3.1-8b": AIModel(
-        id="llama-3.1-8b",
-        short_name="Llama 3.1 8B",
-        display_name="Meta Llama 3.1 8B",
-        anthropic_id="",
-        bedrock_id="",
-        ollama_id="llama3.1:8b",
-        providers=["ollama"],
-    ),
-    "mistral-7b": AIModel(
-        id="mistral-7b",
-        short_name="Mistral 7B",
-        display_name="Mistral 7B",
-        anthropic_id="",
-        bedrock_id="",
-        ollama_id="mistral:7b",
-        providers=["ollama"],
-    ),
-    "qwen-2.5-7b": AIModel(
-        id="qwen-2.5-7b",
-        short_name="Qwen 2.5 7B",
-        display_name="Qwen 2.5 7B",
-        anthropic_id="",
-        bedrock_id="",
-        ollama_id="qwen2.5:7b",
         providers=["ollama"],
     ),
 }

@@ -2034,7 +2034,7 @@ async def init() -> None:
         name="Dev",
         enabled_skills=skills.list_skill_names(),
     )
-    default = "llama-3.1-8b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
+    default = "llama-3.2-3b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
     if (
         not tenant.settings.ai_model
         or PROVIDER
