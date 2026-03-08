@@ -125,3 +125,28 @@ def get_models_for_provider(provider: str) -> list[dict[str, object]]:
             }
         )
     return result
+
+
+def get_models_for_providers(providers: list[str]) -> list[dict[str, object]]:
+    """Return all models with availability info for a set of active providers.
+
+    A model is ``available`` when at least one of the given providers supports it.
+    ``available_via`` lists which active providers can run the model, so the UI
+    can show provider-specific labels (e.g. "Free" for Ollama-only models).
+    ``supported_by`` lists every provider that ever supports the model (for
+    showing why an unavailable model is disabled).
+    """
+    result = []
+    for model in AVAILABLE_MODELS.values():
+        available_via = [p for p in providers if p in model.providers]
+        result.append(
+            {
+                "id": model.id,
+                "short_name": model.short_name,
+                "display_name": model.display_name,
+                "available": len(available_via) > 0,
+                "available_via": available_via,
+                "supported_by": list(model.providers),
+            }
+        )
+    return result
