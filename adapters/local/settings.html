@@ -906,6 +906,7 @@
         // ==================== Settings ====================
         let currentModel = '';
         let provider = 'anthropic';
+        let platform = 'local';
         let settingsData = {};
 
         async function loadSettings() {
@@ -915,6 +916,7 @@
                 settingsData = data;
                 currentModel = data.ai_model || '';
                 provider = data.provider || 'anthropic';
+                platform = data.platform || 'local';
                 if (data.platform) document.getElementById('platform-badge').textContent = data.platform.toUpperCase();
                 if (data.stage) document.getElementById('stage-badge').textContent = data.stage.toUpperCase();
                 if (data.build) document.getElementById('build-number').textContent = data.build;
@@ -953,6 +955,7 @@
                 if (isSelected) tagHtml = '<span class="model-tag current">Current</span>';
                 else if (isDisabled) {
                     const unavailLabel = provider === 'ollama' ? 'Cloud only'
+                                       : isOllamaModel && platform === 'aws' ? 'Local only'
                                        : isOllamaModel        ? 'Requires Ollama'
                                        :                        'Not available';
                     tagHtml = `<span class="model-tag unavailable">${unavailLabel}</span>`;
