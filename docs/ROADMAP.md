@@ -215,11 +215,12 @@ Replace hand-maintained regex patterns (170+ rules in `rule_router.py`) with AI-
 - [x] **Milestone:** Majority of skill-routable messages handled at $0 via AI-generated rules; no hand-maintained regex
 
 **Phase 5b — Admin Training Tools**
-- [ ] Training data API endpoints (list, annotate, delete unmatched examples)
-- [ ] Admin maps unmatched messages to skills from dashboard
-- [ ] Rule recalculation endpoint — admin triggers rebuild incorporating training data
-- [ ] Dashboard UI — training data viewer, skill mapping, performance metrics (hit rate, false positive rate)
-- [ ] **Milestone:** Admins can review unmatched messages and improve routing accuracy over time
+      ↳ ✅ Completed
+- [x] Training data API endpoints (list, annotate, delete) — `GET/PATCH/DELETE /api/admin/training`
+- [x] Admin maps unmatched messages to skills from dashboard
+- [x] Rule recalculation endpoint — `POST /api/admin/rules/rebuild` incorporates annotated training data
+- [x] Dashboard UI — `training.html`: viewer, skill mapping dropdown, rebuild button, rules status
+- [x] **Milestone:** Admins can review unmatched messages and improve routing accuracy over time
 
 **Phase 5c — Ollama Integration (Free AI Models)**
       ↳ 📐 Full plan: [plan-ollama-integration.md](plan-ollama-integration.md)
