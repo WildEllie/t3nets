@@ -18,6 +18,7 @@ Usage:
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -42,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from adapters.local.anthropic_provider import AnthropicProvider
 from adapters.local.direct_bus import DirectBus
 from adapters.local.env_secrets import EnvSecretsProvider
+from adapters.local.file_store import FileStore
 from adapters.local.sqlite_rule_store import SQLiteRuleStore
 from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
@@ -67,6 +69,7 @@ from agent.models.ai_models import (
 )
 from agent.models.message import ChannelType
 from agent.models.tenant import Invitation
+from agent.practices.registry import PracticeRegistry
 from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
 from agent.router.models import TrainingExample
 from agent.router.rule_engine_builder import RuleEngineBuilder
@@ -89,6 +92,8 @@ bus: DirectBus
 rule_store: SQLiteRuleStore
 training_store: SQLiteTrainingStore
 error_handler: ErrorHandler
+practices: PracticeRegistry
+blobs: FileStore
 started_at: float = 0.0
 
 # Per-tenant compiled rule engines (keyed by tenant_id)
@@ -240,6 +245,16 @@ async def platform_page(request: Request) -> Response:
 
 async def training_page(request: Request) -> Response:
     return _file_response("training.html", "adapters/local")
+
+
+async def practice_page(request: Request) -> Response:
+    """Serve a practice page at /p/{practice}/{page}."""
+    practice_name = request.path_params["practice"]
+    page_slug = request.path_params["page"]
+    page_path = practices.get_page_path(practice_name, page_slug)
+    if page_path and page_path.exists():
+        return FileResponse(str(page_path), media_type="text/html")
+    return Response(status_code=404, content="Practice page not found")
 
 
 async def serve_logo(request: Request) -> Response:
@@ -1927,6 +1942,128 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
 
 
 # ---------------------------------------------------------------------------
+# Clinical API handlers
+# ---------------------------------------------------------------------------
+
+
+async def handle_skill_invoke(request: Request) -> Response:
+    """POST /api/skill/{name} — invoke a skill synchronously from practice pages."""
+    skill_name = request.path_params["name"]
+    try:
+        body = await request.json()
+        worker_fn = skills.get_worker(skill_name)
+
+        # Get secrets if the skill requires an integration
+        skill = skills.get_skill(skill_name)
+        skill_secrets: dict[str, Any] = {}
+        if skill and skill.requires_integration:
+            try:
+                skill_secrets = await secrets.get(DEFAULT_TENANT, skill.requires_integration)
+            except Exception:
+                pass
+
+        # Build context with tenant and blob store
+        ctx = {"blob_store": blobs, "tenant_id": DEFAULT_TENANT}
+        sig = inspect.signature(worker_fn)
+        if len(sig.parameters) >= 3:
+            result = worker_fn(body, skill_secrets, ctx)
+        else:
+            result = worker_fn(body, skill_secrets)
+
+        # Support async workers
+        if asyncio.iscoroutine(result):
+            result = await result
+
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Skill invoke failed ({skill_name}): {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_practices_list(request: Request) -> Response:
+    """GET /api/practices — list all installed practices."""
+    result = []
+    for p in practices.list_all():
+        result.append(
+            {
+                "name": p.name,
+                "display_name": p.display_name,
+                "description": p.description,
+                "version": p.version,
+                "icon": p.icon,
+                "built_in": p.built_in,
+                "skills": p.skills,
+                "pages": [
+                    {"slug": pg.slug, "title": pg.title, "nav_label": pg.nav_label}
+                    for pg in p.pages
+                ],
+            }
+        )
+    return JSONResponse(result)
+
+
+async def handle_practices_pages(request: Request) -> Response:
+    """GET /api/practices/pages — pages available to current tenant."""
+    try:
+        tenant = await tenants.get_tenant(DEFAULT_TENANT)
+        pages = practices.get_pages_for_tenant(tenant)
+        return JSONResponse(pages)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_practices_upload(request: Request) -> Response:
+    """POST /api/practices/upload — upload and install a practice ZIP."""
+    try:
+        body = await request.body()
+        data_dir = Path("data")
+        practice = practices.install_zip(body, data_dir)
+        # Register the new practice's skills
+        practices.register_skills(skills)
+        return JSONResponse(
+            {
+                "ok": True,
+                "name": practice.name,
+                "version": practice.version,
+                "skills": practice.skills,
+            }
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_blob_upload(request: Request) -> Response:
+    """POST /api/blobs/{key:path} — upload a binary blob to BlobStore."""
+    key = request.path_params["key"]
+    try:
+        body = await request.body()
+        await blobs.put(DEFAULT_TENANT, key, body)
+        return JSONResponse({"ok": True, "key": key, "size": len(body)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_blob_read(request: Request) -> Response:
+    """GET /api/blobs/{key:path} — read a binary blob from BlobStore."""
+    key = request.path_params["key"]
+    try:
+        data = await blobs.get(DEFAULT_TENANT, key)
+        # Guess content type from key extension
+        ct = "application/octet-stream"
+        if key.endswith(".json"):
+            ct = "application/json"
+        elif key.endswith(".webm"):
+            ct = "audio/webm"
+        elif key.endswith(".html"):
+            ct = "text/html"
+        return Response(data, media_type=ct)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
+# ---------------------------------------------------------------------------
 # Starlette app
 # ---------------------------------------------------------------------------
 
@@ -1940,6 +2077,7 @@ routes = [
     Route("/onboard", onboard_page),
     Route("/platform", platform_page),
     Route("/training", training_page),
+    Route("/p/{practice}/{page}", practice_page),
     # API
     Route("/api/events", sse_endpoint),
     Route("/api/health", handle_health_api),
@@ -1966,6 +2104,13 @@ routes = [
     Route("/api/platform/tenants", handle_platform_list_tenants, methods=["GET"]),
     Route("/api/platform/tenants", handle_platform_create_tenant, methods=["POST"]),
     Route("/api/platform/tenants/{rest:path}", handle_platform_tenant_detail),
+    # Practice routes
+    Route("/api/skill/{name}", handle_skill_invoke, methods=["POST"]),
+    Route("/api/practices", handle_practices_list, methods=["GET"]),
+    Route("/api/practices/pages", handle_practices_pages, methods=["GET"]),
+    Route("/api/practices/upload", handle_practices_upload, methods=["POST"]),
+    Route("/api/blobs/{key:path}", handle_blob_upload, methods=["POST"]),
+    Route("/api/blobs/{key:path}", handle_blob_read, methods=["GET"]),
     # Admin routes
     Route("/api/admin/rules/{rest:path}", handle_rules_admin, methods=["GET", "POST"]),
     Route(
@@ -2007,6 +2152,8 @@ async def init() -> None:
         rule_store, \
         training_store, \
         error_handler, \
+        practices, \
+        blobs, \
         started_at
 
     started_at = time.time()
@@ -2032,20 +2179,29 @@ async def init() -> None:
     ai = MultiAIProvider(_providers)
     memory = SQLiteConversationStore("data/t3nets.db")
     tenants = SQLiteTenantStore("data/t3nets.db")
+    blobs = FileStore("data/blobs")
 
-    # Load skills
+    # Load skills — base skills (ping) from agent/skills/
     skills = SkillRegistry()
     skills_dir = Path(__file__).parent.parent.parent / "agent" / "skills"
     skills.load_from_directory(skills_dir)
+
+    # Load practices and register their skills
+    practices = PracticeRegistry()
+    practices_dir = Path(__file__).parent.parent.parent / "agent" / "practices"
+    practices.load_builtin(practices_dir)
+    practices.load_uploaded(Path("data"))
+    practices.register_skills(skills)
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
+    logger.info(f"Loaded practices: {[p.name for p in practices.list_all()]}")
 
     # Rule and training stores
     rule_store = SQLiteRuleStore("data/t3nets.db")
     training_store = SQLiteTrainingStore("data/t3nets.db")
     error_handler = ErrorHandler()
 
-    # Direct bus
-    bus = DirectBus(skills, secrets)
+    # Direct bus — with context for practice skills (BlobStore access)
+    bus = DirectBus(skills, secrets, context={"blob_store": blobs})
 
     # Register channels
     channels = ChannelRegistry()

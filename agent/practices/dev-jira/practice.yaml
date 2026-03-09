@@ -1,0 +1,14 @@
+name: dev-jira
+display_name: "Dev — Jira"
+description: "Sprint management and release tracking for engineering teams using Jira"
+version: "1.0.0"
+icon: "gear"
+
+integrations:
+  - jira
+
+skills:
+  - sprint_status
+  - release_notes
+
+pages: []

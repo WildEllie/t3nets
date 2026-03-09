@@ -25,6 +25,11 @@ class TenantSettings:
     enabled_skills: list[str] = field(default_factory=list)
     custom_skills: list[str] = field(default_factory=list)
 
+    # Practices
+    primary_practice: str = ""  # Active practice name, e.g. "engineering"
+    addon_skills: list[str] = field(default_factory=list)  # Extra skills from other practices
+    addon_pages: list[str] = field(default_factory=list)  # "practice/page" format
+
     # Limits
     messages_per_day: int = 1000
     max_conversation_history: int = 20

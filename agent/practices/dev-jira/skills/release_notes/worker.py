@@ -9,12 +9,11 @@ No cloud imports. No Lambda knowledge. Pure business logic.
 Secrets are injected by the infrastructure layer.
 """
 
-import json
-import urllib.request
-import urllib.parse
 import base64
-from datetime import datetime
-from typing import Any, cast
+import json
+import urllib.parse
+import urllib.request
+from typing import Any
 
 
 def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
@@ -57,9 +56,7 @@ def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
 
 def _make_headers(secrets: dict[str, Any]) -> dict[str, str]:
     """Create Basic Auth headers for Jira Cloud."""
-    creds = base64.b64encode(
-        f"{secrets['email']}:{secrets['api_token']}".encode()
-    ).decode()
+    creds = base64.b64encode(f"{secrets['email']}:{secrets['api_token']}".encode()).decode()
     return {
         "Authorization": f"Basic {creds}",
         "Content-Type": "application/json",
@@ -79,8 +76,9 @@ def _jira_rest_request(secrets: dict[str, Any], endpoint: str) -> Any:
         return json.loads(response.read().decode())
 
 
-def _jira_search(secrets: dict[str, Any], jql: str, fields: list[str],
-                 max_per_page: int = 100) -> list[dict[str, Any]]:
+def _jira_search(
+    secrets: dict[str, Any], jql: str, fields: list[str], max_per_page: int = 100
+) -> list[dict[str, Any]]:
     """Execute a JQL search with automatic pagination.
 
     Uses the /rest/api/3/search/jql endpoint with nextPageToken pagination.
@@ -124,7 +122,10 @@ def _list_releases(secrets: dict[str, Any]) -> dict[str, Any]:
         project_key = _get_project_key_from_board(secrets)
 
     if not project_key:
-        return {"error": "Could not determine project key. Add 'project_key' to your Jira integration settings."}
+        return {
+            "error": "Could not determine project key. "
+            "Add 'project_key' to your Jira integration settings."
+        }
 
     data = _jira_rest_request(secrets, f"project/{project_key}/versions")
 
@@ -180,10 +181,20 @@ def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, 
     jql += " ORDER BY issuetype ASC, priority ASC, key ASC"
 
     fields = [
-        "summary", "status", "issuetype", "priority",
-        "assignee", "reporter", "created", "updated",
-        "resolutiondate", "resolution", "labels",
-        "components", "fixVersions", "customfield_10016",
+        "summary",
+        "status",
+        "issuetype",
+        "priority",
+        "assignee",
+        "reporter",
+        "created",
+        "updated",
+        "resolutiondate",
+        "resolution",
+        "labels",
+        "components",
+        "fixVersions",
+        "customfield_10016",
     ]
 
     raw_issues = _jira_search(secrets, jql, fields)
@@ -211,8 +222,7 @@ def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, 
     # Check if this is a future release with no meaningful work done
     if not version_info.get("released", False):
         status_names = [
-            (issue.get("fields", {}).get("status") or {}).get("name", "")
-            for issue in raw_issues
+            (issue.get("fields", {}).get("status") or {}).get("name", "") for issue in raw_issues
         ]
         work_statuses = {"In Progress", "In Review", "Done", "Closed", "Resolved"}
         has_work = any(s in work_statuses for s in status_names)
@@ -290,7 +300,9 @@ def _extract_issue(secrets: dict[str, Any], issue: dict[str, Any]) -> dict[str, 
     }
 
 
-def _get_version_info(secrets: dict[str, Any], project_key: str, release_name: str) -> dict[str, Any]:
+def _get_version_info(
+    secrets: dict[str, Any], project_key: str, release_name: str
+) -> dict[str, Any]:
     """Get metadata for a specific version."""
     if not project_key:
         return {}

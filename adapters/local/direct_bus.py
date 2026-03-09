@@ -6,12 +6,14 @@ When a skill is invoked, it's called directly and the result
 is fed back to Claude immediately (synchronous flow).
 """
 
+import asyncio
+import inspect
 import logging
 from typing import Any
 
 from agent.interfaces.event_bus import EventBus
-from agent.skills.registry import SkillRegistry
 from agent.interfaces.secrets_provider import SecretsProvider
+from agent.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +24,15 @@ class DirectBus(EventBus):
     Results are returned synchronously — no response handler needed.
     """
 
-    def __init__(self, skills: SkillRegistry, secrets: SecretsProvider):
+    def __init__(
+        self,
+        skills: SkillRegistry,
+        secrets: SecretsProvider,
+        context: dict[str, Any] | None = None,
+    ):
         self.skills = skills
         self.secrets = secrets
+        self.context: dict[str, Any] = context or {}
         self._pending_results: dict[str, dict[str, Any]] = {}
 
     async def publish(
@@ -65,8 +73,20 @@ class DirectBus(EventBus):
                     }
                     return
 
-            # Execute the skill worker
-            result = worker_fn(params, secrets)
+            # Build runtime context (includes tenant_id for this request)
+            runtime_ctx = {**self.context, "tenant_id": tenant_id}
+
+            # Execute the skill worker — pass context if it accepts 3+ args
+            sig = inspect.signature(worker_fn)
+            if len(sig.parameters) >= 3:
+                result = worker_fn(params, secrets, runtime_ctx)
+            else:
+                result = worker_fn(params, secrets)
+
+            # Support async workers (coroutines)
+            if asyncio.iscoroutine(result):
+                result = await result
+
             self._pending_results[request_id] = result
 
             logger.info(f"DirectBus: skill '{skill_name}' completed for request {request_id[:8]}")
