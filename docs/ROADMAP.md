@@ -248,63 +248,35 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 - [ ] Skill marketplace page in dashboard
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
-### Phase 6b: CBT Clinical Practice (First Practice)
-
-CBT therapy session recording and analysis for clinical social workers in private clinics. First implementation of a "practice" — a domain-specific experience bundle with custom pages, skills, and data models.
-
-**Core Infrastructure:**
-- [x] `Patient` and `Session` data models (`agent/models/clinical.py`)
-- [x] `PatientStore` and `SessionStore` interfaces (`agent/interfaces/`)
-- [x] `FileStore` — first `BlobStore` implementation for local dev (`adapters/local/file_store.py`)
-- [x] `SQLiteClinicalStore` — SQLite implementation (`adapters/local/sqlite_clinical_store.py`)
-
-**Skills:**
-- [x] `session_transcribe` — stub transcript for pipeline wiring (production: Whisper API)
-- [x] `session_analyze` — Claude-powered session analysis from transcript
-
-**API & Pages:**
-- [x] Clinical API endpoints: patient CRUD, session CRUD, recording upload, analysis pipeline
-- [x] Session recording page (`/clinical/record`) — patient management, voice recording, notes
-- [x] Session summary page (`/clinical/session/{id}`) — gauges, emotional timeline, metrics, flagged moments, comparison chart
-- [ ] **Milestone:** Therapist records a session, gets AI-powered analysis with emotional timeline and clinical insights
-
-**Future (Phase 6b.2):**
-- [ ] Real audio transcription (Whisper API integration)
-- [ ] Acoustic voice analysis (librosa/parselmouth for true vocal metrics)
-- [ ] Session export to PDF
-- [ ] Patient timeline / history view
-- [ ] Treatment plan tracking
-- [ ] DynamoDB + S3 adapters for AWS deployment
-
-
-### Phase 7: Email Delivery
-- [ ] SES domain verification + IAM in Terraform
-- [ ] HTML invite email template with tenant branding
-- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
-- [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
-- [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
-
-
 ### Phase 8: Practices — Team Experience Bundles
       ↳ 📐 Full plan: [plan-practices-team-experience-bundles.md](plan-practices-team-experience-bundles.md)
 
 Practices are complete team experience bundles: skills + custom console pages + functionality, uploadable as ZIPs. Pages interact with data through skills (same async EventBus flow as chat). One primary practice per tenant + add-on skills/pages from other practices.
 
 **Phase 8a — Core Practice Framework**
-- [ ] Practice data models (`PracticeDefinition`, `PracticePage`) and `PracticeRegistry`
-- [ ] Built-in engineering practice: move existing skills into `agent/practices/engineering/`
-- [ ] Practice manifest format (`practice.yaml`: skills, pages, integrations, system_prompt_addon)
-- [ ] `POST /api/skill/{name}` — async skill invocation for pages (returns 202, result via WebSocket/SSE)
-- [ ] `GET /api/practices/pages` — pages for tenant's dynamic nav injection
-- [ ] `GET /api/practices` — list installed practices
-- [ ] Practice page serving: `/p/{practice}/{page}` (local: FileResponse; AWS: S3 + CloudFront CDN)
-- [ ] Dynamic nav: practice page links injected after `checkAuth()` in all HTML pages
-- [ ] TenantSettings: `primary_practice`, `addon_skills`, `addon_pages`
-- [ ] Server startup: `PracticeRegistry.load_builtin()` replaces direct `SkillRegistry.load_from_directory()`
-- [ ] **Milestone:** Built-in engineering practice works with pages served at `/p/engineering/sprint`
+      ↳ ✅ Completed (local dev server)
+- [x] `PracticeDefinition` / `PracticePage` data models (`agent/models/practice.py`)
+- [x] `PracticeRegistry` — load built-in, load uploaded, install ZIP, register skills (`agent/practices/registry.py`)
+- [x] Practice manifest format (`practice.yaml`: skills, pages, integrations, system_prompt_addon)
+- [x] `SkillRegistry` `worker_path` support — `spec_from_file_location` for practice skills in non-importable paths
+- [x] `DirectBus` context injection — `blob_store`, `tenant_id` passed to 3-arg workers via `inspect.signature`
+- [x] `DirectBus` async worker support — `asyncio.iscoroutine` check + await
+- [x] Built-in `dev-jira` practice: `sprint_status` + `release_notes` moved to `agent/practices/dev-jira/skills/`
+- [x] `ping` stays as platform-level skill in `agent/skills/`
+- [x] `POST /api/skill/{name}` — skill invocation for pages
+- [x] `GET /api/practices/pages` — pages for tenant's dynamic nav injection
+- [x] `GET /api/practices` — list installed practices
+- [x] `POST /api/practices/upload` — ZIP upload, validation, extraction
+- [x] Practice page serving: `/p/{practice}/{page}` (local: FileResponse)
+- [x] Dynamic nav: `loadPracticePages()` injected after `checkAuth()` in all HTML pages
+- [x] `TenantSettings`: `primary_practice`, `addon_skills`, `addon_pages`
+- [x] `FileStore` — `BlobStore` implementation for practice data storage (`adapters/local/file_store.py`)
+- [x] Generic blob endpoints: `POST/GET /api/blobs/{key:path}`
+- [x] Server startup: `PracticeRegistry.load_builtin()` + `register_skills()` replaces direct skill loading
+- [x] **Milestone:** Practices framework running locally with dev-jira built-in practice
 
 **Phase 8b — Practice Upload & Management**
-- [ ] `POST /api/practices/upload` — ZIP upload, validation (structure, safety, name uniqueness), extraction
+- [x] `POST /api/practices/upload` — ZIP upload, validation (structure, name uniqueness), extraction
 - [ ] Settings UI: Practices tab (select primary, upload, manage add-ons)
 - [ ] Practice persistence (DynamoDB for AWS, SQLite for local)
 - [ ] S3-backed practice storage for uploaded ZIPs (pages + skills)
