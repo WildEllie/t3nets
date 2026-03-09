@@ -7,6 +7,7 @@ tool/function calling (Llama 3.1+, Mistral, Qwen, etc.).
 Also compatible with any OpenAI-compatible endpoint (vLLM, Groq, Together.ai).
 """
 
+import asyncio
 import json
 import logging
 import urllib.request
@@ -44,7 +45,8 @@ class OllamaProvider(AIProvider):
         if tools:
             body["tools"] = [self._tool_to_openai(t) for t in tools]
 
-        return self._call_api(body)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._call_api, body)
 
     async def chat_with_tool_result(
         self,
@@ -77,7 +79,8 @@ class OllamaProvider(AIProvider):
         if tools:
             body["tools"] = [self._tool_to_openai(t) for t in tools]
 
-        return self._call_api(body)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._call_api, body)
 
     def _convert_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert T3nets/Anthropic-style messages to OpenAI format."""
@@ -171,10 +174,20 @@ class OllamaProvider(AIProvider):
         req.add_header("Content-Type", "application/json")
 
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 result = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode()
+            logger.error(f"Ollama HTTP {e.code}: {error_body[:300]}")
+            model_name = body.get("model", "unknown")
+            if e.code == 404 or "not found" in error_body.lower():
+                raise RuntimeError(
+                    f"Ollama model '{model_name}' not found. "
+                    f"Pull it first: ollama pull {model_name}"
+                ) from e
+            raise ConnectionError(f"Ollama API returned HTTP {e.code}: {error_body[:200]}") from e
         except urllib.error.URLError as e:
-            logger.error(f"Ollama API error: {e}")
+            logger.error(f"Ollama connection error: {e}")
             raise ConnectionError(
                 f"Cannot reach Ollama at {self.base_url}. "
                 "Is Ollama running? Start it with: ollama serve"

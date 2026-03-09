@@ -49,6 +49,7 @@ from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
 from adapters.local.sqlite_training_store import SQLiteTrainingStore
 from adapters.ollama.provider import OllamaProvider
+from adapters.shared.multi_provider import MultiAIProvider
 from adapters.shared.server_utils import (
     INTEGRATION_SCHEMAS,
     _format_raw_json,
@@ -62,10 +63,9 @@ from agent.channels.telegram import TelegramAdapter
 from agent.errors.handler import ErrorHandler
 from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
-    AIModel,
     get_model,
     get_model_for_provider,
-    get_models_for_provider,
+    get_models_for_providers,
 )
 from agent.models.message import ChannelType
 from agent.models.tenant import Invitation
@@ -83,7 +83,7 @@ logging.basicConfig(
 logger = logging.getLogger("t3nets.dev")
 
 # --- Global state (initialized in main) ---
-ai: AnthropicProvider | OllamaProvider
+ai: MultiAIProvider
 memory: SQLiteConversationStore
 tenants: SQLiteTenantStore
 secrets: EnvSecretsProvider
@@ -112,7 +112,6 @@ def _fire_and_forget(coro: Any) -> None:  # type: ignore[type-arg]
 DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "")
-PROVIDER = "ollama" if OLLAMA_API_URL else "anthropic"
 
 # Build number — read from version.txt at startup
 _version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
@@ -132,24 +131,39 @@ stats = {
 sse_manager = SSEConnectionManager()
 
 
-def _resolve_model(tenant: Any) -> tuple[str, str]:
-    """Resolve the tenant's ai_model setting to a provider-specific model ID and short name."""
+def _resolve_model(tenant: Any) -> tuple[str, str, str]:
+    """Resolve the tenant's ai_model to (provider_name, api_model_id, short_name).
+
+    Picks the first active provider that supports the requested model.
+    Falls back gracefully when the selected model isn't available.
+    """
     model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
     model = get_model(model_id)
-    if not model or PROVIDER not in model.providers:
-        # Fall back to first model available for current provider
-        fallback = DEFAULT_MODEL_ID if PROVIDER == "anthropic" else "llama-3.1-8b"
+    active = ai.active_providers  # e.g. ["anthropic", "ollama"]
+
+    # Find the first active provider that supports this model
+    selected_provider: str | None = None
+    if model:
+        for p in active:
+            if p in model.providers:
+                selected_provider = p
+                break
+
+    if not selected_provider:
+        # Model not supported by any active provider — use a safe fallback
+        selected_provider = active[0]
+        fallback_id = "llama-3.2-3b" if "ollama" in active else DEFAULT_MODEL_ID
         logger.warning(
-            f"Model '{model_id}' not available for {PROVIDER}, falling back to {fallback}"
+            f"Model '{model_id}' not available for {active}, falling back to {fallback_id}"
         )
-        model_id = fallback
+        model_id = fallback_id
         model = get_model(model_id)
     assert model is not None, f"Fallback model {model_id} not found in registry"
-    api_id = get_model_for_provider(model_id, PROVIDER)
+
+    api_id = get_model_for_provider(model_id, selected_provider)
     if not api_id:
-        # Last resort: use anthropic_id for anthropic, ollama_id for ollama
-        api_id = model.ollama_id if PROVIDER == "ollama" else model.anthropic_id
-    return api_id, model.short_name
+        api_id = model.ollama_id if selected_provider == "ollama" else model.anthropic_id
+    return selected_provider, api_id, model.short_name
 
 
 def _file_response(filename: str, search_dir: str | None = None) -> Response:
@@ -343,8 +357,8 @@ async def handle_health_api(request: Request) -> Response:
                 "ai_model": tenant.settings.ai_model,
             },
             "ai": {
-                "provider": "anthropic (direct)",
-                "model": _resolve_model(tenant)[0],
+                "providers": ai.active_providers,
+                "model": _resolve_model(tenant)[1],
                 "api_key_preview": key_preview,
                 "total_tokens": stats["total_tokens"],
             },
@@ -419,8 +433,8 @@ async def handle_settings_get(request: Request) -> Response:
         return JSONResponse(
             {
                 "ai_model": s.ai_model or DEFAULT_MODEL_ID,
-                "provider": PROVIDER,
-                "models": get_models_for_provider(PROVIDER),
+                "providers": ai.active_providers,
+                "models": get_models_for_providers(ai.active_providers),
                 "platform": os.getenv("T3NETS_PLATFORM", "local"),
                 "stage": os.getenv("T3NETS_STAGE", "dev"),
                 "build": BUILD_NUMBER,
@@ -451,9 +465,10 @@ async def handle_settings_post(request: Request) -> Response:
             model = get_model(model_id)
             if not model:
                 return JSONResponse({"error": f"Unknown model: {model_id}"}, status_code=400)
-            if PROVIDER not in model.providers:
+            active = ai.active_providers
+            if not any(p in model.providers for p in active):
                 return JSONResponse(
-                    {"error": f"Model '{model_id}' not available for {PROVIDER}"}, status_code=400
+                    {"error": f"Model '{model_id}' not available for {active}"}, status_code=400
                 )
             tenant.settings.ai_model = model_id
             changed = True
@@ -712,13 +727,13 @@ async def _rebuild_rules(tenant_id: str) -> None:
         # Include recent training data to improve patterns
         training_data = await training_store.list_examples(tenant_id, limit=50)
 
-        api_model, _ = _resolve_model(tenant)
+        active_provider, api_model, _ = _resolve_model(tenant)
         builder = RuleEngineBuilder()
         rule_set = await builder.build_rules(
             tenant_id=tenant_id,
             enabled_skills=enabled,
             disabled_skills=disabled,
-            ai=ai,
+            ai=ai.for_provider(active_provider),
             model=api_model,
             training_data=training_data or None,
         )
@@ -793,7 +808,8 @@ async def handle_chat(request: Request) -> Response:
 
         history = _strip_metadata(await memory.get_conversation(DEFAULT_TENANT, conversation_id))
         tenant = await tenants.get_tenant(DEFAULT_TENANT)
-        active_model, model_short_name = _resolve_model(tenant)
+        active_provider, active_model, model_short_name = _resolve_model(tenant)
+        provider_ai = ai.for_provider(active_provider)
 
         system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
@@ -804,7 +820,9 @@ When you have data to present, format it clearly with structure."""
             logger.info("Route: CONVERSATIONAL (no tools)")
             stats["conversational"] += 1
             messages = history + [{"role": "user", "content": clean_text}]
-            response = await ai.chat(model=active_model, system=system, messages=messages, tools=[])
+            response = await provider_ai.chat(
+                model=active_model, system=system, messages=messages, tools=[]
+            )
             assistant_text = response.text or "Hey! How can I help?"
             total_tokens = response.input_tokens + response.output_tokens
             route_type = "conversational"
@@ -859,7 +877,7 @@ You called the {match.skill_name} tool and got this data:
 Format this data into a clear, helpful response for the user.
 Include risk assessment and actionable suggestions where relevant."""
                     messages = history + [{"role": "user", "content": format_prompt}]
-                    response = await ai.chat(
+                    response = await provider_ai.chat(
                         model=active_model, system=system, messages=messages, tools=[]
                     )
                     assistant_text = response.text or "Got the data but couldn't format it."
@@ -889,7 +907,7 @@ Include risk assessment and actionable suggestions where relevant."""
 
                 tools = skills.get_tools_for_tenant(type("Ctx", (), {"tenant": tenant})())
                 messages = history + [{"role": "user", "content": clean_text}]
-                response = await ai.chat(
+                response = await provider_ai.chat(
                     model=active_model, system=system, messages=messages, tools=tools
                 )
 
@@ -940,7 +958,7 @@ Include risk assessment and actionable suggestions where relevant."""
                                 ],
                             }
                         ]
-                        final_response = await ai.chat_with_tool_result(
+                        final_response = await provider_ai.chat_with_tool_result(
                             model=active_model,
                             system=system,
                             messages=messages_with_tool,
@@ -1616,7 +1634,8 @@ async def _handle_teams_message_local(
     logger.info(f"Teams [{tenant_id}]: {text[:100]}")
 
     clean_text, is_raw = strip_raw_flag(text)
-    active_model, model_short_name = _resolve_model(tenant)
+    active_provider, active_model, model_short_name = _resolve_model(tenant)
+    provider_ai = ai.for_provider(active_provider)
     system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 You are communicating via Microsoft Teams. Keep responses clear and well-formatted.
@@ -1627,7 +1646,7 @@ When you have data to present, format it clearly with structure."""
     if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
-        response = await ai.chat(active_model, system, messages, [])
+        response = await provider_ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
@@ -1657,7 +1676,7 @@ When you have data to present, format it clearly with structure."""
                     f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly."
                 )
                 messages = history + [{"role": "user", "content": prompt}]
-                response = await ai.chat(active_model, system, messages, [])
+                response = await provider_ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
         elif teams_engine and (disabled_skill := teams_engine.check_disabled_skill(clean_text)):
@@ -1674,7 +1693,7 @@ When you have data to present, format it clearly with structure."""
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
             messages = history + [{"role": "user", "content": clean_text}]
-            response = await ai.chat(active_model, system, messages, tools)
+            response = await provider_ai.chat(active_model, system, messages, tools)
             if response.has_tool_use:
                 tc = response.tool_calls[0]
                 request_id = f"teams-ai-{conversation_id}"
@@ -1709,7 +1728,7 @@ When you have data to present, format it clearly with structure."""
                         ],
                     }
                 ]
-                final = await ai.chat_with_tool_result(
+                final = await provider_ai.chat_with_tool_result(
                     active_model, system, messages_with_tool, tools, tc.tool_use_id, skill_result
                 )
                 assistant_text = final.text or "Got data but couldn't format."
@@ -1797,7 +1816,8 @@ async def _handle_telegram_message_local(adapter: TelegramAdapter, update: dict[
     await adapter.send_typing_indicator(message.conversation_id)
 
     clean_text, is_raw = strip_raw_flag(text)
-    active_model, model_short_name = _resolve_model(tenant)
+    active_provider, active_model, model_short_name = _resolve_model(tenant)
+    provider_ai = ai.for_provider(active_provider)
     system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 You are communicating via Telegram. Keep responses concise and well-formatted.
@@ -1808,7 +1828,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
     if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
-        response = await ai.chat(active_model, system, messages, [])
+        response = await provider_ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
@@ -1837,7 +1857,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                     f"Format this clearly and concisely for Telegram."
                 )
                 messages = history + [{"role": "user", "content": prompt}]
-                response = await ai.chat(active_model, system, messages, [])
+                response = await provider_ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
         elif tg_engine and (disabled_skill := tg_engine.check_disabled_skill(clean_text)):
@@ -1854,7 +1874,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
             messages = history + [{"role": "user", "content": clean_text}]
-            response = await ai.chat(active_model, system, messages, tools)
+            response = await provider_ai.chat(active_model, system, messages, tools)
             if response.has_tool_use:
                 tc = response.tool_calls[0]
                 request_id = f"tg-ai-{conversation_id}"
@@ -1889,7 +1909,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                         ],
                     }
                 ]
-                final = await ai.chat_with_tool_result(
+                final = await provider_ai.chat_with_tool_result(
                     active_model, system, messages_with_tool, tools, tc.tool_use_id, skill_result
                 )
                 assistant_text = final.text or "Got data but couldn't format."
@@ -2141,19 +2161,22 @@ async def init() -> None:
     # Load .env
     secrets = EnvSecretsProvider(".env")
 
-    # Initialize AI provider
+    # Initialize AI providers — both can run simultaneously
+    _providers: dict[str, AnthropicProvider | OllamaProvider] = {}
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if api_key:
+        logger.info("Using Anthropic provider (direct API)")
+        _providers["anthropic"] = AnthropicProvider(api_key)
     if OLLAMA_API_URL:
         logger.info(f"Using Ollama provider at {OLLAMA_API_URL}")
-        ai = OllamaProvider(base_url=OLLAMA_API_URL)
-    else:
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            logger.error(
-                "No AI provider configured. Set ANTHROPIC_API_KEY or OLLAMA_API_URL "
-                "in .env. For free local AI: ollama serve & set OLLAMA_API_URL=http://localhost:11434"
-            )
-            sys.exit(1)
-        ai = AnthropicProvider(api_key)
+        _providers["ollama"] = OllamaProvider(base_url=OLLAMA_API_URL)
+    if not _providers:
+        logger.error(
+            "No AI provider configured. Set ANTHROPIC_API_KEY or OLLAMA_API_URL "
+            "in .env. For free local AI: ollama serve & set OLLAMA_API_URL=http://localhost:11434"
+        )
+        sys.exit(1)
+    ai = MultiAIProvider(_providers)
     memory = SQLiteConversationStore("data/t3nets.db")
     tenants = SQLiteTenantStore("data/t3nets.db")
     blobs = FileStore("data/blobs")
@@ -2190,11 +2213,13 @@ async def init() -> None:
         name="Dev",
         enabled_skills=skills.list_skill_names(),
     )
-    default = "llama-3.1-8b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
+    active = ai.active_providers
+    default = "llama-3.2-3b" if active == ["ollama"] else DEFAULT_MODEL_ID
+    current_model = get_model(tenant.settings.ai_model or "")
     if (
         not tenant.settings.ai_model
-        or PROVIDER
-        not in (get_model(tenant.settings.ai_model) or AIModel("", "", "", "", "")).providers
+        or not current_model
+        or not any(p in current_model.providers for p in active)
     ):
         tenant.settings.ai_model = default
         await tenants.update_tenant(tenant)
@@ -2244,7 +2269,7 @@ def main() -> None:
     logger.info("  ╚══════════════════════════════════════╝")
     logger.info("")
 
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning", timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

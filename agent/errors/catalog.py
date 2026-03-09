@@ -10,14 +10,14 @@ When a new error is encountered in production:
 """
 
 import re
-from agent.errors.models import FriendlyError, ErrorSeverity
+
+from agent.errors.models import ErrorSeverity, FriendlyError
 
 # Each entry: (compiled_regex, FriendlyError template)
 # Order matters — first match wins.
 
 ERROR_PATTERNS: list[tuple[re.Pattern[str], FriendlyError]] = [
     # ── Bedrock / AI Provider ──────────────────────────────────────────────
-
     (
         re.compile(
             r"Invocation of model ID .* with on-demand throughput isn't supported",
@@ -133,9 +133,7 @@ ERROR_PATTERNS: list[tuple[re.Pattern[str], FriendlyError]] = [
             admin_required=True,
         ),
     ),
-
     # ── Jira Integration ──────────────────────────────────────────────────
-
     (
         re.compile(r"Jira integration is not configured", re.IGNORECASE),
         FriendlyError(
@@ -201,9 +199,7 @@ ERROR_PATTERNS: list[tuple[re.Pattern[str], FriendlyError]] = [
             action="Retry in a few minutes",
         ),
     ),
-
     # ── Secrets Manager ───────────────────────────────────────────────────
-
     (
         re.compile(r"ResourceNotFoundException.*secret", re.IGNORECASE),
         FriendlyError(
@@ -230,9 +226,7 @@ ERROR_PATTERNS: list[tuple[re.Pattern[str], FriendlyError]] = [
             admin_required=True,
         ),
     ),
-
     # ── DynamoDB ──────────────────────────────────────────────────────────
-
     (
         re.compile(r"ResourceNotFoundException.*table", re.IGNORECASE),
         FriendlyError(
@@ -249,17 +243,39 @@ ERROR_PATTERNS: list[tuple[re.Pattern[str], FriendlyError]] = [
     (
         re.compile(r"ProvisionedThroughputExceededException", re.IGNORECASE),
         FriendlyError(
-            message=(
-                "The database is under heavy load right now. Try again in a moment."
-            ),
+            message=("The database is under heavy load right now. Try again in a moment."),
             severity=ErrorSeverity.INFO,
             error_code="DYNAMODB_THROTTLED",
             action="Retry in a moment",
         ),
     ),
-
+    # ── Ollama (local free AI) ────────────────────────────────────────────
+    (
+        re.compile(r"Ollama model '([^']+)' not found|not found.*ollama pull", re.IGNORECASE),
+        FriendlyError(
+            message=(
+                "The selected AI model isn't downloaded yet. "
+                "Pull it with: ollama pull <model-name> "
+                "(e.g. ollama pull llama3.1:8b), then try again."
+            ),
+            severity=ErrorSeverity.CONFIG,
+            error_code="OLLAMA_MODEL_MISSING",
+            action="Run: ollama pull <model-name>",
+        ),
+    ),
+    (
+        re.compile(r"Cannot reach Ollama|Is Ollama running", re.IGNORECASE),
+        FriendlyError(
+            message=(
+                "I can't connect to the local AI model (Ollama). "
+                "Make sure Ollama is running: ollama serve"
+            ),
+            severity=ErrorSeverity.CONFIG,
+            error_code="OLLAMA_UNREACHABLE",
+            action="Run: ollama serve",
+        ),
+    ),
     # ── Anthropic Direct API (local dev) ──────────────────────────────────
-
     (
         re.compile(r"AuthenticationError|invalid.*api.key|401.*anthropic", re.IGNORECASE),
         FriendlyError(

@@ -59,9 +59,33 @@ variable "ws_connections_table_name" {
   default     = ""
 }
 
+# Phase 5c: Ollama sidecar
+variable "use_ollama" {
+  description = "Feature flag: run Ollama as a sidecar container for free AI"
+  type        = bool
+  default     = false
+}
+
+variable "ollama_model" {
+  description = "Ollama model to pull on startup"
+  type        = string
+  default     = "llama3.2:3b"
+}
+
+variable "ollama_memory_mb" {
+  description = "Memory (MB) for Ollama container. Task total = router_memory + this."
+  type        = number
+  default     = 4096
+}
+
 
 locals {
   name_prefix = "${var.project}-${var.environment}"
+
+  # When Ollama is enabled the task must accommodate both containers.
+  # Fargate requires CPU >= 1024 to support 4 GB+ memory configurations.
+  effective_cpu    = var.use_ollama ? max(var.router_cpu, 1024) : var.router_cpu
+  effective_memory = var.use_ollama ? var.router_memory + var.ollama_memory_mb : var.router_memory
 }
 
 data "aws_caller_identity" "current" {}
@@ -73,6 +97,14 @@ resource "aws_cloudwatch_log_group" "router" {
   retention_in_days = 14
 
   tags = { Name = "${local.name_prefix}-router-logs" }
+}
+
+resource "aws_cloudwatch_log_group" "ollama" {
+  count             = var.use_ollama ? 1 : 0
+  name              = "/ecs/${local.name_prefix}-ollama"
+  retention_in_days = 14
+
+  tags = { Name = "${local.name_prefix}-ollama-logs" }
 }
 
 # --- Security Groups ---
@@ -335,63 +367,116 @@ resource "aws_ecs_task_definition" "router" {
   family                   = "${local.name_prefix}-router"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = var.router_cpu
-  memory                   = var.router_memory
+  cpu                      = local.effective_cpu
+  memory                   = local.effective_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
-  container_definitions = jsonencode([
-    {
-      name      = "router"
-      image     = "${var.ecr_repository_url}:${var.router_image_tag}"
-      essential = true
+  container_definitions = jsonencode(concat(
+    [
+      {
+        name      = "router"
+        image     = "${var.ecr_repository_url}:${var.router_image_tag}"
+        essential = true
 
-      portMappings = [
-        {
-          containerPort = 8080
-          protocol      = "tcp"
+        portMappings = [
+          {
+            containerPort = 8080
+            protocol      = "tcp"
+          }
+        ]
+
+        # Wait for Ollama to be healthy before starting router (only when use_ollama=true)
+        dependsOn = var.use_ollama ? [
+          { containerName = "ollama", condition = "HEALTHY" }
+        ] : []
+
+        environment = concat(
+          [
+            { name = "T3NETS_PLATFORM", value = "aws" },
+            { name = "T3NETS_STAGE", value = var.environment },
+            { name = "AWS_REGION", value = var.aws_region },
+            { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
+            { name = "DYNAMODB_CONVERSATIONS_TABLE", value = "${local.name_prefix}-conversations" },
+            { name = "DYNAMODB_TENANTS_TABLE", value = "${local.name_prefix}-tenants" },
+            { name = "SECRETS_PREFIX", value = "/${var.project}/${var.environment}/tenants" },
+            { name = "COGNITO_USER_POOL_ID", value = var.cognito_user_pool_id },
+            { name = "COGNITO_APP_CLIENT_ID", value = var.cognito_app_client_id },
+            { name = "COGNITO_AUTH_DOMAIN", value = var.cognito_auth_domain },
+            { name = "USE_ASYNC_SKILLS", value = tostring(var.use_async_skills) },
+            { name = "EVENTBRIDGE_BUS_NAME", value = aws_cloudwatch_event_bus.skills.name },
+            { name = "SQS_RESULTS_QUEUE_URL", value = aws_sqs_queue.skill_results.id },
+            { name = "PENDING_REQUESTS_TABLE", value = var.pending_requests_table_name },
+            { name = "WS_API_ENDPOINT", value = var.ws_api_endpoint },
+            { name = "WS_CONNECTIONS_TABLE", value = var.ws_connections_table_name },
+          ],
+          # Phase 5c: wire Ollama sidecar URL only when enabled
+          var.use_ollama ? [
+            { name = "OLLAMA_API_URL", value = "http://localhost:11434" }
+          ] : []
+        )
+
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            "awslogs-group"         = aws_cloudwatch_log_group.router.name
+            "awslogs-region"        = var.aws_region
+            "awslogs-stream-prefix" = "router"
+          }
         }
-      ]
 
-      environment = [
-        { name = "T3NETS_PLATFORM", value = "aws" },
-        { name = "T3NETS_STAGE", value = var.environment },
-        { name = "AWS_REGION", value = var.aws_region },
-        { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
-        { name = "DYNAMODB_CONVERSATIONS_TABLE", value = "${local.name_prefix}-conversations" },
-        { name = "DYNAMODB_TENANTS_TABLE", value = "${local.name_prefix}-tenants" },
-        { name = "SECRETS_PREFIX", value = "/${var.project}/${var.environment}/tenants" },
-        { name = "COGNITO_USER_POOL_ID", value = var.cognito_user_pool_id },
-        { name = "COGNITO_APP_CLIENT_ID", value = var.cognito_app_client_id },
-        { name = "COGNITO_AUTH_DOMAIN", value = var.cognito_auth_domain },
-        # Phase 3b: Async skills
-        { name = "USE_ASYNC_SKILLS", value = tostring(var.use_async_skills) },
-        { name = "EVENTBRIDGE_BUS_NAME", value = aws_cloudwatch_event_bus.skills.name },
-        { name = "SQS_RESULTS_QUEUE_URL", value = aws_sqs_queue.skill_results.id },
-        { name = "PENDING_REQUESTS_TABLE", value = var.pending_requests_table_name },
-        # WebSocket API (real-time push — derived from wss:// endpoint at runtime)
-        { name = "WS_API_ENDPOINT", value = var.ws_api_endpoint },
-        { name = "WS_CONNECTIONS_TABLE", value = var.ws_connections_table_name },
-      ]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.router.name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "router"
+        healthCheck = {
+          command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+          interval    = 30
+          timeout     = 5
+          retries     = 3
+          startPeriod = 10
         }
       }
+    ],
 
-      healthCheck = {
-        command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 10
+    # Phase 5c: Ollama sidecar — only included when use_ollama = true.
+    # ECS awsvpc mode: containers in the same task share the network namespace.
+    # The router reaches Ollama via localhost:11434 — no security group changes needed.
+    var.use_ollama ? [
+      {
+        name      = "ollama"
+        image     = "ollama/ollama:latest"
+        essential = false # Graceful degradation: router stays up if Ollama crashes post-startup
+
+        environment = [
+          # Keep model loaded indefinitely (no auto-unload)
+          { name = "OLLAMA_KEEP_ALIVE", value = "-1" }
+        ]
+
+        # Start serve, wait until ready, pull the configured model, then keep serving.
+        # Terraform interpolates var.ollama_model at plan time → literal model name in the command.
+        entryPoint = ["sh", "-c"]
+        command    = ["/bin/ollama serve & until /bin/ollama list >/dev/null 2>&1; do sleep 2; done && /bin/ollama pull ${var.ollama_model} && echo 'Ollama: model ready' && wait"]
+
+        healthCheck = {
+          command     = ["CMD-SHELL", "/bin/ollama list >/dev/null 2>&1 || exit 1"]
+          interval    = 30
+          timeout     = 10
+          retries     = 5
+          startPeriod = 180 # Allow up to 3 min for model download on first start
+        }
+
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            "awslogs-group"         = aws_cloudwatch_log_group.ollama[0].name
+            "awslogs-region"        = var.aws_region
+            "awslogs-stream-prefix" = "ollama"
+          }
+        }
+
+        portMappings = []
+        mountPoints  = []
+        volumesFrom  = []
       }
-    }
-  ])
+    ] : []
+  ))
 
   tags = { Name = "${local.name_prefix}-router" }
 }

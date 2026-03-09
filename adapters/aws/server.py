@@ -54,6 +54,7 @@ from adapters.aws.sqs_poller import SQSResultPoller
 from adapters.aws.ws_connections import WebSocketConnectionManager
 from adapters.local.direct_bus import DirectBus
 from adapters.ollama.provider import OllamaProvider
+from adapters.shared.multi_provider import MultiAIProvider
 from adapters.shared.server_utils import (
     INTEGRATION_SCHEMAS,
     _format_raw_json,
@@ -69,7 +70,7 @@ from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
     get_model_for_provider,
-    get_models_for_provider,
+    get_models_for_providers,
 )
 from agent.models.message import ChannelType
 from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
@@ -86,7 +87,7 @@ logging.basicConfig(
 logger = logging.getLogger("t3nets.aws")
 
 # --- Global state ---
-ai: BedrockProvider | OllamaProvider
+ai: MultiAIProvider
 memory: DynamoDBConversationStore
 tenants: DynamoDBTenantStore
 secrets: SecretsManagerProvider
@@ -123,7 +124,6 @@ USE_ASYNC_SKILLS = os.environ.get("USE_ASYNC_SKILLS", "false").lower() == "true"
 DEFAULT_TENANT = "default"
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "")
-PROVIDER = "ollama" if OLLAMA_API_URL else "bedrock"
 PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")
 STAGE = os.environ.get("T3NETS_STAGE", "dev")
 WS_API_ENDPOINT = os.environ.get("WS_API_ENDPOINT", "")
@@ -181,30 +181,45 @@ def _bedrock_geo_prefix() -> str:
     return "us"
 
 
-def _resolve_model(tenant: Any) -> tuple[str, str]:
-    """Resolve tenant's ai_model to a provider-specific model ID and short name."""
+def _resolve_model(tenant: Any) -> tuple[str, str, str]:
+    """Resolve tenant's ai_model to (provider_name, api_model_id, short_name).
+
+    Picks the first active provider that supports the requested model.
+    Falls back gracefully when the selected model isn't available.
+    """
     model_id = tenant.settings.ai_model or DEFAULT_MODEL_ID
     model = get_model(model_id)
-    if not model or PROVIDER not in model.providers:
-        fallback = "llama-3.1-8b" if PROVIDER == "ollama" else DEFAULT_MODEL_ID
+    active = ai.active_providers  # e.g. ["bedrock", "ollama"] or ["ollama"]
+
+    # Find the first active provider that supports this model
+    selected_provider: str | None = None
+    if model:
+        for p in active:
+            if p in model.providers:
+                selected_provider = p
+                break
+
+    if not selected_provider:
+        selected_provider = active[0]
+        fallback_id = "llama-3.2-3b" if "ollama" in active else DEFAULT_MODEL_ID
         logger.warning(
-            f"Model '{model_id}' not available for {PROVIDER}, falling back to {fallback}"
+            f"Model '{model_id}' not available for {active}, falling back to {fallback_id}"
         )
-        model_id = fallback
+        model_id = fallback_id
         model = get_model(model_id)
     assert model is not None, f"Fallback model {model_id} not found in registry"
 
-    if PROVIDER == "ollama":
+    if selected_provider == "ollama":
         ollama_id = get_model_for_provider(model_id, "ollama")
-        return ollama_id or model.ollama_id, model.short_name
+        return "ollama", ollama_id or model.ollama_id, model.short_name
 
-    bedrock_id = get_model_for_provider(model_id, PROVIDER)
+    bedrock_id = get_model_for_provider(model_id, "bedrock")
     if bedrock_id:
         geo = _bedrock_geo_prefix()
         full_id = f"{geo}.{bedrock_id}"
         logger.info(f"Resolved model: {model_id} → {full_id}")
-        return full_id, model.short_name
-    return BEDROCK_MODEL_ID, model.short_name
+        return "bedrock", full_id, model.short_name
+    return "bedrock", BEDROCK_MODEL_ID, model.short_name
 
 
 async def _get_auth_info(request: Request) -> tuple[str, str]:
@@ -439,8 +454,8 @@ async def handle_health_api(request: Request) -> Response:
                 "ai_model": tenant.settings.ai_model,
             },
             "ai": {
-                "provider": "bedrock",
-                "model": _resolve_model(tenant)[0],
+                "providers": ai.active_providers,
+                "model": _resolve_model(tenant)[1],
                 "api_key_preview": "IAM role (no key)",
                 "total_tokens": stats["total_tokens"],
             },
@@ -784,8 +799,8 @@ async def handle_settings_get(request: Request) -> Response:
         return JSONResponse(
             {
                 "ai_model": s.ai_model or DEFAULT_MODEL_ID,
-                "provider": PROVIDER,
-                "models": get_models_for_provider(PROVIDER),
+                "providers": ai.active_providers,
+                "models": get_models_for_providers(ai.active_providers),
                 "platform": PLATFORM,
                 "stage": STAGE,
                 "build": BUILD_NUMBER,
@@ -816,9 +831,10 @@ async def handle_settings_post(request: Request) -> Response:
             model = get_model(model_id)
             if not model:
                 return JSONResponse({"error": f"Unknown model: {model_id}"}, status_code=400)
-            if PROVIDER not in model.providers:
+            active = ai.active_providers
+            if not any(p in model.providers for p in active):
                 return JSONResponse(
-                    {"error": f"Model '{model_id}' not available for {PROVIDER}"}, status_code=400
+                    {"error": f"Model '{model_id}' not available for {active}"}, status_code=400
                 )
             tenant.settings.ai_model = model_id
             changed = True
@@ -1078,13 +1094,14 @@ async def _rebuild_rules(tenant_id: str) -> None:
 
         training_data = await training_store.list_examples(tenant_id, limit=50)
 
+        active_provider, api_model, _ = _resolve_model(tenant)
         builder = RuleEngineBuilder()
         rule_set = await builder.build_rules(
             tenant_id=tenant_id,
             enabled_skills=enabled,
             disabled_skills=disabled,
-            ai=ai,
-            model=BEDROCK_MODEL_ID,
+            ai=ai.for_provider(active_provider),
+            model=api_model,
             training_data=training_data or None,
         )
         rule_set.version = old_version + 1
@@ -1150,7 +1167,8 @@ async def handle_chat(request: Request) -> Response:
 
         history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
         tenant = await tenants.get_tenant(tenant_id)
-        active_model, model_short_name = _resolve_model(tenant)
+        active_provider, active_model, model_short_name = _resolve_model(tenant)
+        provider_ai = ai.for_provider(active_provider)
 
         system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
@@ -1160,7 +1178,7 @@ When you have data to present, format it clearly with structure."""
         if not is_raw and is_conversational(clean_text):
             stats["conversational"] += 1
             messages = history + [{"role": "user", "content": clean_text}]
-            response = await ai.chat(active_model, system, messages, [])
+            response = await provider_ai.chat(active_model, system, messages, [])
             assistant_text = response.text or "Hey! How can I help?"
             total_tokens = response.input_tokens + response.output_tokens
             route_type = "conversational"
@@ -1209,7 +1227,7 @@ When you have data to present, format it clearly with structure."""
                         f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly."
                     )
                     messages = history + [{"role": "user", "content": prompt}]
-                    response = await ai.chat(active_model, system, messages, [])
+                    response = await provider_ai.chat(active_model, system, messages, [])
                     assistant_text = response.text or "Got data but couldn't format."
                     total_tokens = response.input_tokens + response.output_tokens
                     route_type = "rule"
@@ -1229,7 +1247,7 @@ When you have data to present, format it clearly with structure."""
                 stats["ai_routed"] += 1
                 tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
                 messages = history + [{"role": "user", "content": clean_text}]
-                response = await ai.chat(active_model, system, messages, tools)
+                response = await provider_ai.chat(active_model, system, messages, tools)
 
                 if response.has_tool_use:
                     tc = response.tool_calls[0]
@@ -1288,7 +1306,7 @@ When you have data to present, format it clearly with structure."""
                                 ],
                             }
                         ]
-                        final = await ai.chat_with_tool_result(
+                        final = await provider_ai.chat_with_tool_result(
                             active_model,
                             system,
                             messages_with_tool,
@@ -1650,7 +1668,8 @@ async def _handle_teams_message(teams_adapter: TeamsAdapter, activity: dict[str,
     await teams_adapter.send_typing_indicator(message.conversation_id)
 
     clean_text, is_raw = strip_raw_flag(text)
-    active_model, model_short_name = _resolve_model(tenant)
+    active_provider, active_model, model_short_name = _resolve_model(tenant)
+    provider_ai = ai.for_provider(active_provider)
     system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 You are communicating via Microsoft Teams. Keep responses clear and well-formatted.
@@ -1661,7 +1680,7 @@ When you have data to present, format it clearly with structure."""
     if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
-        response = await ai.chat(active_model, system, messages, [])
+        response = await provider_ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
@@ -1712,7 +1731,7 @@ When you have data to present, format it clearly with structure."""
                     f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly."
                 )
                 messages = history + [{"role": "user", "content": prompt}]
-                response = await ai.chat(active_model, system, messages, [])
+                response = await provider_ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
         elif teams_engine and (disabled_skill := teams_engine.check_disabled_skill(clean_text)):
@@ -1729,7 +1748,7 @@ When you have data to present, format it clearly with structure."""
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
             messages = history + [{"role": "user", "content": clean_text}]
-            response = await ai.chat(active_model, system, messages, tools)
+            response = await provider_ai.chat(active_model, system, messages, tools)
             if response.has_tool_use:
                 tc = response.tool_calls[0]
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
@@ -1788,7 +1807,7 @@ When you have data to present, format it clearly with structure."""
                             ],
                         }
                     ]
-                    final = await ai.chat_with_tool_result(
+                    final = await provider_ai.chat_with_tool_result(
                         active_model,
                         system,
                         messages_with_tool,
@@ -1965,7 +1984,8 @@ async def _handle_telegram_message(adapter: TelegramAdapter, update: dict[str, A
     await adapter.send_typing_indicator(message.conversation_id)
 
     clean_text, is_raw = strip_raw_flag(text)
-    active_model, model_short_name = _resolve_model(tenant)
+    active_provider, active_model, model_short_name = _resolve_model(tenant)
+    provider_ai = ai.for_provider(active_provider)
     system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
 Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
 You are communicating via Telegram. Keep responses concise and well-formatted.
@@ -1976,7 +1996,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
     if not is_raw and is_conversational(clean_text):
         stats["conversational"] += 1
         messages = history + [{"role": "user", "content": clean_text}]
-        response = await ai.chat(active_model, system, messages, [])
+        response = await provider_ai.chat(active_model, system, messages, [])
         assistant_text = response.text or "Hey! How can I help?"
         total_tokens = response.input_tokens + response.output_tokens
     else:
@@ -2023,7 +2043,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                     f"Format this clearly and concisely for Telegram."
                 )
                 messages = history + [{"role": "user", "content": prompt}]
-                response = await ai.chat(active_model, system, messages, [])
+                response = await provider_ai.chat(active_model, system, messages, [])
                 assistant_text = response.text or "Got data but couldn't format."
                 total_tokens = response.input_tokens + response.output_tokens
         elif tg_engine and (disabled_skill := tg_engine.check_disabled_skill(clean_text)):
@@ -2040,7 +2060,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
             stats["ai_routed"] += 1
             tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
             messages = history + [{"role": "user", "content": clean_text}]
-            response = await ai.chat(active_model, system, messages, tools)
+            response = await provider_ai.chat(active_model, system, messages, tools)
             if response.has_tool_use:
                 tc = response.tool_calls[0]
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
@@ -2092,7 +2112,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                         ],
                     }
                 ]
-                final = await ai.chat_with_tool_result(
+                final = await provider_ai.chat_with_tool_result(
                     active_model,
                     system,
                     messages_with_tool,
@@ -2223,15 +2243,18 @@ async def init() -> None:
 
     assert conversations_table and tenants_table and secrets_prefix  # narrowed above
 
-    # Initialize AI provider
+    # Initialize AI providers — both can run simultaneously
+    _providers: dict[str, BedrockProvider | OllamaProvider] = {}
+    if BEDROCK_MODEL_ID:
+        logger.info(f"Using Bedrock provider (model={BEDROCK_MODEL_ID})")
+        _providers["bedrock"] = BedrockProvider(region=region, model_id=BEDROCK_MODEL_ID)
     if OLLAMA_API_URL:
         logger.info(f"Using Ollama provider at {OLLAMA_API_URL}")
-        ai = OllamaProvider(base_url=OLLAMA_API_URL)
-    else:
-        if not BEDROCK_MODEL_ID:
-            logger.error("BEDROCK_MODEL_ID required when not using OLLAMA_API_URL")
-            sys.exit(1)
-        ai = BedrockProvider(region=region, model_id=BEDROCK_MODEL_ID)
+        _providers["ollama"] = OllamaProvider(base_url=OLLAMA_API_URL)
+    if not _providers:
+        logger.error("No AI provider configured. Set BEDROCK_MODEL_ID and/or OLLAMA_API_URL.")
+        sys.exit(1)
+    ai = MultiAIProvider(_providers)
     memory = DynamoDBConversationStore(conversations_table, region=region)
     tenants = DynamoDBTenantStore(tenants_table, region=region)
     secrets = SecretsManagerProvider(secrets_prefix, region=region)

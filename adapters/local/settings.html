@@ -923,7 +923,8 @@
 
         // ==================== Settings ====================
         let currentModel = '';
-        let provider = 'anthropic';
+        let activeProviders = [];
+        let platform = 'local';
         let settingsData = {};
 
         async function loadSettings() {
@@ -932,7 +933,8 @@
                 const data = await resp.json();
                 settingsData = data;
                 currentModel = data.ai_model || '';
-                provider = data.provider || 'anthropic';
+                activeProviders = data.providers || (data.provider ? [data.provider] : ['anthropic']);
+                platform = data.platform || 'local';
                 if (data.platform) document.getElementById('platform-badge').textContent = data.platform.toUpperCase();
                 if (data.stage) document.getElementById('stage-badge').textContent = data.stage.toUpperCase();
                 if (data.build) document.getElementById('build-number').textContent = data.build;
@@ -967,10 +969,27 @@
                 if (isDisabled) div.classList.add('disabled');
 
                 let tagHtml = '';
-                const isOllamaModel = ['llama-3.2-3b','llama-3.1-8b','mistral-7b','qwen-2.5-7b'].includes(model.id);
+                // available_via = active providers that support this model (from backend)
+                const via = model.available_via || [];
+                const supportedBy = model.supported_by || [];
+                const isOllamaModel = supportedBy.includes('ollama') && !supportedBy.some(p => p !== 'ollama');
+                const ollamaActive = activeProviders.includes('ollama');
                 if (isSelected) tagHtml = '<span class="model-tag current">Current</span>';
-                else if (isDisabled) tagHtml = `<span class="model-tag unavailable">${provider === 'ollama' ? 'Cloud only' : 'Not available'}</span>`;
-                if (!isDisabled && isOllamaModel) tagHtml += '<span class="model-tag free">Free</span>';
+                else if (isDisabled) {
+                    let unavailLabel;
+                    if (isOllamaModel && !ollamaActive) {
+                        // Pure Ollama model but Ollama sidecar not running
+                        unavailLabel = 'Requires Ollama';
+                    } else if (!isOllamaModel && activeProviders.length === 1 && ollamaActive) {
+                        // Cloud-only model but only Ollama is active
+                        unavailLabel = 'Cloud only';
+                    } else {
+                        unavailLabel = 'Not available';
+                    }
+                    tagHtml = `<span class="model-tag unavailable">${unavailLabel}</span>`;
+                }
+                // "Free" tag for Ollama models that are available via Ollama
+                if (!isDisabled && via.includes('ollama')) tagHtml += '<span class="model-tag free">Free</span>';
 
                 div.innerHTML = `
                     <div class="model-radio"></div>
