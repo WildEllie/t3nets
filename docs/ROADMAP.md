@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 3, 2026 (Practices plan + AI-generated rule engine)
+**Last Updated:** March 9, 2026 (Practices framework + infrastructure cost optimization)
 
 ---
 
@@ -244,6 +244,34 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 - [ ] Skill marketplace page in dashboard
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
+### Phase 6b: CBT Clinical Practice (First Practice)
+
+CBT therapy session recording and analysis for clinical social workers in private clinics. First implementation of a "practice" — a domain-specific experience bundle with custom pages, skills, and data models.
+
+**Core Infrastructure:**
+- [x] `Patient` and `Session` data models (`agent/models/clinical.py`)
+- [x] `PatientStore` and `SessionStore` interfaces (`agent/interfaces/`)
+- [x] `FileStore` — first `BlobStore` implementation for local dev (`adapters/local/file_store.py`)
+- [x] `SQLiteClinicalStore` — SQLite implementation (`adapters/local/sqlite_clinical_store.py`)
+
+**Skills:**
+- [x] `session_transcribe` — stub transcript for pipeline wiring (production: Whisper API)
+- [x] `session_analyze` — Claude-powered session analysis from transcript
+
+**API & Pages:**
+- [x] Clinical API endpoints: patient CRUD, session CRUD, recording upload, analysis pipeline
+- [x] Session recording page (`/clinical/record`) — patient management, voice recording, notes
+- [x] Session summary page (`/clinical/session/{id}`) — gauges, emotional timeline, metrics, flagged moments, comparison chart
+- [ ] **Milestone:** Therapist records a session, gets AI-powered analysis with emotional timeline and clinical insights
+
+**Future (Phase 6b.2):**
+- [ ] Real audio transcription (Whisper API integration)
+- [ ] Acoustic voice analysis (librosa/parselmouth for true vocal metrics)
+- [ ] Session export to PDF
+- [ ] Patient timeline / history view
+- [ ] Treatment plan tracking
+- [ ] DynamoDB + S3 adapters for AWS deployment
+
 
 ### Phase 7: Email Delivery
 - [ ] SES domain verification + IAM in Terraform
@@ -370,9 +398,33 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] Email adapter (SES)
 - [ ] Discord adapter
 
-### Cost Optimization
-- [ ] Replace NAT Gateway with NAT instance (~$28/mo savings)
-- [ ] Evaluate placing Fargate in public subnets (eliminate NAT entirely)
+### Cost Optimization — Networking
+
+**Current state:** All private-subnet traffic (Bedrock, DynamoDB, Secrets Manager, ECR, CloudWatch) exits through a single NAT Gateway (~$32/month fixed + data processing charges). Zero VPC endpoints exist. DynamoDB is the highest-frequency service (hit on every request for tenant resolution, conversation history, user lookup) and Bedrock is the heaviest payload (AI inference calls).
+
+**1. VPC Endpoints for Bedrock + DynamoDB**
+- [ ] Add `aws_vpc_endpoint` for `bedrock-runtime` (Interface endpoint) in networking module
+- [ ] Add VPC endpoint security group (allow HTTPS from private subnets)
+- [ ] Add `aws_vpc_endpoint_subnet_association` for both private subnets
+- [ ] Verify `boto3.client("bedrock-runtime")` auto-routes via endpoint (PrivateDnsEnabled=true)
+- [ ] Add `aws_vpc_endpoint` for `dynamodb` (Gateway endpoint — **free**, no hourly or data charges)
+- [ ] Associate DynamoDB gateway endpoint with private route table
+- [ ] Consider also adding S3 Gateway endpoint (also free — used by ECR image layers, future practice storage)
+
+**2. Environment-aware NAT: NAT Instance for dev, NAT Gateway for staging/prod**
+- [ ] Add `var.use_nat_gateway` (bool, default `true`) to networking module variables
+- [ ] Conditional NAT Gateway: `count = var.use_nat_gateway ? 1 : 0`
+- [ ] NAT Instance alternative (when `use_nat_gateway = false`):
+  - `fck-nat` AMI on `t4g.nano` in public subnet, source/dest check disabled
+  - Security group: allow all outbound, allow inbound from private subnet CIDR
+  - Private route table points `0.0.0.0/0` → NAT instance ENI
+- [ ] Set `use_nat_gateway = false` in `environments/dev.tfvars`
+- [ ] Set `use_nat_gateway = true` in `environments/staging.tfvars` and `environments/prod.tfvars`
+- [ ] Update `docs/aws-infrastructure.md` cost table (dev: ~$3 NAT instance vs ~$32 NAT GW)
+
+**Estimated savings:** ~$29/month on dev environment from NAT instance swap. DynamoDB Gateway endpoint is free and eliminates NAT data-processing charges for the highest-frequency traffic path across all environments. Bedrock Interface endpoint eliminates NAT charges for the heaviest-payload traffic.
+
+### Cost Optimization — Other
 - [ ] Bedrock batch inference for non-real-time processing
 - [ ] DynamoDB DAX caching if read-heavy patterns emerge
 

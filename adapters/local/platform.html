@@ -486,6 +486,24 @@
                 }
             } catch (e) { /* auth not available — continue */ }
             SessionManager.init();
+            loadPracticePages();
+        }
+
+        async function loadPracticePages() {
+            try {
+                const resp = await fetch('/api/practices/pages');
+                if (!resp.ok) return;
+                const pages = await resp.json();
+                const nav = document.querySelector('.nav-links');
+                if (!nav) return;
+                pages.forEach(p => {
+                    const a = document.createElement('a');
+                    a.href = p.url;
+                    a.textContent = p.nav_label;
+                    if (window.location.pathname === p.url) a.classList.add('active');
+                    nav.appendChild(a);
+                });
+            } catch (e) { /* practices not available */ }
         }
 
         function logout() {

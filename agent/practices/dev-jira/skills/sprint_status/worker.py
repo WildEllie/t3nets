@@ -8,9 +8,9 @@ No cloud imports. No Lambda knowledge. Pure business logic.
 Secrets are injected by the infrastructure layer.
 """
 
+import base64
 import json
 import urllib.request
-import base64
 from datetime import datetime
 from typing import Any, cast
 
@@ -56,9 +56,7 @@ def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
 def _jira_request(secrets: dict[str, Any], endpoint: str) -> dict[str, Any]:
     """Make authenticated request to Jira Cloud REST API."""
     url = f"{secrets['url'].rstrip('/')}/rest/agile/1.0/{endpoint}"
-    credentials = base64.b64encode(
-        f"{secrets['email']}:{secrets['api_token']}".encode()
-    ).decode()
+    credentials = base64.b64encode(f"{secrets['email']}:{secrets['api_token']}".encode()).decode()
 
     req = urllib.request.Request(url)
     req.add_header("Authorization", f"Basic {credentials}")
@@ -105,17 +103,21 @@ def _parse_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
         assignee = fields.get("assignee")
         story_points = fields.get("customfield_10016") or 0
 
-        parsed.append({
-            "key": issue.get("key", ""),
-            "summary": fields.get("summary", ""),
-            "status": fields.get("status", {}).get("name", "Unknown"),
-            "status_category": fields.get("status", {}).get("statusCategory", {}).get("name", "Unknown"),
-            "assignee": assignee.get("displayName", "Unassigned") if assignee else "Unassigned",
-            "assignee_email": assignee.get("emailAddress", "") if assignee else "",
-            "priority": fields.get("priority", {}).get("name", "Medium"),
-            "story_points": story_points,
-            "flagged": "impediment" in [l.lower() for l in fields.get("labels", [])],
-        })
+        parsed.append(
+            {
+                "key": issue.get("key", ""),
+                "summary": fields.get("summary", ""),
+                "status": fields.get("status", {}).get("name", "Unknown"),
+                "status_category": fields.get("status", {})
+                .get("statusCategory", {})
+                .get("name", "Unknown"),
+                "assignee": assignee.get("displayName", "Unassigned") if assignee else "Unassigned",
+                "assignee_email": assignee.get("emailAddress", "") if assignee else "",
+                "priority": fields.get("priority", {}).get("name", "Medium"),
+                "story_points": story_points,
+                "flagged": "impediment" in [lbl.lower() for lbl in fields.get("labels", [])],
+            }
+        )
     return parsed
 
 
@@ -163,8 +165,7 @@ def _build_report(sprint: dict[str, Any], issues: list[dict[str, Any]]) -> dict[
         },
         "blockers": [i for i in issues if i["flagged"]],
         "large_unstarted": [
-            i for i in categories.get("To Do", [])
-            if (i["story_points"] or 0) >= 5
+            i for i in categories.get("To Do", []) if (i["story_points"] or 0) >= 5
         ],
         "tickets": {
             "done": categories.get("Done", []),
@@ -204,8 +205,5 @@ def _get_mine(secrets: dict[str, Any], assignee_email: str) -> dict[str, Any]:
     return {
         "sprint": sprint.get("name"),
         "assignee": assignee_email,
-        "tickets": [
-            i for i in parsed
-            if assignee_email.lower() in i["assignee_email"].lower()
-        ],
+        "tickets": [i for i in parsed if assignee_email.lower() in i["assignee_email"].lower()],
     }

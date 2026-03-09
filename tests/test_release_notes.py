@@ -9,23 +9,39 @@ Tests cover:
 - Registration: skill.yaml loads into the registry
 """
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agent.skills.release_notes.worker import (
-    execute,
-    _extract_issue,
-    _list_releases,
-    _summarize_release,
+from agent.practices.registry import PracticeRegistry  # noqa: E402
+from agent.router.rule_router import RuleBasedRouter, strip_raw_flag  # noqa: E402
+from agent.skills.registry import SkillRegistry  # noqa: E402
+
+# Load the release_notes worker from its practice directory (dev-jira has a
+# hyphen, so normal Python import paths won't work).
+_worker_path = (
+    Path(__file__).parent.parent
+    / "agent"
+    / "practices"
+    / "dev-jira"
+    / "skills"
+    / "release_notes"
+    / "worker.py"
 )
-from agent.skills.registry import SkillRegistry
-from agent.router.rule_router import RuleBasedRouter, strip_raw_flag
+_spec = importlib.util.spec_from_file_location("release_notes_worker", _worker_path)
+assert _spec and _spec.loader
+_worker_module = importlib.util.module_from_spec(_spec)
+sys.modules["release_notes_worker"] = _worker_module
+_spec.loader.exec_module(_worker_module)
+
+execute = _worker_module.execute
+_extract_issue = _worker_module._extract_issue
 
 
 # --- Fixtures ---
@@ -76,7 +92,7 @@ def test_execute_unknown_action():
 # --- Worker: list_releases ---
 
 
-@patch("agent.skills.release_notes.worker._jira_rest_request")
+@patch("release_notes_worker._jira_rest_request")
 def test_list_releases_success(mock_req):
     """Should group released and unreleased versions."""
     mock_req.return_value = [
@@ -108,7 +124,7 @@ def test_list_releases_success(mock_req):
     assert result["unreleased"][0]["name"] == "v2.0.0"
 
 
-@patch("agent.skills.release_notes.worker._get_project_key_from_board")
+@patch("release_notes_worker._get_project_key_from_board")
 def test_list_releases_no_project_key(mock_board):
     """Should error if project key cannot be determined."""
     mock_board.return_value = ""
@@ -130,8 +146,8 @@ def test_summarize_missing_release_name():
     assert "release_name is required" in result["error"]
 
 
-@patch("agent.skills.release_notes.worker._get_version_info")
-@patch("agent.skills.release_notes.worker._jira_search")
+@patch("release_notes_worker._get_version_info")
+@patch("release_notes_worker._jira_search")
 def test_summarize_success(mock_search, mock_version_info):
     """Should return structured release summary."""
     mock_version_info.return_value = {
@@ -189,8 +205,8 @@ def test_summarize_success(mock_search, mock_version_info):
     assert result["summary"]["contributors"]["Alice"] == 2
 
 
-@patch("agent.skills.release_notes.worker._get_version_info")
-@patch("agent.skills.release_notes.worker._jira_search")
+@patch("release_notes_worker._get_version_info")
+@patch("release_notes_worker._jira_search")
 def test_summarize_no_issues(mock_search, mock_version_info):
     """Should return not_started when unreleased version has no issues."""
     mock_search.return_value = []
@@ -210,7 +226,7 @@ def test_summarize_no_issues(mock_search, mock_version_info):
     assert "not started" in result["message"].lower()
 
 
-@patch("agent.skills.release_notes.worker._get_version_info")
+@patch("release_notes_worker._get_version_info")
 def test_summarize_release_not_found(mock_version_info):
     """Should return error when release doesn't exist in Jira."""
     mock_version_info.return_value = {}
@@ -224,8 +240,8 @@ def test_summarize_release_not_found(mock_version_info):
     assert "not found" in result["error"].lower()
 
 
-@patch("agent.skills.release_notes.worker._get_version_info")
-@patch("agent.skills.release_notes.worker._jira_search")
+@patch("release_notes_worker._get_version_info")
+@patch("release_notes_worker._jira_search")
 def test_summarize_future_release_no_work_started(mock_search, mock_version_info):
     """Should return not_started when issues exist but none have started."""
     mock_version_info.return_value = {
@@ -276,8 +292,8 @@ def test_summarize_future_release_no_work_started(mock_search, mock_version_info
     assert "no work to summarize" in result["message"].lower()
 
 
-@patch("agent.skills.release_notes.worker._get_version_info")
-@patch("agent.skills.release_notes.worker._jira_search")
+@patch("release_notes_worker._get_version_info")
+@patch("release_notes_worker._jira_search")
 def test_summarize_future_release_with_work(mock_search, mock_version_info):
     """Should summarize normally if unreleased version has work in progress."""
     mock_version_info.return_value = {
@@ -317,10 +333,10 @@ def test_summarize_future_release_with_work(mock_search, mock_version_info):
 # --- Worker: search endpoint and pagination ---
 
 
-@patch("agent.skills.release_notes.worker._jira_rest_request")
+@patch("release_notes_worker._jira_rest_request")
 def test_jira_search_uses_new_endpoint(mock_req):
     """Should use /rest/api/3/search/jql (not deprecated /search)."""
-    from agent.skills.release_notes.worker import _jira_search
+    _jira_search = _worker_module._jira_search
 
     mock_req.return_value = {"issues": [], "isLast": True}
     _jira_search(FAKE_SECRETS, 'project = "NV"', ["summary"])
@@ -331,10 +347,10 @@ def test_jira_search_uses_new_endpoint(mock_req):
     assert "startAt" not in endpoint, "Should not use deprecated startAt parameter"
 
 
-@patch("agent.skills.release_notes.worker._jira_rest_request")
+@patch("release_notes_worker._jira_rest_request")
 def test_jira_search_pagination_with_token(mock_req):
     """Should paginate using nextPageToken until isLast or no token."""
-    from agent.skills.release_notes.worker import _jira_search
+    _jira_search = _worker_module._jira_search
 
     mock_req.side_effect = [
         {
@@ -410,7 +426,7 @@ def test_extract_issue_nulls():
 # --- Worker: error handling ---
 
 
-@patch("agent.skills.release_notes.worker._jira_rest_request")
+@patch("release_notes_worker._jira_rest_request")
 def test_http_error_handling(mock_req):
     """Should catch HTTP errors and return friendly message."""
     import urllib.error
@@ -434,10 +450,18 @@ def test_http_error_handling(mock_req):
 
 @pytest.fixture
 def router():
-    """Build a RuleBasedRouter with release_notes loaded."""
-    skills_dir = Path(__file__).parent.parent / "agent" / "skills"
+    """Build a RuleBasedRouter with release_notes loaded from practices."""
+    root = Path(__file__).parent.parent
+    skills_dir = root / "agent" / "skills"
+    practices_dir = root / "agent" / "practices"
+
     registry = SkillRegistry()
-    registry.load_from_directory(skills_dir)
+    registry.load_from_directory(skills_dir)  # loads ping
+
+    practices = PracticeRegistry()
+    practices.load_builtin(practices_dir)  # loads dev-jira (release_notes, sprint_status)
+    practices.register_skills(registry)
+
     return RuleBasedRouter(registry)
 
 
@@ -521,10 +545,12 @@ class TestReleaseNotesRouting:
 
 
 def test_skill_yaml_loads():
-    """skill.yaml should load into the registry without errors."""
-    skills_dir = Path(__file__).parent.parent / "agent" / "skills"
+    """skill.yaml should load into the registry via PracticeRegistry."""
+    root = Path(__file__).parent.parent
     registry = SkillRegistry()
-    registry.load_from_directory(skills_dir)
+    practices = PracticeRegistry()
+    practices.load_builtin(root / "agent" / "practices")
+    practices.register_skills(registry)
 
     skill = registry.get_skill("release_notes")
     assert skill is not None
@@ -537,10 +563,12 @@ def test_skill_yaml_loads():
 
 
 def test_worker_importable():
-    """Registry should be able to import the worker module."""
-    skills_dir = Path(__file__).parent.parent / "agent" / "skills"
+    """Registry should be able to load the worker via worker_path."""
+    root = Path(__file__).parent.parent
     registry = SkillRegistry()
-    registry.load_from_directory(skills_dir)
+    practices = PracticeRegistry()
+    practices.load_builtin(root / "agent" / "practices")
+    practices.register_skills(registry)
 
     worker_fn = registry.get_worker("release_notes")
     assert callable(worker_fn)

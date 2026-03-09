@@ -3,6 +3,7 @@ Skill Registry — manages available skills and converts them to Claude tool def
 """
 
 import importlib
+import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -25,6 +26,7 @@ class SkillDefinition:
     triggers: list[str] = field(default_factory=list)
     action_descriptions: dict[str, str] = field(default_factory=dict)  # action → description
     worker_module: str = ""  # Python module path for the worker
+    worker_path: str = ""  # Filesystem path to worker.py (for uploaded practices)
 
 
 class SkillRegistry:
@@ -102,12 +104,28 @@ class SkillRegistry:
         """
         Dynamically import and return the skill's worker execute() function.
         Used by the local adapter (DirectBus) to call skills without Lambda.
+
+        Supports two loading modes:
+        - worker_path: loads from filesystem (for uploaded practices)
+        - worker_module: loads from Python module path (for built-in skills)
         """
         skill = self._skills.get(skill_name)
         if not skill:
             raise SkillNotFound(f"Skill '{skill_name}' not registered")
 
-        module = importlib.import_module(skill.worker_module)
+        if skill.worker_path:
+            spec = importlib.util.spec_from_file_location(
+                f"practice_worker_{skill_name}", skill.worker_path
+            )
+            if spec is None or spec.loader is None:
+                raise SkillNotFound(
+                    f"Cannot load worker for '{skill_name}' from {skill.worker_path}"
+                )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+        else:
+            module = importlib.import_module(skill.worker_module)
+
         if not hasattr(module, "execute"):
             raise SkillNotFound(f"Skill '{skill_name}' worker module has no execute() function")
         execute: Callable[..., Any] = module.execute
