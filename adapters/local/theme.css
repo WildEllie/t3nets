@@ -1,0 +1,363 @@
+/* === CSS Custom Properties === */
+:root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface-2: #1e1e1e;
+    --surface-code: #0d1117;
+    --border: #2a2a2a;
+    --border-2: #333;
+    --border-3: #3a3a3a;
+    --text: #e0e0e0;
+    --text-bright: #fff;
+    --text-muted: #888;
+    --text-dim: #666;
+    --text-faint: #555;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-light: #3b82f6;
+    --accent-muted-bg: #1e3a5f;
+    --accent-muted-text: #93c5fd;
+    --nav-hover-bg: rgba(255,255,255,0.03);
+    --input-bg: #0f0f0f;
+    --stat-row-border: #1f1f1f;
+    --table-head-bg: #141414;
+    --table-row-hover: rgba(255,255,255,0.016);
+    --table-row-border: #222;
+    --modal-overlay: rgba(0,0,0,0.7);
+    --shadow: rgba(0,0,0,0.4);
+    /* === Semantic status === */
+    --success-bg: #14532d;
+    --success-border: #166534;
+    --success-text: #bbf7d0;
+    --error-bg: #7f1d1d;
+    --error-border: #991b1b;
+    --error-text: #fecaca;
+    --warning-bg: #78350f;
+    --warning-text: #fbbf24;
+    --info-bg: #1e3a5f;
+    --info-text: #7dd3fc;
+    /* === Status badges === */
+    --status-active-bg: #14532d;
+    --status-active-text: #4ade80;
+    --status-suspended-bg: #451a03;
+    --status-suspended-text: #fbbf24;
+    --status-deleted-bg: #3f1515;
+    --status-deleted-text: #f87171;
+    --status-unavailable-bg: #374151;
+    --status-unavailable-text: #9ca3af;
+    /* === Route badges === */
+    --rule-matched-bg: #065f46;
+    --rule-matched-text: #6ee7b7;
+    --ai-routed-bg: #1e3a5f;
+    --ai-routed-text: #7dd3fc;
+    --conversational-bg: #3f3f46;
+    --conversational-text: #a1a1aa;
+    --disabled-skill-bg: #2d1a1a;
+    --disabled-skill-text: #f87171;
+    --raw-mode-bg: #78350f;
+    --raw-mode-text: #fbbf24;
+    --model-mode-bg: #4c1d95;
+    --model-mode-text: #c4b5fd;
+    --skill-tag-default-bg: #1e2d45;
+    --skill-tag-default-text: #60a5fa;
+    /* === Invite banner === */
+    --invite-banner-bg: #1e3a5f;
+    --invite-banner-border: #2563eb;
+    --invite-banner-text: #60a5fa;
+    --invite-label-text: #93c5fd;
+    /* === Misc === */
+    --link-color: #7dd3fc;
+    --surface-3: #1e1e2e;
+    --danger: #dc2626;
+    /* === JSON syntax === */
+    --json-key: #7dd3fc;
+    --json-string: #6ee7b7;
+    --json-number: #fbbf24;
+    --json-bool: #f472b6;
+    --json-null: #a1a1aa;
+    /* === Channel brands === */
+    --channel-telegram: #0088cc;
+    --channel-teams: #464EB8;
+    --channel-slack: #4A154B;
+}
+
+[data-theme="light"] {
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --surface-2: #f1f5f9;
+    --surface-code: #f1f5f9;
+    --border: #e2e8f0;
+    --border-2: #cbd5e1;
+    --border-3: #94a3b8;
+    --text: #475569;
+    --text-bright: #0f172a;
+    --text-muted: #64748b;
+    --text-dim: #94a3b8;
+    --text-faint: #94a3b8;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-light: #3b82f6;
+    --accent-muted-bg: #dbeafe;
+    --accent-muted-text: #1e40af;
+    --nav-hover-bg: rgba(0,0,0,0.04);
+    --input-bg: #f8fafc;
+    --stat-row-border: #e2e8f0;
+    --table-head-bg: #f8fafc;
+    --table-row-hover: rgba(0,0,0,0.02);
+    --table-row-border: #e2e8f0;
+    --modal-overlay: rgba(0,0,0,0.5);
+    --shadow: rgba(0,0,0,0.12);
+    /* === Semantic status === */
+    --success-bg: #dcfce7;
+    --success-border: #86efac;
+    --success-text: #166534;
+    --error-bg: #fee2e2;
+    --error-border: #fca5a5;
+    --error-text: #991b1b;
+    --warning-bg: #fef3c7;
+    --warning-text: #92400e;
+    --info-bg: #dbeafe;
+    --info-text: #1e40af;
+    /* === Status badges === */
+    --status-active-bg: #dcfce7;
+    --status-active-text: #166534;
+    --status-suspended-bg: #fef3c7;
+    --status-suspended-text: #92400e;
+    --status-deleted-bg: #fee2e2;
+    --status-deleted-text: #991b1b;
+    --status-unavailable-bg: #f3f4f6;
+    --status-unavailable-text: #6b7280;
+    /* === Route badges === */
+    --rule-matched-bg: #d1fae5;
+    --rule-matched-text: #065f46;
+    --ai-routed-bg: #dbeafe;
+    --ai-routed-text: #1e40af;
+    --conversational-bg: #f3f4f6;
+    --conversational-text: #374151;
+    --disabled-skill-bg: #fee2e2;
+    --disabled-skill-text: #991b1b;
+    --raw-mode-bg: #fef3c7;
+    --raw-mode-text: #92400e;
+    --model-mode-bg: #f5f3ff;
+    --model-mode-text: #6d28d9;
+    --skill-tag-default-bg: #dbeafe;
+    --skill-tag-default-text: #1e40af;
+    /* === Invite banner === */
+    --invite-banner-bg: #dbeafe;
+    --invite-banner-border: #3b82f6;
+    --invite-banner-text: #1e40af;
+    --invite-label-text: #2563eb;
+    /* === Misc === */
+    --link-color: #2563eb;
+    --surface-3: #f1f5f9;
+    --danger: #dc2626;
+    /* === JSON syntax === */
+    --json-key: #0369a1;
+    --json-string: #065f46;
+    --json-number: #92400e;
+    --json-bool: #9d174d;
+    --json-null: #6b7280;
+    /* === Channel brands === */
+    --channel-telegram: #0088cc;
+    --channel-teams: #464EB8;
+    --channel-slack: #4A154B;
+}
+
+/* === Reset === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* === Base === */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    transition: background-color 0.2s, color 0.2s;
+}
+
+/* === Nav === */
+nav {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    height: 48px;
+    min-height: 48px;
+    flex-shrink: 0;
+}
+
+.nav-brand {
+    display: flex;
+    align-items: center;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-right: 24px;
+    text-decoration: none;
+}
+
+.nav-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.nav-badge.platform { background: #22c55e; color: #000; }
+.nav-badge.stage { background: #3b82f6; color: #fff; }
+
+.nav-tenant-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 12px;
+    padding-left: 12px;
+    border-left: 1px solid var(--border-2);
+}
+
+.nav-links {
+    display: flex;
+    gap: 0;
+    height: 100%;
+}
+
+.nav-links a {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    height: 100%;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.nav-links a:hover { color: var(--text); background: var(--nav-hover-bg); }
+.nav-links a.active { color: var(--text-bright); border-bottom-color: var(--accent-light); }
+
+.nav-right {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.nav-btn {
+    background: none;
+    border: 1px solid var(--border-2);
+    color: var(--text-muted);
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.nav-btn:hover { border-color: var(--border-3); color: var(--text); }
+
+.nav-user-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.nav-user-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--border-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    overflow: hidden;
+}
+
+.nav-user-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.nav-user-email {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* === Theme toggle button === */
+.theme-toggle {
+    background: none;
+    border: 1px solid var(--border-2);
+    color: var(--text-muted);
+    border-radius: 6px;
+    width: 30px;
+    height: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.theme-toggle:hover { border-color: var(--border-3); color: var(--text); }
+
+.theme-toggle .icon-sun,
+.theme-toggle .icon-moon { display: none; }
+
+:root .theme-toggle .icon-moon { display: block; }
+[data-theme="light"] .theme-toggle .icon-sun { display: block; }
+[data-theme="light"] .theme-toggle .icon-moon { display: none; }
+
+/* === Session expired modal === */
+.session-expired-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--modal-overlay);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+
+.session-expired-modal .modal-inner {
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: 8px;
+    padding: 32px;
+    max-width: 360px;
+    text-align: center;
+}
+
+.session-expired-modal h3 {
+    margin: 0 0 12px;
+    color: var(--text-bright);
+    font-size: 16px;
+}
+
+.session-expired-modal p {
+    color: var(--text-muted);
+    margin: 0 0 24px;
+    font-size: 14px;
+}
+
+.session-expired-modal button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 28px;
+    font-size: 14px;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.session-expired-modal button:hover { background: var(--accent-hover); }

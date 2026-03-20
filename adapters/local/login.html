@@ -4,13 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>T3nets — Sign In</title>
+    <script>
+(function(){var t=localStorage.getItem('t3nets_theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();
+    </script>
+    <link rel="stylesheet" href="/theme.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #0f0f0f;
-            color: #e0e0e0;
+            background: var(--bg);
+            color: var(--text);
             height: 100vh;
             display: flex;
             align-items: center;
@@ -18,8 +19,8 @@
         }
 
         .login-card {
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 16px;
             padding: 40px;
             width: 100%;
@@ -29,14 +30,14 @@
         .login-card h1 {
             font-size: 24px;
             font-weight: 700;
-            color: #fff;
+            color: var(--text-bright);
             margin-bottom: 8px;
             text-align: center;
         }
 
         .login-card p {
             font-size: 13px;
-            color: #666;
+            color: var(--text-dim);
             text-align: center;
             margin-bottom: 28px;
         }
@@ -49,7 +50,7 @@
             display: block;
             font-size: 12px;
             font-weight: 600;
-            color: #888;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 6px;
@@ -57,23 +58,23 @@
 
         .form-group input {
             width: 100%;
-            background: #0f0f0f;
-            border: 1px solid #333;
+            background: var(--input-bg);
+            border: 1px solid var(--border-2);
             border-radius: 8px;
             padding: 12px 14px;
-            color: #e0e0e0;
+            color: var(--text);
             font-size: 14px;
             font-family: inherit;
             outline: none;
         }
 
-        .form-group input:focus { border-color: #2563eb; }
-        .form-group input::placeholder { color: #555; }
+        .form-group input:focus { border-color: var(--accent); }
+        .form-group input::placeholder { color: var(--text-faint); }
 
         .login-btn {
             width: 100%;
-            background: #2563eb;
-            color: #fff;
+            background: var(--accent);
+            color: var(--text-bright);
             border: none;
             border-radius: 8px;
             padding: 12px;
@@ -83,18 +84,18 @@
             margin-top: 8px;
         }
 
-        .login-btn:hover { background: #1d4ed8; }
-        .login-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+        .login-btn:hover { background: var(--accent-hover); }
+        .login-btn:disabled { background: var(--border-2); color: var(--text-dim); cursor: not-allowed; }
 
         .login-footer {
             text-align: center;
             margin-top: 20px;
             font-size: 12px;
-            color: #555;
+            color: var(--text-faint);
         }
 
         .login-footer a {
-            color: #3b82f6;
+            color: var(--accent-light);
             text-decoration: none;
             cursor: pointer;
         }
@@ -102,9 +103,9 @@
         .login-footer a:hover { text-decoration: underline; }
 
         .error-msg {
-            background: #7f1d1d;
-            border: 1px solid #991b1b;
-            color: #fecaca;
+            background: var(--error-bg);
+            border: 1px solid var(--error-border);
+            color: var(--error-text);
             padding: 10px 14px;
             border-radius: 8px;
             font-size: 13px;
@@ -113,9 +114,9 @@
         }
 
         .success-msg {
-            background: #14532d;
-            border: 1px solid #166534;
-            color: #bbf7d0;
+            background: var(--success-bg);
+            border: 1px solid var(--success-border);
+            color: var(--success-text);
             padding: 10px 14px;
             border-radius: 8px;
             font-size: 13px;
@@ -131,33 +132,33 @@
         .brand span {
             font-size: 28px;
             font-weight: 800;
-            color: #fff;
+            color: var(--text-bright);
         }
 
         .panel { display: none; }
         .panel.active { display: block; }
 
         .invite-banner {
-            background: #1e3a5f;
-            border: 1px solid #2563eb;
+            background: var(--invite-banner-bg);
+            border: 1px solid var(--invite-banner-border);
             border-radius: 8px;
             padding: 14px;
             margin-bottom: 20px;
             text-align: center;
         }
         .invite-banner .tenant-name {
-            color: #60a5fa;
+            color: var(--invite-banner-text);
             font-weight: 700;
             font-size: 15px;
         }
         .invite-banner .invite-label {
-            color: #93c5fd;
+            color: var(--invite-label-text);
             font-size: 13px;
             margin-top: 4px;
         }
         .form-group input[readonly] {
-            background: #1a1a1a;
-            color: #888;
+            background: var(--surface);
+            color: var(--text-muted);
             cursor: not-allowed;
         }
         .invite-options {
@@ -172,23 +173,29 @@
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
-            border: 1px solid #333;
+            border: 1px solid var(--border-2);
         }
         .invite-options .btn-primary {
-            background: #2563eb;
-            color: #fff;
-            border-color: #2563eb;
+            background: var(--accent);
+            color: var(--text-bright);
+            border-color: var(--accent);
         }
-        .invite-options .btn-primary:hover { background: #1d4ed8; }
+        .invite-options .btn-primary:hover { background: var(--accent-hover); }
         .invite-options .btn-secondary {
             background: transparent;
-            color: #93c5fd;
-            border-color: #2563eb;
+            color: var(--invite-label-text);
+            border-color: var(--accent);
         }
-        .invite-options .btn-secondary:hover { background: #1e3a5f; }
+        .invite-options .btn-secondary:hover { background: var(--invite-banner-bg); }
     </style>
 </head>
 <body>
+    <div style="position:fixed;top:12px;right:16px;">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+            <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+    </div>
     <div class="login-card">
         <div class="brand">
             <span>T3nets</span>
@@ -511,9 +518,9 @@
                 errEl.textContent = inviteCode
                     ? 'Email verified! Sign in to complete your invitation.'
                     : 'Email verified! You can now sign in.';
-                errEl.style.background = '#14532d';
-                errEl.style.borderColor = '#166534';
-                errEl.style.color = '#bbf7d0';
+                errEl.style.background = 'var(--success-bg)';
+                errEl.style.borderColor = 'var(--success-border)';
+                errEl.style.color = 'var(--success-text)';
                 errEl.style.display = 'block';
             } catch (err) {
                 showError('verify-error', 'Verification failed: ' + err.message);
@@ -600,9 +607,9 @@
                 document.getElementById('login-email').value = pendingEmail;
                 const errEl = document.getElementById('login-error');
                 errEl.textContent = 'Password reset! You can now sign in.';
-                errEl.style.background = '#14532d';
-                errEl.style.borderColor = '#166534';
-                errEl.style.color = '#bbf7d0';
+                errEl.style.background = 'var(--success-bg)';
+                errEl.style.borderColor = 'var(--success-border)';
+                errEl.style.color = 'var(--success-text)';
                 errEl.style.display = 'block';
             } catch (err) {
                 showError('reset-error', 'Password reset failed: ' + err.message);
@@ -735,5 +742,6 @@
             }
         })();
     </script>
+    <script src="/theme.js"></script>
 </body>
 </html>

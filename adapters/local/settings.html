@@ -4,99 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>T3nets — Settings</title>
+    <script>
+(function(){var t=localStorage.getItem('t3nets_theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();
+    </script>
+    <link rel="stylesheet" href="/theme.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #0f0f0f;
-            color: #e0e0e0;
+            background: var(--bg);
+            color: var(--text);
             height: 100vh;
             display: flex;
             flex-direction: column;
         }
-
-        nav {
-            background: #1a1a1a;
-            border-bottom: 1px solid #2a2a2a;
-            padding: 0 24px;
-            display: flex;
-            align-items: center;
-            gap: 0;
-            height: 48px;
-            min-height: 48px;
-            flex-shrink: 0;
-        }
-
-        .nav-brand {
-            display: flex;
-            align-items: center;
-            font-size: 16px;
-            font-weight: 700;
-            color: #fff;
-            margin-right: 24px;
-            text-decoration: none;
-        }
-
-        .nav-badge {
-            font-size: 10px;
-            padding: 1px 6px;
-            border-radius: 8px;
-            font-weight: 600;
-            margin-left: 6px;
-            vertical-align: middle;
-        }
-        .nav-badge.platform { background: #22c55e; color: #000; }
-        .nav-badge.stage { background: #3b82f6; color: #fff; }
-
-        .nav-tenant-name {
-            font-size: 13px;
-            font-weight: 500;
-            color: #888;
-            margin-left: 12px;
-            padding-left: 12px;
-            border-left: 1px solid #333;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 0;
-            height: 100%;
-        }
-
-        .nav-links a {
-            display: flex;
-            align-items: center;
-            padding: 0 16px;
-            color: #888;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            height: 100%;
-            border-bottom: 2px solid transparent;
-            transition: all 0.15s;
-        }
-
-        .nav-links a:hover { color: #ccc; background: #ffffff08; }
-        .nav-links a.active { color: #fff; border-bottom-color: #3b82f6; }
-
-        .nav-right {
-            margin-left: auto;
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-
-        .nav-btn {
-            background: none;
-            border: 1px solid #333;
-            color: #888;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-        }
-        .nav-btn:hover { border-color: #555; color: #ccc; }
 
         /* --- Settings layout --- */
         .settings-container {
@@ -113,27 +32,27 @@
         .settings-header h1 {
             font-size: 22px;
             font-weight: 600;
-            color: #fff;
+            color: var(--text-bright);
             margin-bottom: 6px;
         }
 
         .settings-header p {
             font-size: 13px;
-            color: #666;
+            color: var(--text-dim);
         }
 
         /* --- Tabs --- */
         .tab-bar {
             display: flex;
             gap: 0;
-            border-bottom: 1px solid #2a2a2a;
+            border-bottom: 1px solid var(--border);
             margin-bottom: 24px;
         }
 
         .tab-btn {
             background: none;
             border: none;
-            color: #888;
+            color: var(--text-muted);
             font-size: 13px;
             font-weight: 500;
             padding: 10px 20px;
@@ -142,8 +61,8 @@
             transition: all 0.15s;
         }
 
-        .tab-btn:hover { color: #ccc; }
-        .tab-btn.active { color: #fff; border-bottom-color: #3b82f6; }
+        .tab-btn:hover { color: var(--text); }
+        .tab-btn.active { color: var(--text-bright); border-bottom-color: var(--accent-light); }
 
         .tab-panel { display: none; }
         .tab-panel.active { display: block; }
@@ -152,7 +71,7 @@
         .section-title {
             font-size: 13px;
             font-weight: 600;
-            color: #888;
+            color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 12px;
@@ -178,7 +97,7 @@
             margin-top: 0;
         }
         .section-chevron {
-            color: #555;
+            color: var(--text-faint);
             font-size: 11px;
             transition: transform 0.2s;
         }
@@ -200,8 +119,8 @@
         }
 
         .model-option {
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 10px;
             padding: 14px 16px;
             cursor: pointer;
@@ -211,34 +130,34 @@
             gap: 12px;
         }
 
-        .model-option:hover:not(.disabled) { border-color: #3b82f6; background: #1e1e2e; }
-        .model-option.selected { border-color: #3b82f6; background: #1e1e2e; box-shadow: 0 0 0 1px #3b82f6; }
+        .model-option:hover:not(.disabled) { border-color: var(--accent-light); background: var(--surface-3); }
+        .model-option.selected { border-color: var(--accent-light); background: var(--surface-3); box-shadow: 0 0 0 1px var(--accent-light); }
         .model-option.disabled { opacity: 0.4; cursor: not-allowed; }
 
         .model-radio {
             width: 18px; height: 18px; border-radius: 50%;
-            border: 2px solid #444; flex-shrink: 0;
+            border: 2px solid var(--border-3); flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
             transition: all 0.15s;
         }
-        .model-option.selected .model-radio { border-color: #3b82f6; }
+        .model-option.selected .model-radio { border-color: var(--accent-light); }
         .model-option.selected .model-radio::after {
-            content: ''; width: 8px; height: 8px; border-radius: 50%; background: #3b82f6;
+            content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-light);
         }
 
         .model-info { flex: 1; }
-        .model-name { font-size: 14px; font-weight: 600; color: #fff; }
-        .model-option.disabled .model-name { color: #888; }
+        .model-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+        .model-option.disabled .model-name { color: var(--text-muted); }
         .model-id {
-            font-size: 11px; color: #555; margin-top: 2px;
+            font-size: 11px; color: var(--text-faint); margin-top: 2px;
             font-family: "SF Mono", "Fira Code", Menlo, monospace;
         }
 
         .model-tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
-        .model-tag.bedrock-only { background: #78350f; color: #fbbf24; }
-        .model-tag.current { background: #065f46; color: #6ee7b7; }
-        .model-tag.free { background: #1e3a5f; color: #93c5fd; }
-        .model-tag.unavailable { background: #374151; color: #9ca3af; }
+        .model-tag.bedrock-only { background: var(--warning-bg); color: var(--warning-text); }
+        .model-tag.current { background: var(--rule-matched-bg); color: var(--rule-matched-text); }
+        .model-tag.free { background: var(--info-bg); color: var(--accent-muted-text); }
+        .model-tag.unavailable { background: var(--status-unavailable-bg); color: var(--status-unavailable-text); }
 
         /* --- Skills --- */
         .skill-list {
@@ -248,8 +167,8 @@
         }
 
         .skill-card {
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 10px;
             overflow: hidden;
         }
@@ -273,52 +192,52 @@
         .skill-toggle .slider {
             position: absolute; cursor: pointer;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: #333; border-radius: 22px; transition: 0.2s;
+            background: var(--border-2); border-radius: 22px; transition: 0.2s;
         }
 
         .skill-toggle .slider::before {
             content: ''; position: absolute;
             width: 16px; height: 16px; border-radius: 50%;
-            background: #888; left: 3px; bottom: 3px; transition: 0.2s;
+            background: var(--text-muted); left: 3px; bottom: 3px; transition: 0.2s;
         }
 
-        .skill-toggle input:checked + .slider { background: #1d4ed8; }
-        .skill-toggle input:checked + .slider::before { transform: translateX(18px); background: #fff; }
+        .skill-toggle input:checked + .slider { background: var(--accent-hover); }
+        .skill-toggle input:checked + .slider::before { transform: translateX(18px); background: var(--text-bright); }
 
         .skill-info { flex: 1; }
-        .skill-name { font-size: 14px; font-weight: 600; color: #fff; }
-        .skill-desc { font-size: 12px; color: #666; margin-top: 2px; }
+        .skill-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+        .skill-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
 
         .skill-badges { display: flex; gap: 6px; align-items: center; }
 
         .skill-integration-tag {
             font-size: 10px; padding: 2px 8px; border-radius: 4px;
-            font-weight: 600; background: #78350f; color: #fbbf24;
+            font-weight: 600; background: var(--warning-bg); color: var(--warning-text);
         }
 
         .skill-connected-tag {
             font-size: 10px; padding: 2px 8px; border-radius: 4px;
-            font-weight: 600; background: #065f46; color: #6ee7b7;
+            font-weight: 600; background: var(--rule-matched-bg); color: var(--rule-matched-text);
         }
 
         .skill-disconnected-tag {
             font-size: 10px; padding: 2px 8px; border-radius: 4px;
-            font-weight: 600; background: #7f1d1d; color: #fca5a5;
+            font-weight: 600; background: var(--error-bg); color: var(--error-text);
         }
 
         .skill-expand-btn {
-            background: none; border: none; color: #555;
+            background: none; border: none; color: var(--text-faint);
             font-size: 11px; cursor: pointer; padding: 4px 8px;
             transition: color 0.15s;
         }
-        .skill-expand-btn:hover { color: #aaa; }
+        .skill-expand-btn:hover { color: var(--text-muted); }
 
         /* --- Integration config pane --- */
         .integration-config {
             display: none;
-            border-top: 1px solid #2a2a2a;
+            border-top: 1px solid var(--border);
             padding: 16px;
-            background: #151515;
+            background: var(--bg);
         }
 
         .integration-config.open { display: block; }
@@ -330,16 +249,16 @@
         .integration-config label {
             display: block;
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 4px;
         }
 
         .integration-config input {
             width: 100%;
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 6px;
-            color: #e0e0e0;
+            color: var(--text);
             padding: 8px 10px;
             font-size: 13px;
             font-family: inherit;
@@ -347,9 +266,9 @@
             transition: border-color 0.15s;
         }
 
-        .integration-config input:focus { border-color: #3b82f6; }
+        .integration-config input:focus { border-color: var(--accent-light); }
 
-        .integration-config input::placeholder { color: #444; }
+        .integration-config input::placeholder { color: var(--text-faint); }
 
         .integration-actions {
             display: flex;
@@ -360,8 +279,8 @@
 
         .btn-test {
             background: none;
-            border: 1px solid #333;
-            color: #888;
+            border: 1px solid var(--border-2);
+            color: var(--text-muted);
             padding: 6px 14px;
             border-radius: 6px;
             font-size: 12px;
@@ -369,11 +288,11 @@
             cursor: pointer;
             transition: all 0.15s;
         }
-        .btn-test:hover { border-color: #555; color: #ccc; }
+        .btn-test:hover { border-color: var(--border-3); color: var(--text); }
 
         .btn-save {
-            background: #3b82f6;
-            color: #fff;
+            background: var(--accent-light);
+            color: var(--text-bright);
             border: none;
             padding: 6px 14px;
             border-radius: 6px;
@@ -383,45 +302,45 @@
             cursor: pointer;
             transition: background 0.15s;
         }
-        .btn-save:hover { background: #2563eb; }
+        .btn-save:hover { background: var(--accent); }
 
         .integration-status {
             font-size: 12px;
             margin-left: auto;
         }
-        .integration-status.ok { color: #6ee7b7; }
-        .integration-status.error { color: #fca5a5; }
+        .integration-status.ok { color: var(--rule-matched-text); }
+        .integration-status.error { color: var(--error-text); }
 
         /* --- Form fields (agent settings) --- */
         .settings-field { margin-bottom: 16px; }
 
         .settings-field label {
-            display: block; font-size: 13px; color: #888; margin-bottom: 6px;
+            display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px;
         }
 
         .settings-field input[type="number"],
         .settings-field textarea {
-            width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a;
-            border-radius: 8px; color: #e0e0e0; padding: 10px 12px;
+            width: 100%; background: var(--surface); border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text); padding: 10px 12px;
             font-size: 13px; font-family: inherit; outline: none;
             transition: border-color 0.15s;
         }
 
         .settings-field input[type="number"] { max-width: 200px; }
         .settings-field textarea { min-height: 80px; resize: vertical; }
-        .settings-field input:focus, .settings-field textarea:focus { border-color: #3b82f6; }
+        .settings-field input:focus, .settings-field textarea:focus { border-color: var(--accent-light); }
 
         .save-btn {
-            background: #3b82f6; color: #fff; border: none;
+            background: var(--accent-light); color: var(--text-bright); border: none;
             padding: 8px 20px; border-radius: 8px; font-size: 13px;
             font-weight: 600; cursor: pointer; transition: background 0.15s;
         }
-        .save-btn:hover { background: #2563eb; }
+        .save-btn:hover { background: var(--accent); }
         .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
         /* --- Channel cards --- */
         .channel-card {
-            background: #1a1a1a; border: 1px solid #2a2a2a;
+            background: var(--surface); border: 1px solid var(--border);
             border-radius: 10px; padding: 16px 20px; margin-bottom: 12px;
         }
         .channel-card-header {
@@ -432,56 +351,56 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 18px; flex-shrink: 0;
         }
-        .channel-icon.telegram { background: #0088cc; }
-        .channel-icon.teams { background: #464EB8; }
-        .channel-icon.slack { background: #4A154B; }
-        .channel-name { font-size: 15px; font-weight: 600; color: #e0e0e0; }
-        .channel-desc { font-size: 12px; color: #666; margin-top: 2px; }
+        .channel-icon.telegram { background: var(--channel-telegram); }
+        .channel-icon.teams { background: var(--channel-teams); }
+        .channel-icon.slack { background: var(--channel-slack); }
+        .channel-name { font-size: 15px; font-weight: 600; color: var(--text); }
+        .channel-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
         .channel-status-row {
             display: flex; align-items: center; gap: 8px; margin: 10px 0 0 0;
         }
         .channel-status-dot {
             width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
         }
-        .channel-status-dot.connected { background: #6ee7b7; }
-        .channel-status-dot.disconnected { background: #555; }
-        .channel-status-text { font-size: 12px; color: #888; }
+        .channel-status-dot.connected { background: var(--rule-matched-text); }
+        .channel-status-dot.disconnected { background: var(--text-faint); }
+        .channel-status-text { font-size: 12px; color: var(--text-muted); }
         .channel-config {
             display: none; margin-top: 14px; padding-top: 14px;
-            border-top: 1px solid #2a2a2a;
+            border-top: 1px solid var(--border);
         }
         .channel-config.open { display: block; }
         .channel-config .field-group { margin-bottom: 12px; }
         .channel-config label {
-            display: block; font-size: 12px; color: #888; margin-bottom: 4px;
+            display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px;
         }
         .channel-config input {
-            width: 100%; background: #111; border: 1px solid #333;
-            border-radius: 6px; color: #e0e0e0; padding: 8px 10px;
+            width: 100%; background: var(--surface-code); border: 1px solid var(--border-2);
+            border-radius: 6px; color: var(--text); padding: 8px 10px;
             font-size: 13px; font-family: monospace; outline: none;
         }
-        .channel-config input:focus { border-color: #3b82f6; }
+        .channel-config input:focus { border-color: var(--accent-light); }
         .channel-config .help-text {
-            font-size: 11px; color: #555; margin-top: 3px;
+            font-size: 11px; color: var(--text-faint); margin-top: 3px;
         }
         .channel-toggle-btn {
-            background: transparent; border: 1px solid #333; color: #aaa;
+            background: transparent; border: 1px solid var(--border-2); color: var(--text-muted);
             padding: 5px 14px; border-radius: 6px; font-size: 12px;
             cursor: pointer; margin-left: auto;
         }
-        .channel-toggle-btn:hover { border-color: #555; color: #e0e0e0; }
+        .channel-toggle-btn:hover { border-color: var(--border-3); color: var(--text); }
         .channel-setup-steps {
             margin: 12px 0 14px 0; padding: 12px 16px;
-            background: #111; border-radius: 8px; border: 1px solid #222;
+            background: var(--surface-code); border-radius: 8px; border: 1px solid var(--table-row-border);
         }
         .channel-setup-steps ol {
-            margin: 0; padding-left: 20px; font-size: 13px; color: #aaa;
+            margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-muted);
             line-height: 1.8;
         }
         .channel-setup-steps ol li { margin-bottom: 2px; }
         .channel-setup-steps code {
-            background: #1a1a1a; padding: 1px 5px; border-radius: 3px;
-            font-size: 12px; color: #e0e0e0;
+            background: var(--surface); padding: 1px 5px; border-radius: 3px;
+            font-size: 12px; color: var(--text);
         }
 
         /* --- Team table --- */
@@ -492,31 +411,31 @@
         }
         .team-table th {
             text-align: left;
-            color: #666;
+            color: var(--text-dim);
             font-weight: 600;
             font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             padding: 8px 12px;
-            border-bottom: 1px solid #2a2a2a;
+            border-bottom: 1px solid var(--border);
         }
         .team-table td {
             padding: 10px 12px;
-            border-bottom: 1px solid #1a1a1a;
-            color: #ccc;
+            border-bottom: 1px solid var(--stat-row-border);
+            color: var(--text);
         }
-        .team-table tr:hover td { background: #1a1a1a; }
+        .team-table tr:hover td { background: var(--surface); }
 
         .role-badge {
             font-size: 10px; padding: 2px 8px; border-radius: 4px;
             font-weight: 600;
         }
-        .role-badge.admin { background: #78350f; color: #fbbf24; }
-        .role-badge.member { background: #1e3a5f; color: #93c5fd; }
+        .role-badge.admin { background: var(--warning-bg); color: var(--warning-text); }
+        .role-badge.member { background: var(--info-bg); color: var(--accent-muted-text); }
 
         .invite-form {
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 10px;
             padding: 16px;
             margin-top: 16px;
@@ -530,16 +449,16 @@
         .invite-form-row label {
             display: block;
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 4px;
         }
         .invite-form-row input,
         .invite-form-row select {
             width: 100%;
-            background: #0f0f0f;
-            border: 1px solid #333;
+            background: var(--input-bg);
+            border: 1px solid var(--border-2);
             border-radius: 6px;
-            color: #e0e0e0;
+            color: var(--text);
             padding: 8px 10px;
             font-size: 13px;
             font-family: inherit;
@@ -550,14 +469,14 @@
             cursor: pointer;
         }
         .invite-form-row input:focus,
-        .invite-form-row select:focus { border-color: #3b82f6; }
+        .invite-form-row select:focus { border-color: var(--accent-light); }
 
         .invite-result {
             margin-top: 12px;
-            background: #065f46;
-            border: 1px solid #166534;
+            background: var(--rule-matched-bg);
+            border: 1px solid var(--success-border);
             border-radius: 8px;
-            color: #6ee7b7;
+            color: var(--rule-matched-text);
             font-size: 12px;
             display: none;
         }
@@ -571,19 +490,19 @@
         .invite-email-body {
             margin: 0 14px 12px;
             padding: 12px 14px;
-            background: #0d2a1d;
-            border: 1px solid #166534;
+            background: var(--surface-code);
+            border: 1px solid var(--success-border);
             border-radius: 6px;
-            color: #d1fae5;
+            color: var(--success-text);
             font-size: 13px;
             line-height: 1.65;
             white-space: pre-wrap;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         .btn-copy-invite {
-            background: #166534;
-            border: 1px solid #16a34a;
-            color: #6ee7b7;
+            background: var(--success-border);
+            border: 1px solid var(--rule-matched-bg);
+            color: var(--rule-matched-text);
             border-radius: 5px;
             padding: 4px 12px;
             font-size: 11px;
@@ -592,27 +511,27 @@
             white-space: nowrap;
             flex-shrink: 0;
         }
-        .btn-copy-invite:hover { background: #15803d; }
+        .btn-copy-invite:hover { background: var(--success-bg); }
 
         .btn-revoke {
-            background: none; border: 1px solid #7f1d1d; color: #fca5a5;
+            background: none; border: 1px solid var(--error-bg); color: var(--error-text);
             padding: 4px 10px; border-radius: 4px; font-size: 11px;
             cursor: pointer;
         }
-        .btn-revoke:hover { background: #7f1d1d; }
+        .btn-revoke:hover { background: var(--error-bg); }
 
         .btn-copy {
-            background: none; border: 1px solid #333; color: #888;
+            background: none; border: 1px solid var(--border-2); color: var(--text-muted);
             padding: 4px 10px; border-radius: 4px; font-size: 11px;
             cursor: pointer;
         }
-        .btn-copy:hover { border-color: #555; color: #ccc; }
+        .btn-copy:hover { border-color: var(--border-3); color: var(--text); }
 
         /* --- Toast --- */
         .toast {
             position: fixed; bottom: 24px; left: 50%;
             transform: translateX(-50%) translateY(80px);
-            background: #065f46; color: #6ee7b7;
+            background: var(--rule-matched-bg); color: var(--rule-matched-text);
             padding: 10px 24px; border-radius: 8px;
             font-size: 13px; font-weight: 500;
             opacity: 0; transition: all 0.3s ease; pointer-events: none;
@@ -630,6 +549,10 @@
             <a href="/training">Training</a>
         </div>
         <div class="nav-right">
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
             <button class="nav-btn" id="logout-btn" style="display:none;" onclick="logout()">Logout</button>
         </div>
     </nav>
@@ -695,7 +618,7 @@
         <!-- ===== Channels Tab ===== -->
         <div class="tab-panel" id="tab-channels">
             <div class="section-title">Channel Integrations</div>
-            <p style="color:#888;font-size:13px;margin-bottom:16px;">
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
                 Connect external messaging platforms to your T3nets agent.
                 Team members can message the bot directly from these channels.
             </p>
@@ -719,7 +642,7 @@
                 </thead>
                 <tbody id="invitations-body"></tbody>
             </table>
-            <div id="no-invitations" style="color:#555;font-size:13px;display:none;">No pending invitations</div>
+            <div id="no-invitations" style="color:var(--text-faint);font-size:13px;display:none;">No pending invitations</div>
 
             <div class="section-title">Invite New Member</div>
             <div class="invite-form">
@@ -743,8 +666,8 @@
             </div>
         </div>
 
-        <div style="margin-top: 48px; padding-top: 16px; border-top: 1px solid #2a2a2a;">
-            <span style="font-size: 12px; color: #555;">Build <span id="build-number">—</span></span>
+        <div style="margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border);">
+            <span style="font-size: 12px; color: var(--text-faint);">Build <span id="build-number">—</span></span>
         </div>
     </div>
 
@@ -1028,7 +951,7 @@
             list.innerHTML = '';
 
             if (available.length === 0) {
-                list.innerHTML = '<div style="color:#555;font-size:13px;">No skills registered</div>';
+                list.innerHTML = '<div style="color:var(--text-faint);font-size:13px;">No skills registered</div>';
                 return;
             }
 
@@ -1302,7 +1225,7 @@
 
         async function loadChannels() {
             const list = document.getElementById('channels-list');
-            list.innerHTML = '<div style="color:#555;font-size:13px;">Loading...</div>';
+            list.innerHTML = '<div style="color:var(--text-faint);font-size:13px;">Loading...</div>';
 
             try {
                 const resp = await fetch('/api/integrations', { headers: getAuthHeaders() });
@@ -1381,11 +1304,11 @@
                 }
 
                 if (!hasChannels) {
-                    list.innerHTML = '<div style="color:#555;font-size:13px;">No channel integrations available</div>';
+                    list.innerHTML = '<div style="color:var(--text-faint);font-size:13px;">No channel integrations available</div>';
                 }
             } catch (err) {
                 console.error('Failed to load channels:', err);
-                list.innerHTML = '<div style="color:#fca5a5;font-size:13px;">Failed to load channels</div>';
+                list.innerHTML = '<div style="color:var(--error-text);font-size:13px;">Failed to load channels</div>';
             }
         }
 
@@ -1688,21 +1611,13 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
         loadSettings();
     </script>
 
-    <div id="session-expired-modal"
-         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
-                z-index:9999;align-items:center;justify-content:center;">
-        <div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;
-                    padding:32px;max-width:360px;text-align:center;">
-            <h3 style="margin:0 0 12px;color:#f1f5f9;">Session Expired</h3>
-            <p style="color:#94a3b8;margin:0 0 24px;">
-                Your session has expired. Please sign in again.
-            </p>
-            <button onclick="window.location.href='/login'"
-                    style="background:#3b82f6;color:#fff;border:none;border-radius:6px;
-                           padding:10px 28px;font-size:14px;cursor:pointer;">
-                OK
-            </button>
+    <div id="session-expired-modal" class="session-expired-modal">
+        <div class="modal-inner">
+            <h3>Session Expired</h3>
+            <p>Your session has expired. Please sign in again.</p>
+            <button onclick="window.location.href='/login'">OK</button>
         </div>
     </div>
+    <script src="/theme.js"></script>
 </body>
 </html>

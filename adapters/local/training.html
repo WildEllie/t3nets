@@ -4,147 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>T3nets — Training</title>
+    <script>
+(function(){var t=localStorage.getItem('t3nets_theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();
+    </script>
+    <link rel="stylesheet" href="/theme.css">
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-
       body {
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: #0f0f0f;
-        color: #e0e0e0;
+        background: var(--bg);
+        color: var(--text);
         min-height: 100vh;
-      }
-
-      nav {
-        background: #1a1a1a;
-        border-bottom: 1px solid #2a2a2a;
-        padding: 0 24px;
-        display: flex;
-        align-items: center;
-        gap: 0;
-        height: 48px;
-        min-height: 48px;
-        flex-shrink: 0;
-      }
-
-      .nav-brand {
-        display: flex;
-        align-items: center;
-        font-size: 16px;
-        font-weight: 700;
-        color: #fff;
-        margin-right: 24px;
-        text-decoration: none;
-      }
-
-      .nav-badge {
-        font-size: 10px;
-        padding: 1px 6px;
-        border-radius: 8px;
-        font-weight: 600;
-        margin-left: 6px;
-        vertical-align: middle;
-      }
-      .nav-badge.platform {
-        background: #22c55e;
-        color: #000;
-      }
-      .nav-badge.stage {
-        background: #3b82f6;
-        color: #fff;
-      }
-
-      .nav-tenant-name {
-        font-size: 13px;
-        font-weight: 500;
-        color: #888;
-        margin-left: 12px;
-        padding-left: 12px;
-        border-left: 1px solid #333;
-      }
-
-      .nav-links {
-        display: flex;
-        gap: 0;
-        height: 100%;
-      }
-
-      .nav-links a {
-        display: flex;
-        align-items: center;
-        padding: 0 16px;
-        color: #888;
-        text-decoration: none;
-        font-size: 13px;
-        font-weight: 500;
-        height: 100%;
-        border-bottom: 2px solid transparent;
-        transition: all 0.15s;
-      }
-
-      .nav-links a:hover {
-        color: #ccc;
-        background: #ffffff08;
-      }
-      .nav-links a.active {
-        color: #fff;
-        border-bottom-color: #3b82f6;
-      }
-
-      .nav-right {
-        margin-left: auto;
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-
-      .nav-btn {
-        background: none;
-        border: 1px solid #333;
-        color: #888;
-        padding: 4px 12px;
-        border-radius: 6px;
-        font-size: 12px;
-        cursor: pointer;
-      }
-      .nav-btn:hover {
-        border-color: #555;
-        color: #ccc;
-      }
-
-      .nav-user-info {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: #ccc;
-      }
-      .nav-user-avatar {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: #2a2a2a;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 12px;
-        font-weight: 600;
-        color: #888;
-        overflow: hidden;
-        flex-shrink: 0;
-      }
-      .nav-user-avatar img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-      .nav-user-email {
-        font-size: 12px;
-        color: #666;
       }
 
       /* Page layout */
@@ -165,13 +33,13 @@
       .page-header h1 {
         font-size: 20px;
         font-weight: 600;
-        color: #fff;
+        color: var(--text-bright);
         margin-bottom: 4px;
       }
 
       .page-header p {
         font-size: 13px;
-        color: #666;
+        color: var(--text-dim);
       }
 
       /* Stats row */
@@ -183,8 +51,8 @@
       }
 
       .stat-card {
-        background: #1a1a1a;
-        border: 1px solid #2a2a2a;
+        background: var(--surface);
+        border: 1px solid var(--border);
         border-radius: 10px;
         padding: 14px 18px;
         min-width: 120px;
@@ -192,7 +60,7 @@
 
       .stat-card .label {
         font-size: 11px;
-        color: #666;
+        color: var(--text-dim);
         text-transform: uppercase;
         letter-spacing: 0.4px;
         margin-bottom: 6px;
@@ -201,20 +69,20 @@
       .stat-card .value {
         font-size: 22px;
         font-weight: 700;
-        color: #fff;
+        color: var(--text-bright);
       }
 
       .stat-card .value.blue {
-        color: #3b82f6;
+        color: var(--accent-light);
       }
       .stat-card .value.green {
-        color: #22c55e;
+        color: var(--status-active-text);
       }
       .stat-card .value.amber {
-        color: #f59e0b;
+        color: var(--warning-text);
       }
       .stat-card .value.red {
-        color: #ef4444;
+        color: var(--status-deleted-text);
       }
 
       /* Filters + rebuild row */
@@ -227,8 +95,8 @@
 
       .filter-btn {
         background: none;
-        border: 1px solid #333;
-        color: #888;
+        border: 1px solid var(--border-2);
+        color: var(--text-muted);
         padding: 5px 14px;
         border-radius: 6px;
         font-size: 12px;
@@ -236,20 +104,20 @@
         transition: all 0.15s;
       }
       .filter-btn:hover {
-        border-color: #555;
-        color: #ccc;
+        border-color: var(--border-3);
+        color: var(--text);
       }
       .filter-btn.active {
-        border-color: #3b82f6;
-        color: #3b82f6;
-        background: #1e1e2e;
+        border-color: var(--accent-light);
+        color: var(--accent-light);
+        background: var(--surface-3);
       }
 
       .rebuild-btn {
         margin-left: auto;
-        background: #3b82f6;
+        background: var(--accent-light);
         border: none;
-        color: #fff;
+        color: var(--text-bright);
         padding: 7px 16px;
         border-radius: 7px;
         font-size: 13px;
@@ -258,28 +126,28 @@
         transition: background 0.15s;
       }
       .rebuild-btn:hover {
-        background: #2563eb;
+        background: var(--accent);
       }
       .rebuild-btn:disabled {
-        background: #1e3a5f;
-        color: #4a7ab5;
+        background: var(--info-bg);
+        color: var(--text-muted);
         cursor: not-allowed;
       }
 
       /* Rules status */
       .rules-status {
         font-size: 12px;
-        color: #666;
+        color: var(--text-dim);
       }
       .rules-status .version {
-        color: #888;
+        color: var(--text-muted);
         font-weight: 500;
       }
 
       /* Table */
       .table-wrap {
-        background: #1a1a1a;
-        border: 1px solid #2a2a2a;
+        background: var(--surface);
+        border: 1px solid var(--border);
         border-radius: 12px;
         overflow: hidden;
       }
@@ -290,26 +158,26 @@
       }
 
       thead th {
-        background: #141414;
+        background: var(--table-head-bg);
         padding: 10px 14px;
         text-align: left;
         font-size: 11px;
         font-weight: 600;
-        color: #666;
+        color: var(--text-dim);
         text-transform: uppercase;
         letter-spacing: 0.4px;
-        border-bottom: 1px solid #2a2a2a;
+        border-bottom: 1px solid var(--border);
       }
 
       tbody tr {
-        border-bottom: 1px solid #222;
+        border-bottom: 1px solid var(--table-row-border);
         transition: background 0.1s;
       }
       tbody tr:last-child {
         border-bottom: none;
       }
       tbody tr:hover {
-        background: #ffffff04;
+        background: var(--table-row-hover);
       }
 
       tbody td {
@@ -319,14 +187,14 @@
       }
 
       .td-time {
-        color: #666;
+        color: var(--text-dim);
         font-size: 12px;
         white-space: nowrap;
         width: 80px;
       }
 
       .td-message {
-        color: #ccc;
+        color: var(--text);
         max-width: 300px;
         word-break: break-word;
       }
@@ -337,8 +205,8 @@
 
       .skill-tag {
         display: inline-block;
-        background: #1e2d45;
-        color: #60a5fa;
+        background: var(--skill-tag-default-bg);
+        color: var(--skill-tag-default-text);
         border-radius: 5px;
         padding: 2px 8px;
         font-size: 11px;
@@ -346,13 +214,13 @@
       }
 
       .skill-tag.none {
-        background: #222;
-        color: #555;
+        background: var(--table-row-border);
+        color: var(--text-faint);
       }
 
       .skill-tag.disabled {
-        background: #2d1a1a;
-        color: #f87171;
+        background: var(--disabled-skill-bg);
+        color: var(--disabled-skill-text);
       }
 
       .td-annotation {
@@ -367,9 +235,9 @@
 
       .skill-select {
         flex: 1;
-        background: #111;
-        border: 1px solid #2a2a2a;
-        color: #ccc;
+        background: var(--surface-code);
+        border: 1px solid var(--border);
+        color: var(--text);
         padding: 4px 8px;
         border-radius: 6px;
         font-size: 12px;
@@ -377,13 +245,13 @@
       }
       .skill-select:focus {
         outline: none;
-        border-color: #3b82f6;
+        border-color: var(--accent-light);
       }
 
       .save-btn {
-        background: #1e3a5f;
-        border: 1px solid #2563eb;
-        color: #60a5fa;
+        background: var(--info-bg);
+        border: 1px solid var(--accent);
+        color: var(--ai-routed-text);
         padding: 4px 10px;
         border-radius: 6px;
         font-size: 12px;
@@ -392,13 +260,13 @@
         transition: all 0.15s;
       }
       .save-btn:hover {
-        background: #2563eb;
-        color: #fff;
+        background: var(--accent);
+        color: var(--text-bright);
       }
       .save-btn.saved {
-        background: #14532d;
-        border-color: #16a34a;
-        color: #4ade80;
+        background: var(--status-active-bg);
+        border-color: var(--rule-matched-bg);
+        color: var(--status-active-text);
       }
 
       .td-actions {
@@ -409,7 +277,7 @@
       .delete-btn {
         background: none;
         border: none;
-        color: #444;
+        color: var(--border-3);
         font-size: 14px;
         cursor: pointer;
         padding: 4px 6px;
@@ -417,15 +285,15 @@
         transition: all 0.15s;
       }
       .delete-btn:hover {
-        color: #ef4444;
-        background: #2d1a1a;
+        color: var(--status-deleted-text);
+        background: var(--disabled-skill-bg);
       }
 
       /* Empty state */
       .empty-state {
         padding: 48px 24px;
         text-align: center;
-        color: #555;
+        color: var(--text-faint);
       }
 
       .empty-state p {
@@ -434,14 +302,14 @@
       }
       .empty-state small {
         font-size: 12px;
-        color: #444;
+        color: var(--text-faint);
       }
 
       /* Loading */
       .loading {
         padding: 32px;
         text-align: center;
-        color: #555;
+        color: var(--text-faint);
         font-size: 13px;
       }
 
@@ -450,13 +318,13 @@
         position: fixed;
         bottom: 24px;
         right: 24px;
-        background: #1a1a1a;
-        border: 1px solid #2a2a2a;
+        background: var(--surface);
+        border: 1px solid var(--border);
         border-radius: 10px;
         padding: 12px 18px;
         font-size: 13px;
-        color: #ccc;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        color: var(--text);
+        box-shadow: 0 8px 32px var(--shadow);
         z-index: 1000;
         opacity: 0;
         transform: translateY(8px);
@@ -468,12 +336,12 @@
         transform: translateY(0);
       }
       .toast.success {
-        border-color: #16a34a;
-        color: #4ade80;
+        border-color: var(--rule-matched-bg);
+        color: var(--status-active-text);
       }
       .toast.error {
-        border-color: #dc2626;
-        color: #f87171;
+        border-color: var(--danger);
+        color: var(--status-deleted-text);
       }
     </style>
   </head>
@@ -508,6 +376,10 @@
           id="user-email"
           style="display: none"
         ></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+            <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
         <button
           class="nav-btn"
           id="logout-btn"
@@ -755,7 +627,7 @@
           return '<span class="skill-tag none">— freeform</span>';
         }
         const action = ex.matched_action
-          ? `<span style="color:#6b7280">/${ex.matched_action}</span>`
+          ? `<span style="color:var(--text-muted)">/${ex.matched_action}</span>`
           : "";
         return `<span class="skill-tag">${escHtml(ex.matched_skill)}${action}</span>`;
       }
@@ -1091,5 +963,6 @@
       checkAuth();
       init();
     </script>
+    <script src="/theme.js"></script>
   </body>
 </html>

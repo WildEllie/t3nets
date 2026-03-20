@@ -5,144 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>T3nets — Chat</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <script>
+(function(){var t=localStorage.getItem('t3nets_theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();
+    </script>
+    <link rel="stylesheet" href="/theme.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #0f0f0f;
-            color: #e0e0e0;
+            background: var(--bg);
+            color: var(--text);
             height: 100vh;
             display: flex;
             flex-direction: column;
         }
 
-        nav {
-            background: #1a1a1a;
-            border-bottom: 1px solid #2a2a2a;
-            padding: 0 24px;
-            display: flex;
-            align-items: center;
-            gap: 0;
-            height: 48px;
-            min-height: 48px;
-            flex-shrink: 0;
-        }
-
-        .nav-brand {
-            display: flex;
-            align-items: center;
-            font-size: 16px;
-            font-weight: 700;
-            color: #fff;
-            margin-right: 24px;
-            text-decoration: none;
-        }
-
-        .nav-badge {
-            font-size: 10px;
-            padding: 1px 6px;
-            border-radius: 8px;
-            font-weight: 600;
-            margin-left: 6px;
-            vertical-align: middle;
-        }
-        .nav-badge.platform { background: #22c55e; color: #000; }
-        .nav-badge.stage { background: #3b82f6; color: #fff; }
-
-        .nav-tenant-name {
-            font-size: 13px;
-            font-weight: 500;
-            color: #888;
-            margin-left: 12px;
-            padding-left: 12px;
-            border-left: 1px solid #333;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 0;
-            height: 100%;
-        }
-
-        .nav-links a {
-            display: flex;
-            align-items: center;
-            padding: 0 16px;
-            color: #888;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            height: 100%;
-            border-bottom: 2px solid transparent;
-            transition: all 0.15s;
-        }
-
-        .nav-links a:hover { color: #ccc; background: #ffffff08; }
-        .nav-links a.active { color: #fff; border-bottom-color: #3b82f6; }
-
-        .nav-right {
-            margin-left: auto;
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-
-        .nav-btn {
-            background: none;
-            border: 1px solid #333;
-            color: #888;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-        }
-
-        .nav-btn:hover { border-color: #555; color: #ccc; }
-
-        .nav-user-info {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-            color: #888;
-        }
-
-        .nav-user-avatar {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            background: #333;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            font-weight: 700;
-            color: #aaa;
-            overflow: hidden;
-        }
-
-        .nav-user-avatar img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .nav-user-email {
-            font-size: 12px;
-            color: #888;
-        }
-
         .message-sender {
             font-size: 11px;
-            color: #999;
+            color: var(--text-muted);
             margin-bottom: 4px;
             font-weight: 600;
         }
 
         .message.user .message-sender {
             text-align: right;
-            color: #93c5fd;
+            color: var(--accent-muted-text);
         }
 
         #chat-container {
@@ -165,20 +50,20 @@
 
         .message.user {
             align-self: flex-end;
-            background: #2563eb;
-            color: #fff;
+            background: var(--accent);
+            color: var(--text-bright);
             border-bottom-right-radius: 4px;
             white-space: pre-wrap;
         }
 
         .message.assistant {
             align-self: flex-start;
-            background: #1e1e1e;
-            border: 1px solid #2a2a2a;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
             border-bottom-left-radius: 4px;
         }
 
-        .message.assistant strong { color: #fff; }
+        .message.assistant strong { color: var(--text-bright); }
 
         /* Markdown rendering in assistant messages */
         .message.assistant p { margin: 0 0 8px 0; }
@@ -186,15 +71,15 @@
         .message.assistant ul, .message.assistant ol { margin: 4px 0 8px 20px; }
         .message.assistant li { margin: 2px 0; }
         .message.assistant h1, .message.assistant h2, .message.assistant h3 {
-            color: #fff; margin: 12px 0 6px 0; font-size: 15px;
+            color: var(--text-bright); margin: 12px 0 6px 0; font-size: 15px;
         }
         .message.assistant h1 { font-size: 17px; }
         .message.assistant code {
-            background: #0d1117; padding: 1px 5px; border-radius: 3px;
+            background: var(--surface-code); padding: 1px 5px; border-radius: 3px;
             font-family: "SF Mono", Menlo, monospace; font-size: 12px;
         }
         .message.assistant pre {
-            background: #0d1117; padding: 10px; border-radius: 6px;
+            background: var(--surface-code); padding: 10px; border-radius: 6px;
             overflow-x: auto; margin: 8px 0;
         }
         .message.assistant pre code { padding: 0; background: none; }
@@ -205,52 +90,52 @@
             font-size: 13px;
         }
         .message.assistant th {
-            background: #2a2a2a; color: #e0e0e0; font-weight: 600;
+            background: var(--border); color: var(--text); font-weight: 600;
             text-align: left; padding: 6px 10px;
-            border: 1px solid #3a3a3a;
+            border: 1px solid var(--border-3);
         }
         .message.assistant td {
-            padding: 5px 10px; border: 1px solid #333;
+            padding: 5px 10px; border: 1px solid var(--border-2);
         }
-        .message.assistant tr:nth-child(even) { background: #1a1a1a; }
-        .message.assistant a { color: #7dd3fc; }
+        .message.assistant tr:nth-child(even) { background: var(--surface); }
+        .message.assistant a { color: var(--link-color); }
 
         .message.assistant.raw-message {
             max-width: 95%;
-            background: #0d1117;
+            background: var(--surface-code);
             border-color: #f59e0b33;
         }
 
         .message.error {
             align-self: flex-start;
             max-width: 80%;
-            background: #1e1e1e;
-            border: 1px solid #991b1b;
-            border-left: 3px solid #ef4444;
-            color: #e0e0e0;
+            background: var(--surface-2);
+            border: 1px solid var(--error-border);
+            border-left: 3px solid var(--status-deleted-text);
+            color: var(--text);
             font-size: 14px;
             line-height: 1.5;
         }
 
         .message.error.severity-info {
-            border-left-color: #3b82f6;
-            border-color: #1e3a5f;
+            border-left-color: var(--accent-light);
+            border-color: var(--info-bg);
         }
 
         .message.error.severity-config {
-            border-left-color: #f59e0b;
-            border-color: #78350f;
+            border-left-color: var(--warning-text);
+            border-color: var(--warning-bg);
         }
 
         .message.error.severity-critical {
-            border-left-color: #ef4444;
-            border-color: #991b1b;
+            border-left-color: var(--status-deleted-text);
+            border-color: var(--error-border);
         }
 
         .error-action {
             margin-top: 8px;
             font-size: 12px;
-            color: #888;
+            color: var(--text-muted);
             font-style: italic;
         }
 
@@ -264,14 +149,14 @@
             margin-bottom: 6px;
         }
 
-        .error-badge.info { background: #1e3a5f; color: #7dd3fc; }
-        .error-badge.config { background: #78350f; color: #fbbf24; }
-        .error-badge.critical { background: #7f1d1d; color: #fca5a5; }
+        .error-badge.info { background: var(--info-bg); color: var(--info-text); }
+        .error-badge.config { background: var(--warning-bg); color: var(--warning-text); }
+        .error-badge.critical { background: var(--error-bg); color: var(--error-text); }
 
         .message .meta {
             margin-top: 8px;
             font-size: 11px;
-            color: #555;
+            color: var(--text-faint);
             display: flex;
             gap: 8px;
             align-items: center;
@@ -285,12 +170,12 @@
             text-transform: uppercase;
         }
 
-        .route-badge.rule { background: #065f46; color: #6ee7b7; }
-        .route-badge.ai, .route-badge.tier2 { background: #1e3a5f; color: #7dd3fc; }
-        .route-badge.conversational, .route-badge.tier3 { background: #3f3f46; color: #a1a1aa; }
-        .route-badge.disabled_skill { background: #431407; color: #fdba74; }
-        .route-badge.raw { background: #78350f; color: #fbbf24; }
-        .route-badge.model { background: #4c1d95; color: #c4b5fd; }
+        .route-badge.rule { background: var(--rule-matched-bg); color: var(--rule-matched-text); }
+        .route-badge.ai, .route-badge.tier2 { background: var(--ai-routed-bg); color: var(--ai-routed-text); }
+        .route-badge.conversational, .route-badge.tier3 { background: var(--conversational-bg); color: var(--conversational-text); }
+        .route-badge.disabled_skill { background: var(--warning-bg); color: var(--status-suspended-text); }
+        .route-badge.raw { background: var(--raw-mode-bg); color: var(--raw-mode-text); }
+        .route-badge.model { background: var(--model-mode-bg); color: var(--model-mode-text); }
 
         /* JSON syntax highlighting for raw output */
         .json-display {
@@ -299,17 +184,17 @@
             line-height: 1.6;
         }
 
-        .json-display .json-key { color: #7dd3fc; }
-        .json-display .json-string { color: #6ee7b7; }
-        .json-display .json-number { color: #fbbf24; }
-        .json-display .json-bool { color: #f472b6; }
-        .json-display .json-null { color: #a1a1aa; }
-        .json-display .json-bracket { color: #888; }
+        .json-display .json-key { color: var(--json-key); }
+        .json-display .json-string { color: var(--json-string); }
+        .json-display .json-number { color: var(--json-number); }
+        .json-display .json-bool { color: var(--json-bool); }
+        .json-display .json-null { color: var(--json-null); }
+        .json-display .json-bracket { color: var(--text-muted); }
 
         .thinking {
             align-self: flex-start;
             padding: 12px 16px;
-            color: #888;
+            color: var(--text-muted);
             font-size: 14px;
         }
 
@@ -326,8 +211,8 @@
         }
 
         #input-container {
-            background: #1a1a1a;
-            border-top: 1px solid #2a2a2a;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
             padding: 16px 24px;
             display: flex;
             gap: 12px;
@@ -335,11 +220,11 @@
 
         #message-input {
             flex: 1;
-            background: #0f0f0f;
-            border: 1px solid #333;
+            background: var(--input-bg);
+            border: 1px solid var(--border-2);
             border-radius: 8px;
             padding: 12px 16px;
-            color: #e0e0e0;
+            color: var(--text);
             font-size: 14px;
             font-family: inherit;
             resize: none;
@@ -348,12 +233,12 @@
             max-height: 120px;
         }
 
-        #message-input:focus { border-color: #2563eb; }
-        #message-input::placeholder { color: #555; }
+        #message-input:focus { border-color: var(--accent); }
+        #message-input::placeholder { color: var(--text-faint); }
 
         #send-btn {
-            background: #2563eb;
-            color: #fff;
+            background: var(--accent);
+            color: var(--text-bright);
             border: none;
             border-radius: 8px;
             padding: 12px 20px;
@@ -363,19 +248,19 @@
             white-space: nowrap;
         }
 
-        #send-btn:hover { background: #1d4ed8; }
-        #send-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+        #send-btn:hover { background: var(--accent-hover); }
+        #send-btn:disabled { background: var(--border-2); color: var(--text-dim); cursor: not-allowed; }
 
         .welcome {
             text-align: center;
-            color: #666;
+            color: var(--text-dim);
             padding: 40px;
             font-size: 14px;
             line-height: 1.8;
         }
 
         .welcome h2 {
-            color: #aaa;
+            color: var(--text-muted);
             font-size: 20px;
             margin-bottom: 12px;
         }
@@ -389,19 +274,19 @@
         }
 
         .welcome .suggestion {
-            background: #1e1e1e;
-            border: 1px solid #333;
+            background: var(--surface-2);
+            border: 1px solid var(--border-2);
             border-radius: 8px;
             padding: 8px 16px;
             font-size: 13px;
-            color: #aaa;
+            color: var(--text-muted);
             cursor: pointer;
             transition: all 0.15s;
         }
 
         .welcome .suggestion:hover {
-            border-color: #2563eb;
-            color: #fff;
+            border-color: var(--accent);
+            color: var(--text-bright);
         }
     </style>
 </head>
@@ -415,6 +300,10 @@
             <a href="/training">Training</a>
         </div>
         <div class="nav-right">
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            </button>
             <button class="nav-btn" onclick="clearChat()">Clear Chat</button>
             <div class="nav-user-info" id="user-info" style="display:none;">
                 <div class="nav-user-avatar" id="user-avatar"></div>
@@ -429,7 +318,7 @@
         <div class="welcome">
             <h2>👋 Hey! I'm your T3nets agent.</h2>
             <p>Ask me about your sprint, blockers, or anything your connected tools can tell me.</p>
-            <p style="color:#555; font-size:12px; margin-top:8px;">Tip: append <code style="background:#1e1e1e;padding:2px 6px;border-radius:3px;color:#fbbf24;">--raw</code> to see raw skill output</p>
+            <p style="color:var(--text-faint); font-size:12px; margin-top:8px;">Tip: append <code style="background:var(--surface-3);padding:2px 6px;border-radius:3px;color:var(--warning-text);">--raw</code> to see raw skill output</p>
             <div class="suggestions">
                 <div class="suggestion" onclick="sendSuggestion(this)">What's the sprint status?</div>
                 <div class="suggestion" onclick="sendSuggestion(this)">What's blocked?</div>
@@ -1028,8 +917,8 @@
                 if (roundtripSec !== undefined && roundtripSec > 0) {
                     const rt = document.createElement('span');
                     rt.className = 'route-badge';
-                    rt.style.background = '#1e3a5f';
-                    rt.style.color = '#93c5fd';
+                    rt.style.background = 'var(--ai-routed-bg)';
+                    rt.style.color = 'var(--accent-muted-text)';
                     rt.textContent = roundtripSec.toFixed(1) + 's';
                     meta.appendChild(rt);
                 }
@@ -1107,21 +996,13 @@
         input.focus();
     </script>
 
-    <div id="session-expired-modal"
-         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
-                z-index:9999;align-items:center;justify-content:center;">
-        <div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;
-                    padding:32px;max-width:360px;text-align:center;">
-            <h3 style="margin:0 0 12px;color:#f1f5f9;">Session Expired</h3>
-            <p style="color:#94a3b8;margin:0 0 24px;">
-                Your session has expired. Please sign in again.
-            </p>
-            <button onclick="window.location.href='/login'"
-                    style="background:#3b82f6;color:#fff;border:none;border-radius:6px;
-                           padding:10px 28px;font-size:14px;cursor:pointer;">
-                OK
-            </button>
+    <div id="session-expired-modal" class="session-expired-modal">
+        <div class="modal-inner">
+            <h3>Session Expired</h3>
+            <p>Your session has expired. Please sign in again.</p>
+            <button onclick="window.location.href='/login'">OK</button>
         </div>
     </div>
+    <script src="/theme.js"></script>
 </body>
 </html>
