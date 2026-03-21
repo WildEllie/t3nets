@@ -265,6 +265,22 @@ async def serve_logo(request: Request) -> Response:
     return Response(status_code=404, content="logo not found")
 
 
+async def serve_theme_css(request: Request) -> Response:
+    _base = Path(__file__).parent.parent.parent
+    path = _base / "adapters/local/theme.css"
+    if path.exists():
+        return FileResponse(str(path), media_type="text/css")
+    return Response(status_code=404, content="theme.css not found")
+
+
+async def serve_theme_js(request: Request) -> Response:
+    _base = Path(__file__).parent.parent.parent
+    path = _base / "adapters/local/theme.js"
+    if path.exists():
+        return FileResponse(str(path), media_type="application/javascript")
+    return Response(status_code=404, content="theme.js not found")
+
+
 # ---------------------------------------------------------------------------
 # SSE endpoint
 # ---------------------------------------------------------------------------
@@ -2072,6 +2088,8 @@ routes = [
     Route("/", homepage),
     Route("/chat", homepage),
     Route("/logo.png", serve_logo),
+    Route("/theme.css", serve_theme_css),
+    Route("/theme.js", serve_theme_js),
     Route("/health", health_page),
     Route("/settings", settings_page),
     Route("/onboard", onboard_page),

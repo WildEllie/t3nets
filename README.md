@@ -19,9 +19,7 @@
 
 ---
 
-T3nets is the layer between your team's communication channels and their productivity tools. Instead of switching between Jira, GitHub, email, and calendars — you ask a question and get an answer.
-
-A **hybrid routing engine** handles the heavy lifting: known requests are matched locally for $0, while complex queries are routed to the AI model with full tool access. The result is an AI agent platform that's smart when it needs to be and free when it doesn't.
+T3nets is an open-source, AI-native platform that gives every team a tailored AI workspace. Each tenant gets its own experience — skills, dashboards, and workflows — assembled through Practices, with multi-tenant isolation, hybrid routing that cuts AI costs by 60%, and cloud-agnostic deployment baked in. Clone it, deploy it, extend it. Self-host or run as a service.
 
 ```
 You (Dashboard / Teams / Telegram) → T3nets → AI Model → Your Tools → Answer

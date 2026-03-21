@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 9, 2026 (Practices framework + infrastructure cost optimization)
+**Last Updated:** March 7, 2026 (Phase 5c Ollama integration complete)
 
 ---
 
@@ -248,49 +248,41 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 - [ ] Skill marketplace page in dashboard
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
-### Phase 8: Practices — Team Experience Bundles
+
+### Phase 7: Practices — Team Experience Bundles
       ↳ 📐 Full plan: [plan-practices-team-experience-bundles.md](plan-practices-team-experience-bundles.md)
 
 Practices are complete team experience bundles: skills + custom console pages + functionality, uploadable as ZIPs. Pages interact with data through skills (same async EventBus flow as chat). One primary practice per tenant + add-on skills/pages from other practices.
 
-**Phase 8a — Core Practice Framework**
-      ↳ ✅ Completed (local dev server)
-- [x] `PracticeDefinition` / `PracticePage` data models (`agent/models/practice.py`)
-- [x] `PracticeRegistry` — load built-in, load uploaded, install ZIP, register skills (`agent/practices/registry.py`)
-- [x] Practice manifest format (`practice.yaml`: skills, pages, integrations, system_prompt_addon)
-- [x] `SkillRegistry` `worker_path` support — `spec_from_file_location` for practice skills in non-importable paths
-- [x] `DirectBus` context injection — `blob_store`, `tenant_id` passed to 3-arg workers via `inspect.signature`
-- [x] `DirectBus` async worker support — `asyncio.iscoroutine` check + await
-- [x] Built-in `dev-jira` practice: `sprint_status` + `release_notes` moved to `agent/practices/dev-jira/skills/`
-- [x] `ping` stays as platform-level skill in `agent/skills/`
-- [x] `POST /api/skill/{name}` — skill invocation for pages
-- [x] `GET /api/practices/pages` — pages for tenant's dynamic nav injection
-- [x] `GET /api/practices` — list installed practices
-- [x] `POST /api/practices/upload` — ZIP upload, validation, extraction
-- [x] Practice page serving: `/p/{practice}/{page}` (local: FileResponse)
-- [x] Dynamic nav: `loadPracticePages()` injected after `checkAuth()` in all HTML pages
-- [x] `TenantSettings`: `primary_practice`, `addon_skills`, `addon_pages`
-- [x] `FileStore` — `BlobStore` implementation for practice data storage (`adapters/local/file_store.py`)
-- [x] Generic blob endpoints: `POST/GET /api/blobs/{key:path}`
-- [x] Server startup: `PracticeRegistry.load_builtin()` + `register_skills()` replaces direct skill loading
-- [x] **Milestone:** Practices framework running locally with dev-jira built-in practice
+**Phase 7a — Core Practice Framework**
+- [ ] Practice data models (`PracticeDefinition`, `PracticePage`) and `PracticeRegistry`
+- [ ] Built-in engineering practice: move existing skills into `agent/practices/engineering/`
+- [ ] Practice manifest format (`practice.yaml`: skills, pages, integrations, system_prompt_addon)
+- [ ] `POST /api/skill/{name}` — async skill invocation for pages (returns 202, result via WebSocket/SSE)
+- [ ] `GET /api/practices/pages` — pages for tenant's dynamic nav injection
+- [ ] `GET /api/practices` — list installed practices
+- [ ] Practice page serving: `/p/{practice}/{page}` (local: FileResponse; AWS: S3 + CloudFront CDN)
+- [ ] Dynamic nav: practice page links injected after `checkAuth()` in all HTML pages
+- [ ] TenantSettings: `primary_practice`, `addon_skills`, `addon_pages`
+- [ ] Server startup: `PracticeRegistry.load_builtin()` replaces direct `SkillRegistry.load_from_directory()`
+- [ ] **Milestone:** Built-in engineering practice works with pages served at `/p/engineering/sprint`
 
-**Phase 8b — Practice Upload & Management**
-- [x] `POST /api/practices/upload` — ZIP upload, validation (structure, name uniqueness), extraction
+**Phase 7b — Practice Upload & Management**
+- [ ] `POST /api/practices/upload` — ZIP upload, validation (structure, safety, name uniqueness), extraction
 - [ ] Settings UI: Practices tab (select primary, upload, manage add-ons)
 - [ ] Practice persistence (DynamoDB for AWS, SQLite for local)
 - [ ] S3-backed practice storage for uploaded ZIPs (pages + skills)
 - [ ] Skill versioning and rollback
 - [ ] **Milestone:** Admin can upload a practice ZIP and activate it for their tenant
 
-**Phase 8c — AWS Deployment**
+**Phase 7c — AWS Deployment**
 - [ ] `deploy.sh`: sync built-in practice pages to S3 under `p/` prefix
 - [ ] CloudFront: `/p/*` cache behavior pointing to S3 origin
 - [ ] ECS task role: S3 GetObject/PutObject for `practices/*` prefix
 - [ ] Lambda hot-reload — pull uploaded practice skills from S3 on cold start
 - [ ] **Milestone:** Practices work end-to-end on AWS
 
-### Phase 9: Dashboard & UX
+### Phase 8: Dashboard & UX
 - [x] Markdown rendering in chat responses
 - [x] S3 + CloudFront CDN module: private bucket (OAC), path-based routing (`/api/*` → API GW, `/*` → S3), 5-min TTL
       ↳ ✅ Completed — `infra/aws/modules/cdn/`
@@ -302,10 +294,18 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] Conversation history browser
 - [ ] Skill configuration UI
 
-### Phase 10: Multi-cloud
+### Phase 9: Multi-cloud
 - [ ] Set up another cloud (Azure or GCP)
 - [ ] Update terraform to support deployment for another cloud
 - [ ] Deploy and test
+
+
+### Phase 10: Email Delivery
+- [ ] SES domain verification + IAM in Terraform
+- [ ] HTML invite email template with tenant branding
+- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
+- [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
+- [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
 
 ### Phase 11: Email Delivery
 - [ ] SES domain verification + IAM in Terraform
@@ -374,33 +374,9 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] Email adapter (SES)
 - [ ] Discord adapter
 
-### Cost Optimization — Networking
-
-**Current state:** All private-subnet traffic (Bedrock, DynamoDB, Secrets Manager, ECR, CloudWatch) exits through a single NAT Gateway (~$32/month fixed + data processing charges). Zero VPC endpoints exist. DynamoDB is the highest-frequency service (hit on every request for tenant resolution, conversation history, user lookup) and Bedrock is the heaviest payload (AI inference calls).
-
-**1. VPC Endpoints for Bedrock + DynamoDB**
-- [ ] Add `aws_vpc_endpoint` for `bedrock-runtime` (Interface endpoint) in networking module
-- [ ] Add VPC endpoint security group (allow HTTPS from private subnets)
-- [ ] Add `aws_vpc_endpoint_subnet_association` for both private subnets
-- [ ] Verify `boto3.client("bedrock-runtime")` auto-routes via endpoint (PrivateDnsEnabled=true)
-- [ ] Add `aws_vpc_endpoint` for `dynamodb` (Gateway endpoint — **free**, no hourly or data charges)
-- [ ] Associate DynamoDB gateway endpoint with private route table
-- [ ] Consider also adding S3 Gateway endpoint (also free — used by ECR image layers, future practice storage)
-
-**2. Environment-aware NAT: NAT Instance for dev, NAT Gateway for staging/prod**
-- [ ] Add `var.use_nat_gateway` (bool, default `true`) to networking module variables
-- [ ] Conditional NAT Gateway: `count = var.use_nat_gateway ? 1 : 0`
-- [ ] NAT Instance alternative (when `use_nat_gateway = false`):
-  - `fck-nat` AMI on `t4g.nano` in public subnet, source/dest check disabled
-  - Security group: allow all outbound, allow inbound from private subnet CIDR
-  - Private route table points `0.0.0.0/0` → NAT instance ENI
-- [ ] Set `use_nat_gateway = false` in `environments/dev.tfvars`
-- [ ] Set `use_nat_gateway = true` in `environments/staging.tfvars` and `environments/prod.tfvars`
-- [ ] Update `docs/aws-infrastructure.md` cost table (dev: ~$3 NAT instance vs ~$32 NAT GW)
-
-**Estimated savings:** ~$29/month on dev environment from NAT instance swap. DynamoDB Gateway endpoint is free and eliminates NAT data-processing charges for the highest-frequency traffic path across all environments. Bedrock Interface endpoint eliminates NAT charges for the heaviest-payload traffic.
-
-### Cost Optimization — Other
+### Cost Optimization
+- [ ] Replace NAT Gateway with NAT instance (~$28/mo savings)
+- [ ] Evaluate placing Fargate in public subnets (eliminate NAT entirely)
 - [ ] Bedrock batch inference for non-real-time processing
 - [ ] DynamoDB DAX caching if read-heavy patterns emerge
 
