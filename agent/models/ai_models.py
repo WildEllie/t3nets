@@ -61,14 +61,6 @@ AVAILABLE_MODELS: dict[str, AIModel] = {
         bedrock_id="amazon.nova-micro-v1:0",
         providers=["bedrock"],
     ),
-    "llama-3-2-1b": AIModel(
-        id="llama-3-2-1b",
-        short_name="Llama 3.2 1B",
-        display_name="Meta Llama 3.2 1B",
-        anthropic_id="",
-        bedrock_id="meta.llama3-2-1b-instruct-v1:0",
-        providers=["bedrock"],
-    ),
     # --- Ollama models (free, local) ---
     # Only models that fit within the sidecar's 4 GB RAM budget (~2 GB loaded).
     # 7B/8B models (4-5 GB) exceed the sidecar limit and will OOM the container.
@@ -77,9 +69,9 @@ AVAILABLE_MODELS: dict[str, AIModel] = {
         short_name="Llama 3.2 3B",
         display_name="Meta Llama 3.2 3B",
         anthropic_id="",
-        bedrock_id="",
+        bedrock_id="meta.llama3-2-3b-instruct-v1:0",
         ollama_id="llama3.2:3b",
-        providers=["ollama"],
+        providers=["bedrock", "ollama"],
     ),
 }
 

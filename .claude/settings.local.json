@@ -8,7 +8,8 @@
       "Bash(python -m pytest:*)",
       "Bash(ruff check:*)",
       "Bash(terraform version:*)",
-      "Bash(aws logs:*)"
+      "Bash(aws logs:*)",
+      "Bash(git rebase:*)"
     ]
   }
 }

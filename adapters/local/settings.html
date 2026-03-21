@@ -1,920 +1,1354 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>T3nets — Settings</title>
     <script>
-(function(){var t=localStorage.getItem('t3nets_theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();
+      (function () {
+        var t = localStorage.getItem("t3nets_theme") || "dark";
+        document.documentElement.setAttribute("data-theme", t);
+      })();
     </script>
-    <link rel="stylesheet" href="/theme.css">
+    <link rel="stylesheet" href="/theme.css" />
     <style>
-        body {
-            background: var(--bg);
-            color: var(--text);
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
 
-        /* --- Settings layout --- */
-        .settings-container {
-            max-width: 640px;
-            margin: 32px auto;
-            padding: 0 24px;
-            width: 100%;
-        }
+      /* --- Settings layout --- */
+      .settings-container {
+        max-width: 640px;
+        margin: 32px auto;
+        padding: 0 24px;
+        width: 100%;
+      }
 
-        .settings-header {
-            margin-bottom: 24px;
-        }
+      .settings-header {
+        margin-bottom: 24px;
+      }
 
-        .settings-header h1 {
-            font-size: 22px;
-            font-weight: 600;
-            color: var(--text-bright);
-            margin-bottom: 6px;
-        }
+      .settings-header h1 {
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--text-bright);
+        margin-bottom: 6px;
+      }
 
-        .settings-header p {
-            font-size: 13px;
-            color: var(--text-dim);
-        }
+      .settings-header p {
+        font-size: 13px;
+        color: var(--text-dim);
+      }
 
-        /* --- Tabs --- */
-        .tab-bar {
-            display: flex;
-            gap: 0;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 24px;
-        }
+      /* --- Tabs --- */
+      .tab-bar {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 24px;
+      }
 
-        .tab-btn {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            font-size: 13px;
-            font-weight: 500;
-            padding: 10px 20px;
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            transition: all 0.15s;
-        }
+      .tab-btn {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 500;
+        padding: 10px 20px;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.15s;
+      }
 
-        .tab-btn:hover { color: var(--text); }
-        .tab-btn.active { color: var(--text-bright); border-bottom-color: var(--accent-light); }
+      .tab-btn:hover {
+        color: var(--text);
+      }
+      .tab-btn.active {
+        color: var(--text-bright);
+        border-bottom-color: var(--accent-light);
+      }
 
-        .tab-panel { display: none; }
-        .tab-panel.active { display: block; }
+      .tab-panel {
+        display: none;
+      }
+      .tab-panel.active {
+        display: block;
+      }
 
-        /* --- Shared section styles --- */
-        .section-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 12px;
-        }
+      /* --- Shared section styles --- */
+      .section-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 12px;
+      }
 
-        .section-title:not(:first-child) {
-            margin-top: 32px;
-        }
+      .section-title:not(:first-child) {
+        margin-top: 32px;
+      }
 
-        /* --- Collapsible sections --- */
-        .section-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            user-select: none;
-        }
-        .section-header:not(:first-child) {
-            margin-top: 32px;
-        }
-        .section-header .section-title {
-            margin-bottom: 0;
-            margin-top: 0;
-        }
-        .section-chevron {
-            color: var(--text-faint);
-            font-size: 11px;
-            transition: transform 0.2s;
-        }
-        .section-header.collapsed .section-chevron {
-            transform: rotate(-90deg);
-        }
-        .section-body {
-            margin-top: 12px;
-        }
-        .section-body.collapsed {
-            display: none;
-        }
+      /* --- Collapsible sections --- */
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+      }
+      .section-header:not(:first-child) {
+        margin-top: 32px;
+      }
+      .section-header .section-title {
+        margin-bottom: 0;
+        margin-top: 0;
+      }
+      .section-chevron {
+        color: var(--text-faint);
+        font-size: 11px;
+        transition: transform 0.2s;
+      }
+      .section-header.collapsed .section-chevron {
+        transform: rotate(-90deg);
+      }
+      .section-body {
+        margin-top: 12px;
+      }
+      .section-body.collapsed {
+        display: none;
+      }
 
-        /* --- Model cards --- */
-        .model-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
+      /* --- Model cards --- */
+      .model-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
 
-        .model-option {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 14px 16px;
-            cursor: pointer;
-            transition: all 0.15s;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+      .model-option {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
 
-        .model-option:hover:not(.disabled) { border-color: var(--accent-light); background: var(--surface-3); }
-        .model-option.selected { border-color: var(--accent-light); background: var(--surface-3); box-shadow: 0 0 0 1px var(--accent-light); }
-        .model-option.disabled { opacity: 0.4; cursor: not-allowed; }
+      .model-option:hover:not(.disabled) {
+        border-color: var(--accent-light);
+        background: var(--surface-3);
+      }
+      .model-option.selected {
+        border-color: var(--accent-light);
+        background: var(--surface-3);
+        box-shadow: 0 0 0 1px var(--accent-light);
+      }
+      .model-option.disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
 
-        .model-radio {
-            width: 18px; height: 18px; border-radius: 50%;
-            border: 2px solid var(--border-3); flex-shrink: 0;
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.15s;
-        }
-        .model-option.selected .model-radio { border-color: var(--accent-light); }
-        .model-option.selected .model-radio::after {
-            content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-light);
-        }
+      .model-radio {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 2px solid var(--border-3);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s;
+      }
+      .model-option.selected .model-radio {
+        border-color: var(--accent-light);
+      }
+      .model-option.selected .model-radio::after {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent-light);
+      }
 
-        .model-info { flex: 1; }
-        .model-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
-        .model-option.disabled .model-name { color: var(--text-muted); }
-        .model-id {
-            font-size: 11px; color: var(--text-faint); margin-top: 2px;
-            font-family: "SF Mono", "Fira Code", Menlo, monospace;
-        }
+      .model-info {
+        flex: 1;
+      }
+      .model-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-bright);
+      }
+      .model-option.disabled .model-name {
+        color: var(--text-muted);
+      }
+      .model-id {
+        font-size: 11px;
+        color: var(--text-faint);
+        margin-top: 2px;
+        font-family: "SF Mono", "Fira Code", Menlo, monospace;
+      }
 
-        .model-tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
-        .model-tag.bedrock-only { background: var(--warning-bg); color: var(--warning-text); }
-        .model-tag.current { background: var(--rule-matched-bg); color: var(--rule-matched-text); }
-        .model-tag.free { background: var(--info-bg); color: var(--accent-muted-text); }
-        .model-tag.unavailable { background: var(--status-unavailable-bg); color: var(--status-unavailable-text); }
+      .model-tag {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+      .model-tag.bedrock-only {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+      }
+      .model-tag.current {
+        background: var(--rule-matched-bg);
+        color: var(--rule-matched-text);
+      }
+      .model-tag.free {
+        background: var(--info-bg);
+        color: var(--accent-muted-text);
+      }
+      .model-tag.unavailable {
+        background: var(--status-unavailable-bg);
+        color: var(--status-unavailable-text);
+      }
 
-        /* --- Skills --- */
-        .skill-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
+      /* --- Skills --- */
+      .skill-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
 
-        .skill-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            overflow: hidden;
-        }
+      .skill-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+      }
 
-        .skill-header {
-            padding: 14px 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+      .skill-header {
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
 
-        .skill-toggle {
-            position: relative;
-            width: 40px;
-            height: 22px;
-            flex-shrink: 0;
-        }
+      .skill-toggle {
+        position: relative;
+        width: 40px;
+        height: 22px;
+        flex-shrink: 0;
+      }
 
-        .skill-toggle input { opacity: 0; width: 0; height: 0; }
+      .skill-toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
 
-        .skill-toggle .slider {
-            position: absolute; cursor: pointer;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: var(--border-2); border-radius: 22px; transition: 0.2s;
-        }
+      .skill-toggle .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--border-2);
+        border-radius: 22px;
+        transition: 0.2s;
+      }
 
-        .skill-toggle .slider::before {
-            content: ''; position: absolute;
-            width: 16px; height: 16px; border-radius: 50%;
-            background: var(--text-muted); left: 3px; bottom: 3px; transition: 0.2s;
-        }
+      .skill-toggle .slider::before {
+        content: "";
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        left: 3px;
+        bottom: 3px;
+        transition: 0.2s;
+      }
 
-        .skill-toggle input:checked + .slider { background: var(--accent-hover); }
-        .skill-toggle input:checked + .slider::before { transform: translateX(18px); background: var(--text-bright); }
+      .skill-toggle input:checked + .slider {
+        background: var(--accent-hover);
+      }
+      .skill-toggle input:checked + .slider::before {
+        transform: translateX(18px);
+        background: var(--text-bright);
+      }
 
-        .skill-info { flex: 1; }
-        .skill-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
-        .skill-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+      .skill-info {
+        flex: 1;
+      }
+      .skill-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-bright);
+      }
+      .skill-desc {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-top: 2px;
+      }
 
-        .skill-badges { display: flex; gap: 6px; align-items: center; }
+      .skill-badges {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
 
-        .skill-integration-tag {
-            font-size: 10px; padding: 2px 8px; border-radius: 4px;
-            font-weight: 600; background: var(--warning-bg); color: var(--warning-text);
-        }
+      .skill-integration-tag {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+        background: var(--warning-bg);
+        color: var(--warning-text);
+      }
 
-        .skill-connected-tag {
-            font-size: 10px; padding: 2px 8px; border-radius: 4px;
-            font-weight: 600; background: var(--rule-matched-bg); color: var(--rule-matched-text);
-        }
+      .skill-connected-tag {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+        background: var(--rule-matched-bg);
+        color: var(--rule-matched-text);
+      }
 
-        .skill-disconnected-tag {
-            font-size: 10px; padding: 2px 8px; border-radius: 4px;
-            font-weight: 600; background: var(--error-bg); color: var(--error-text);
-        }
+      .skill-disconnected-tag {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+        background: var(--error-bg);
+        color: var(--error-text);
+      }
 
-        .skill-expand-btn {
-            background: none; border: none; color: var(--text-faint);
-            font-size: 11px; cursor: pointer; padding: 4px 8px;
-            transition: color 0.15s;
-        }
-        .skill-expand-btn:hover { color: var(--text-muted); }
+      .skill-expand-btn {
+        background: none;
+        border: none;
+        color: var(--text-faint);
+        font-size: 11px;
+        cursor: pointer;
+        padding: 4px 8px;
+        transition: color 0.15s;
+      }
+      .skill-expand-btn:hover {
+        color: var(--text-muted);
+      }
 
-        /* --- Integration config pane --- */
-        .integration-config {
-            display: none;
-            border-top: 1px solid var(--border);
-            padding: 16px;
-            background: var(--bg);
-        }
+      /* --- Integration config pane --- */
+      .integration-config {
+        display: none;
+        border-top: 1px solid var(--border);
+        padding: 16px;
+        background: var(--bg);
+      }
 
-        .integration-config.open { display: block; }
+      .integration-config.open {
+        display: block;
+      }
 
-        .integration-config .field-group {
-            margin-bottom: 12px;
-        }
+      .integration-config .field-group {
+        margin-bottom: 12px;
+      }
 
-        .integration-config label {
-            display: block;
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-bottom: 4px;
-        }
+      .integration-config label {
+        display: block;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
 
-        .integration-config input {
-            width: 100%;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            color: var(--text);
-            padding: 8px 10px;
-            font-size: 13px;
-            font-family: inherit;
-            outline: none;
-            transition: border-color 0.15s;
-        }
+      .integration-config input {
+        width: 100%;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+      }
 
-        .integration-config input:focus { border-color: var(--accent-light); }
+      .integration-config input:focus {
+        border-color: var(--accent-light);
+      }
 
-        .integration-config input::placeholder { color: var(--text-faint); }
+      .integration-config input::placeholder {
+        color: var(--text-faint);
+      }
 
-        .integration-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 16px;
-            align-items: center;
-        }
+      .integration-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+        align-items: center;
+      }
 
-        .btn-test {
-            background: none;
-            border: 1px solid var(--border-2);
-            color: var(--text-muted);
-            padding: 6px 14px;
-            border-radius: 6px;
-            font-size: 12px;
-            min-width: 80px;
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-        .btn-test:hover { border-color: var(--border-3); color: var(--text); }
+      .btn-test {
+        background: none;
+        border: 1px solid var(--border-2);
+        color: var(--text-muted);
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-size: 12px;
+        min-width: 80px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .btn-test:hover {
+        border-color: var(--border-3);
+        color: var(--text);
+      }
 
-        .btn-save {
-            background: var(--accent-light);
-            color: var(--text-bright);
-            border: none;
-            padding: 6px 14px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            min-width: 80px;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .btn-save:hover { background: var(--accent); }
+      .btn-save {
+        background: var(--accent-light);
+        color: var(--text-bright);
+        border: none;
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        min-width: 80px;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .btn-save:hover {
+        background: var(--accent);
+      }
 
-        .integration-status {
-            font-size: 12px;
-            margin-left: auto;
-        }
-        .integration-status.ok { color: var(--rule-matched-text); }
-        .integration-status.error { color: var(--error-text); }
+      .integration-status {
+        font-size: 12px;
+        margin-left: auto;
+      }
+      .integration-status.ok {
+        color: var(--rule-matched-text);
+      }
+      .integration-status.error {
+        color: var(--error-text);
+      }
 
-        /* --- Form fields (agent settings) --- */
-        .settings-field { margin-bottom: 16px; }
+      /* --- Form fields (agent settings) --- */
+      .settings-field {
+        margin-bottom: 16px;
+      }
 
-        .settings-field label {
-            display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px;
-        }
+      .settings-field label {
+        display: block;
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
 
-        .settings-field input[type="number"],
-        .settings-field textarea {
-            width: 100%; background: var(--surface); border: 1px solid var(--border);
-            border-radius: 8px; color: var(--text); padding: 10px 12px;
-            font-size: 13px; font-family: inherit; outline: none;
-            transition: border-color 0.15s;
-        }
+      .settings-field input[type="number"],
+      .settings-field textarea {
+        width: 100%;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        padding: 10px 12px;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+      }
 
-        .settings-field input[type="number"] { max-width: 200px; }
-        .settings-field textarea { min-height: 80px; resize: vertical; }
-        .settings-field input:focus, .settings-field textarea:focus { border-color: var(--accent-light); }
+      .settings-field input[type="number"] {
+        max-width: 200px;
+      }
+      .settings-field textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+      .settings-field input:focus,
+      .settings-field textarea:focus {
+        border-color: var(--accent-light);
+      }
 
-        .save-btn {
-            background: var(--accent-light); color: var(--text-bright); border: none;
-            padding: 8px 20px; border-radius: 8px; font-size: 13px;
-            font-weight: 600; cursor: pointer; transition: background 0.15s;
-        }
-        .save-btn:hover { background: var(--accent); }
-        .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+      .save-btn {
+        background: var(--accent-light);
+        color: var(--text-bright);
+        border: none;
+        padding: 8px 20px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .save-btn:hover {
+        background: var(--accent);
+      }
+      .save-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
 
-        /* --- Channel cards --- */
-        .channel-card {
-            background: var(--surface); border: 1px solid var(--border);
-            border-radius: 10px; padding: 16px 20px; margin-bottom: 12px;
-        }
-        .channel-card-header {
-            display: flex; align-items: center; gap: 12px; margin-bottom: 4px;
-        }
-        .channel-icon {
-            width: 36px; height: 36px; border-radius: 8px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 18px; flex-shrink: 0;
-        }
-        .channel-icon.telegram { background: var(--channel-telegram); }
-        .channel-icon.teams { background: var(--channel-teams); }
-        .channel-icon.slack { background: var(--channel-slack); }
-        .channel-name { font-size: 15px; font-weight: 600; color: var(--text); }
-        .channel-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-        .channel-status-row {
-            display: flex; align-items: center; gap: 8px; margin: 10px 0 0 0;
-        }
-        .channel-status-dot {
-            width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-        }
-        .channel-status-dot.connected { background: var(--rule-matched-text); }
-        .channel-status-dot.disconnected { background: var(--text-faint); }
-        .channel-status-text { font-size: 12px; color: var(--text-muted); }
-        .channel-config {
-            display: none; margin-top: 14px; padding-top: 14px;
-            border-top: 1px solid var(--border);
-        }
-        .channel-config.open { display: block; }
-        .channel-config .field-group { margin-bottom: 12px; }
-        .channel-config label {
-            display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px;
-        }
-        .channel-config input {
-            width: 100%; background: var(--surface-code); border: 1px solid var(--border-2);
-            border-radius: 6px; color: var(--text); padding: 8px 10px;
-            font-size: 13px; font-family: monospace; outline: none;
-        }
-        .channel-config input:focus { border-color: var(--accent-light); }
-        .channel-config .help-text {
-            font-size: 11px; color: var(--text-faint); margin-top: 3px;
-        }
-        .channel-toggle-btn {
-            background: transparent; border: 1px solid var(--border-2); color: var(--text-muted);
-            padding: 5px 14px; border-radius: 6px; font-size: 12px;
-            cursor: pointer; margin-left: auto;
-        }
-        .channel-toggle-btn:hover { border-color: var(--border-3); color: var(--text); }
-        .channel-setup-steps {
-            margin: 12px 0 14px 0; padding: 12px 16px;
-            background: var(--surface-code); border-radius: 8px; border: 1px solid var(--table-row-border);
-        }
-        .channel-setup-steps ol {
-            margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-muted);
-            line-height: 1.8;
-        }
-        .channel-setup-steps ol li { margin-bottom: 2px; }
-        .channel-setup-steps code {
-            background: var(--surface); padding: 1px 5px; border-radius: 3px;
-            font-size: 12px; color: var(--text);
-        }
+      /* --- Channel cards --- */
+      .channel-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-bottom: 12px;
+      }
+      .channel-card-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 4px;
+      }
+      .channel-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .channel-icon.telegram {
+        background: var(--channel-telegram);
+      }
+      .channel-icon.teams {
+        background: var(--channel-teams);
+      }
+      .channel-icon.slack {
+        background: var(--channel-slack);
+      }
+      .channel-name {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .channel-desc {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-top: 2px;
+      }
+      .channel-status-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 10px 0 0 0;
+      }
+      .channel-status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .channel-status-dot.connected {
+        background: var(--rule-matched-text);
+      }
+      .channel-status-dot.disconnected {
+        background: var(--text-faint);
+      }
+      .channel-status-text {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .channel-config {
+        display: none;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--border);
+      }
+      .channel-config.open {
+        display: block;
+      }
+      .channel-config .field-group {
+        margin-bottom: 12px;
+      }
+      .channel-config label {
+        display: block;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .channel-config input {
+        width: 100%;
+        background: var(--surface-code);
+        border: 1px solid var(--border-2);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: monospace;
+        outline: none;
+      }
+      .channel-config input:focus {
+        border-color: var(--accent-light);
+      }
+      .channel-config .help-text {
+        font-size: 11px;
+        color: var(--text-faint);
+        margin-top: 3px;
+      }
+      .channel-toggle-btn {
+        background: transparent;
+        border: 1px solid var(--border-2);
+        color: var(--text-muted);
+        padding: 5px 14px;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        margin-left: auto;
+      }
+      .channel-toggle-btn:hover {
+        border-color: var(--border-3);
+        color: var(--text);
+      }
+      .channel-setup-steps {
+        margin: 12px 0 14px 0;
+        padding: 12px 16px;
+        background: var(--surface-code);
+        border-radius: 8px;
+        border: 1px solid var(--table-row-border);
+      }
+      .channel-setup-steps ol {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.8;
+      }
+      .channel-setup-steps ol li {
+        margin-bottom: 2px;
+      }
+      .channel-setup-steps code {
+        background: var(--surface);
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 12px;
+        color: var(--text);
+      }
 
-        /* --- Team table --- */
-        .team-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-        .team-table th {
-            text-align: left;
-            color: var(--text-dim);
-            font-weight: 600;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 8px 12px;
-            border-bottom: 1px solid var(--border);
-        }
-        .team-table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid var(--stat-row-border);
-            color: var(--text);
-        }
-        .team-table tr:hover td { background: var(--surface); }
+      /* --- Team table --- */
+      .team-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .team-table th {
+        text-align: left;
+        color: var(--text-dim);
+        font-weight: 600;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .team-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--stat-row-border);
+        color: var(--text);
+      }
+      .team-table tr:hover td {
+        background: var(--surface);
+      }
 
-        .role-badge {
-            font-size: 10px; padding: 2px 8px; border-radius: 4px;
-            font-weight: 600;
-        }
-        .role-badge.admin { background: var(--warning-bg); color: var(--warning-text); }
-        .role-badge.member { background: var(--info-bg); color: var(--accent-muted-text); }
+      .role-badge {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+      .role-badge.admin {
+        background: var(--warning-bg);
+        color: var(--warning-text);
+      }
+      .role-badge.member {
+        background: var(--info-bg);
+        color: var(--accent-muted-text);
+      }
 
-        .invite-form {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 16px;
-            margin-top: 16px;
-        }
-        .invite-form-row {
-            display: flex;
-            gap: 10px;
-            align-items: flex-end;
-        }
-        .invite-form-row .field { flex: 1; }
-        .invite-form-row label {
-            display: block;
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-bottom: 4px;
-        }
-        .invite-form-row input,
-        .invite-form-row select {
-            width: 100%;
-            background: var(--input-bg);
-            border: 1px solid var(--border-2);
-            border-radius: 6px;
-            color: var(--text);
-            padding: 8px 10px;
-            font-size: 13px;
-            font-family: inherit;
-            outline: none;
-        }
-        .invite-form-row select {
-            appearance: auto;
-            cursor: pointer;
-        }
-        .invite-form-row input:focus,
-        .invite-form-row select:focus { border-color: var(--accent-light); }
+      .invite-form {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 16px;
+      }
+      .invite-form-row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+      .invite-form-row .field {
+        flex: 1;
+      }
+      .invite-form-row label {
+        display: block;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .invite-form-row input,
+      .invite-form-row select {
+        width: 100%;
+        background: var(--input-bg);
+        border: 1px solid var(--border-2);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+      }
+      .invite-form-row select {
+        appearance: auto;
+        cursor: pointer;
+      }
+      .invite-form-row input:focus,
+      .invite-form-row select:focus {
+        border-color: var(--accent-light);
+      }
 
-        .invite-result {
-            margin-top: 12px;
-            background: var(--rule-matched-bg);
-            border: 1px solid var(--success-border);
-            border-radius: 8px;
-            color: var(--rule-matched-text);
-            font-size: 12px;
-            display: none;
-        }
-        .invite-result-header {
-            padding: 10px 14px 8px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-        }
-        .invite-email-body {
-            margin: 0 14px 12px;
-            padding: 12px 14px;
-            background: var(--surface-code);
-            border: 1px solid var(--success-border);
-            border-radius: 6px;
-            color: var(--success-text);
-            font-size: 13px;
-            line-height: 1.65;
-            white-space: pre-wrap;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-        .btn-copy-invite {
-            background: var(--success-border);
-            border: 1px solid var(--rule-matched-bg);
-            color: var(--rule-matched-text);
-            border-radius: 5px;
-            padding: 4px 12px;
-            font-size: 11px;
-            font-weight: 600;
-            cursor: pointer;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        .btn-copy-invite:hover { background: var(--success-bg); }
+      .invite-result {
+        margin-top: 12px;
+        background: var(--rule-matched-bg);
+        border: 1px solid var(--success-border);
+        border-radius: 8px;
+        color: var(--rule-matched-text);
+        font-size: 12px;
+        display: none;
+      }
+      .invite-result-header {
+        padding: 10px 14px 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .invite-email-body {
+        margin: 0 14px 12px;
+        padding: 12px 14px;
+        background: var(--surface-code);
+        border: 1px solid var(--success-border);
+        border-radius: 6px;
+        color: var(--success-text);
+        font-size: 13px;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      .btn-copy-invite {
+        background: var(--success-border);
+        border: 1px solid var(--rule-matched-bg);
+        color: var(--rule-matched-text);
+        border-radius: 5px;
+        padding: 4px 12px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .btn-copy-invite:hover {
+        background: var(--success-bg);
+      }
 
-        .btn-revoke {
-            background: none; border: 1px solid var(--error-bg); color: var(--error-text);
-            padding: 4px 10px; border-radius: 4px; font-size: 11px;
-            cursor: pointer;
-        }
-        .btn-revoke:hover { background: var(--error-bg); }
+      .btn-revoke {
+        background: none;
+        border: 1px solid var(--error-bg);
+        color: var(--error-text);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .btn-revoke:hover {
+        background: var(--error-bg);
+      }
 
-        .btn-copy {
-            background: none; border: 1px solid var(--border-2); color: var(--text-muted);
-            padding: 4px 10px; border-radius: 4px; font-size: 11px;
-            cursor: pointer;
-        }
-        .btn-copy:hover { border-color: var(--border-3); color: var(--text); }
+      .btn-copy {
+        background: none;
+        border: 1px solid var(--border-2);
+        color: var(--text-muted);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .btn-copy:hover {
+        border-color: var(--border-3);
+        color: var(--text);
+      }
 
-        /* --- Toast --- */
-        .toast {
-            position: fixed; bottom: 24px; left: 50%;
-            transform: translateX(-50%) translateY(80px);
-            background: var(--rule-matched-bg); color: var(--rule-matched-text);
-            padding: 10px 24px; border-radius: 8px;
-            font-size: 13px; font-weight: 500;
-            opacity: 0; transition: all 0.3s ease; pointer-events: none;
-        }
-        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+      /* --- Toast --- */
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(80px);
+        background: var(--rule-matched-bg);
+        color: var(--rule-matched-text);
+        padding: 10px 24px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        opacity: 0;
+        transition: all 0.3s ease;
+        pointer-events: none;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <nav>
-        <a href="/" class="nav-brand"><img src="/logo.png" alt="T3nets" style="height:28px;display:block;"> <span class="nav-badge platform" id="platform-badge">...</span><span class="nav-badge stage" id="stage-badge">...</span></a><span class="nav-tenant-name" id="nav-tenant-name" style="display:none;"></span>
-        <div class="nav-links">
-            <a href="/chat">Chat</a>
-            <a href="/health">Health</a>
-            <a href="/settings" class="active">Settings</a>
-            <a href="/training">Training</a>
-        </div>
-        <div class="nav-right">
-            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
-                <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            </button>
-            <button class="nav-btn" id="logout-btn" style="display:none;" onclick="logout()">Logout</button>
-        </div>
+      <a href="/" class="nav-brand"
+        ><img
+          src="/logo.png"
+          alt="T3nets"
+          style="height: 28px; display: block"
+        />
+        <span class="nav-badge platform" id="platform-badge">...</span
+        ><span class="nav-badge stage" id="stage-badge">...</span></a
+      ><span
+        class="nav-tenant-name"
+        id="nav-tenant-name"
+        style="display: none"
+      ></span>
+      <div class="nav-links">
+        <a href="/chat">Chat</a>
+        <a href="/health">Health</a>
+        <a href="/settings" class="active">Settings</a>
+        <a href="/training">Training</a>
+      </div>
+      <div class="nav-right">
+        <button
+          class="theme-toggle"
+          onclick="toggleTheme()"
+          title="Toggle theme"
+        >
+          <svg
+            class="icon-moon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+          <svg
+            class="icon-sun"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="5" />
+            <line x1="12" y1="1" x2="12" y2="3" />
+            <line x1="12" y1="21" x2="12" y2="23" />
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+            <line x1="1" y1="12" x2="3" y2="12" />
+            <line x1="21" y1="12" x2="23" y2="12" />
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+          </svg>
+        </button>
+        <button
+          class="nav-btn"
+          id="logout-btn"
+          style="display: none"
+          onclick="logout()"
+        >
+          Logout
+        </button>
+      </div>
     </nav>
 
     <div class="settings-container">
-        <div class="settings-header">
-            <h1>Settings</h1>
-            <p>Configure your T3nets agent</p>
+      <div class="settings-header">
+        <h1>Settings</h1>
+        <p>Configure your T3nets agent</p>
+      </div>
+
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('general')">
+          General
+        </button>
+        <button class="tab-btn" onclick="switchTab('skills')">Skills</button>
+        <button class="tab-btn" onclick="switchTab('channels')">
+          Channels
+        </button>
+        <button class="tab-btn" onclick="switchTab('team')">Team</button>
+      </div>
+
+      <!-- ===== General Tab ===== -->
+      <div class="tab-panel active" id="tab-general">
+        <div class="section-header" onclick="toggleSection(this)">
+          <div class="section-title">AI Model</div>
+          <span class="section-chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <div id="model-list" class="model-list"></div>
         </div>
 
-        <div class="tab-bar">
-            <button class="tab-btn active" onclick="switchTab('general')">General</button>
-            <button class="tab-btn" onclick="switchTab('skills')">Skills</button>
-            <button class="tab-btn" onclick="switchTab('channels')">Channels</button>
-            <button class="tab-btn" onclick="switchTab('team')">Team</button>
+        <div class="section-header" onclick="toggleSection(this)">
+          <div class="section-title">Agent Settings</div>
+          <span class="section-chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <div class="settings-field">
+            <label for="system-prompt">System Prompt Override</label>
+            <textarea
+              id="system-prompt"
+              placeholder="Leave blank to use the default system prompt..."
+            ></textarea>
+          </div>
+
+          <div class="settings-field">
+            <label for="max-tokens">Max Tokens per Message</label>
+            <input
+              type="number"
+              id="max-tokens"
+              min="256"
+              max="16384"
+              step="256"
+            />
+          </div>
+
+          <div class="settings-field">
+            <label for="messages-per-day">Messages per Day Limit</label>
+            <input
+              type="number"
+              id="messages-per-day"
+              min="1"
+              max="100000"
+              step="1"
+            />
+          </div>
+
+          <div class="settings-field">
+            <label for="max-history">Conversation History Length</label>
+            <input type="number" id="max-history" min="1" max="100" step="1" />
+          </div>
+
+          <button
+            class="save-btn"
+            id="save-agent-btn"
+            onclick="saveAgentSettings()"
+          >
+            Save Agent Settings
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== Skills Tab ===== -->
+      <div class="tab-panel" id="tab-skills">
+        <div class="section-title">Skills</div>
+        <div id="skill-list" class="skill-list"></div>
+      </div>
+
+      <!-- ===== Channels Tab ===== -->
+      <div class="tab-panel" id="tab-channels">
+        <div class="section-title">Channel Integrations</div>
+        <p
+          style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px"
+        >
+          Connect external messaging platforms to your T3nets agent. Team
+          members can message the bot directly from these channels.
+        </p>
+        <div id="channels-list"></div>
+      </div>
+
+      <!-- ===== Team Tab ===== -->
+      <div class="tab-panel" id="tab-team">
+        <div class="section-title">Current Members</div>
+        <table class="team-table" id="members-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody id="members-body"></tbody>
+        </table>
+
+        <div class="section-title">Pending Invitations</div>
+        <table class="team-table" id="invitations-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Expires</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="invitations-body"></tbody>
+        </table>
+        <div
+          id="no-invitations"
+          style="color: var(--text-faint); font-size: 13px; display: none"
+        >
+          No pending invitations
         </div>
 
-        <!-- ===== General Tab ===== -->
-        <div class="tab-panel active" id="tab-general">
-            <div class="section-header" onclick="toggleSection(this)">
-                <div class="section-title">AI Model</div>
-                <span class="section-chevron">&#9660;</span>
+        <div class="section-title">Invite New Member</div>
+        <div class="invite-form">
+          <div class="invite-form-row">
+            <div class="field" style="flex: 2">
+              <label for="invite-email">Email</label>
+              <input
+                type="email"
+                id="invite-email"
+                placeholder="user@company.com"
+              />
             </div>
-            <div class="section-body">
-                <div id="model-list" class="model-list"></div>
+            <div class="field">
+              <label for="invite-role">Role</label>
+              <select id="invite-role">
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
             </div>
-
-            <div class="section-header" onclick="toggleSection(this)">
-                <div class="section-title">Agent Settings</div>
-                <span class="section-chevron">&#9660;</span>
+            <div>
+              <button
+                class="btn-save"
+                id="create-invite-btn"
+                onclick="createInvitation()"
+                style="margin-top: 18px"
+              >
+                Create Invitation
+              </button>
             </div>
-            <div class="section-body">
-                <div class="settings-field">
-                    <label for="system-prompt">System Prompt Override</label>
-                    <textarea id="system-prompt" placeholder="Leave blank to use the default system prompt..."></textarea>
-                </div>
-
-                <div class="settings-field">
-                    <label for="max-tokens">Max Tokens per Message</label>
-                    <input type="number" id="max-tokens" min="256" max="16384" step="256">
-                </div>
-
-                <div class="settings-field">
-                    <label for="messages-per-day">Messages per Day Limit</label>
-                    <input type="number" id="messages-per-day" min="1" max="100000" step="1">
-                </div>
-
-                <div class="settings-field">
-                    <label for="max-history">Conversation History Length</label>
-                    <input type="number" id="max-history" min="1" max="100" step="1">
-                </div>
-
-                <button class="save-btn" id="save-agent-btn" onclick="saveAgentSettings()">Save Agent Settings</button>
-            </div>
+          </div>
+          <div class="invite-result" id="invite-result"></div>
         </div>
+      </div>
 
-        <!-- ===== Skills Tab ===== -->
-        <div class="tab-panel" id="tab-skills">
-            <div class="section-title">Skills</div>
-            <div id="skill-list" class="skill-list"></div>
-        </div>
-
-        <!-- ===== Channels Tab ===== -->
-        <div class="tab-panel" id="tab-channels">
-            <div class="section-title">Channel Integrations</div>
-            <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
-                Connect external messaging platforms to your T3nets agent.
-                Team members can message the bot directly from these channels.
-            </p>
-            <div id="channels-list"></div>
-        </div>
-
-        <!-- ===== Team Tab ===== -->
-        <div class="tab-panel" id="tab-team">
-            <div class="section-title">Current Members</div>
-            <table class="team-table" id="members-table">
-                <thead>
-                    <tr><th>Name</th><th>Email</th><th>Role</th></tr>
-                </thead>
-                <tbody id="members-body"></tbody>
-            </table>
-
-            <div class="section-title">Pending Invitations</div>
-            <table class="team-table" id="invitations-table">
-                <thead>
-                    <tr><th>Email</th><th>Role</th><th>Expires</th><th>Actions</th></tr>
-                </thead>
-                <tbody id="invitations-body"></tbody>
-            </table>
-            <div id="no-invitations" style="color:var(--text-faint);font-size:13px;display:none;">No pending invitations</div>
-
-            <div class="section-title">Invite New Member</div>
-            <div class="invite-form">
-                <div class="invite-form-row">
-                    <div class="field" style="flex:2;">
-                        <label for="invite-email">Email</label>
-                        <input type="email" id="invite-email" placeholder="user@company.com">
-                    </div>
-                    <div class="field">
-                        <label for="invite-role">Role</label>
-                        <select id="invite-role">
-                            <option value="member">Member</option>
-                            <option value="admin">Admin</option>
-                        </select>
-                    </div>
-                    <div>
-                        <button class="btn-save" id="create-invite-btn" onclick="createInvitation()" style="margin-top:18px;">Create Invitation</button>
-                    </div>
-                </div>
-                <div class="invite-result" id="invite-result"></div>
-            </div>
-        </div>
-
-        <div style="margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border);">
-            <span style="font-size: 12px; color: var(--text-faint);">Build <span id="build-number">—</span></span>
-        </div>
+      <div
+        style="
+          margin-top: 48px;
+          padding-top: 16px;
+          border-top: 1px solid var(--border);
+        "
+      >
+        <span style="font-size: 12px; color: var(--text-faint)"
+          >Build <span id="build-number">—</span></span
+        >
+      </div>
     </div>
 
     <div id="toast" class="toast">Model updated</div>
 
     <script>
-        // ==================== Auth ====================
-        function getAuthHeaders() {
-            const token = localStorage.getItem('t3nets_id_token');
-            if (token) return { 'Authorization': 'Bearer ' + token };
-            return {};
-        }
+      // ==================== Auth ====================
+      function getAuthHeaders() {
+        const token = localStorage.getItem("t3nets_id_token");
+        if (token) return { Authorization: "Bearer " + token };
+        return {};
+      }
 
-        async function checkAuth() {
-            try {
-                const resp = await fetch('/api/auth/config');
-                const config = await resp.json();
-                if (config.enabled) {
-                    const token = localStorage.getItem('t3nets_id_token');
-                    if (!token) { window.location.href = '/login'; return; }
-                    document.getElementById('logout-btn').style.display = 'inline-block';
-                    try {
-                        const meResp = await fetch('/api/auth/me', { headers: getAuthHeaders() });
-                        if (meResp.ok) {
-                            const me = await meResp.json();
-                            if (me.role === 'member') { window.location.href = '/chat'; return; }
-                            if (me.tenant_name) {
-                                const tn = document.getElementById('nav-tenant-name');
-                                tn.textContent = me.tenant_name;
-                                tn.style.display = 'inline';
-                            }
-                            if (me.tenant_id === 'default' && me.role === 'admin') {
-                                const pl = document.createElement('a');
-                                pl.href = '/platform';
-                                pl.textContent = 'Platform';
-                                document.querySelector('.nav-links').appendChild(pl);
-                            }
-                        }
-                    } catch (e) { /* /api/auth/me not available */ }
-                } else {
-                    try {
-                        const meResp = await fetch('/api/auth/me');
-                        if (meResp.ok) {
-                            const me = await meResp.json();
-                            if (me.role === 'member') { window.location.href = '/chat'; return; }
-                            if (me.tenant_name) {
-                                const tn = document.getElementById('nav-tenant-name');
-                                tn.textContent = me.tenant_name;
-                                tn.style.display = 'inline';
-                            }
-                            if (me.tenant_id === 'default' && me.role === 'admin') {
-                                const pl = document.createElement('a');
-                                pl.href = '/platform';
-                                pl.textContent = 'Platform';
-                                document.querySelector('.nav-links').appendChild(pl);
-                            }
-                        }
-                    } catch (e) { /* /api/auth/me not available */ }
-                }
-            } catch (e) { /* auth not available */ }
-            SessionManager.init();
-            loadPracticePages();
-        }
-
-        async function loadPracticePages() {
-            try {
-                const resp = await fetch('/api/practices/pages');
-                if (!resp.ok) return;
-                const pages = await resp.json();
-                const nav = document.querySelector('.nav-links');
-                if (!nav) return;
-                pages.forEach(p => {
-                    const a = document.createElement('a');
-                    a.href = p.url;
-                    a.textContent = p.nav_label;
-                    if (window.location.pathname === p.url) a.classList.add('active');
-                    nav.appendChild(a);
-                });
-            } catch (e) { /* practices not available */ }
-        }
-
-        function logout() {
-            localStorage.removeItem('t3nets_id_token');
-            localStorage.removeItem('t3nets_access_token');
-            localStorage.removeItem('t3nets_refresh_token');
-            window.location.href = '/login';
-        }
-
-        async function tryRefreshToken() {
-            const refreshToken = localStorage.getItem('t3nets_refresh_token');
-            if (!refreshToken) return false;
-            try {
-                const resp = await fetch('/api/auth/refresh', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ refresh_token: refreshToken }),
-                });
-                if (!resp.ok) return false;
-                const data = await resp.json();
-                if (data.id_token) localStorage.setItem('t3nets_id_token', data.id_token);
-                if (data.access_token) localStorage.setItem('t3nets_access_token', data.access_token);
-                return true;
-            } catch { return false; }
-        }
-
-        const SessionManager = {
-            lastActivity: Date.now(),
-            _refreshTimer: null,
-            _expiredTimer: null,
-            IDLE_MS: 10 * 60 * 1000,
-            REFRESH_BEFORE_MS: 5 * 60 * 1000,
-
-            init() {
-                ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'].forEach(ev =>
-                    document.addEventListener(ev, () => { this.lastActivity = Date.now(); },
-                        { passive: true })
-                );
-                this.schedule();
-            },
-
-            _getExp() {
-                const token = localStorage.getItem('t3nets_id_token');
-                if (!token) return null;
-                try {
-                    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-                    return JSON.parse(atob(b64)).exp * 1000;
-                } catch { return null; }
-            },
-
-            schedule() {
-                clearTimeout(this._refreshTimer);
-                clearTimeout(this._expiredTimer);
-                const exp = this._getExp();
-                if (!exp) return;
-                const msLeft = exp - Date.now();
-                if (msLeft <= 0) { this._showExpired(); return; }
-                const msToWindow = msLeft - this.REFRESH_BEFORE_MS;
-                if (msToWindow > 0)
-                    this._refreshTimer = setTimeout(() => this._onRefreshWindow(), msToWindow);
-                else
-                    this._onRefreshWindow();
-                this._expiredTimer = setTimeout(() => this._showExpired(), msLeft);
-            },
-
-            async _onRefreshWindow() {
-                const active = (Date.now() - this.lastActivity) < this.IDLE_MS;
-                if (active) {
-                    const ok = await tryRefreshToken();
-                    if (ok) { this.schedule(); return; }
-                }
-                // idle or refresh failed — expiredTimer fires at exp
-            },
-
-            _showExpired() {
-                localStorage.removeItem('t3nets_id_token');
-                localStorage.removeItem('t3nets_access_token');
-                document.getElementById('session-expired-modal').style.display = 'flex';
-            },
-        };
-
-        checkAuth();
-
-        // ==================== Tabs ====================
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-            document.getElementById('tab-' + tabName).classList.add('active');
-            const btns = document.querySelectorAll('.tab-btn');
-            btns.forEach(btn => {
-                if (btn.textContent.toLowerCase() === tabName) btn.classList.add('active');
-            });
-            // Load tab-specific data
-            if (tabName === 'channels') loadChannels();
-            if (tabName === 'team') loadTeam();
-        }
-
-        // ==================== Settings ====================
-        let currentModel = '';
-        let activeProviders = [];
-        let platform = 'local';
-        let settingsData = {};
-
-        async function loadSettings() {
-            try {
-                const resp = await fetch('/api/settings', { headers: getAuthHeaders() });
-                const data = await resp.json();
-                settingsData = data;
-                currentModel = data.ai_model || '';
-                activeProviders = data.providers || (data.provider ? [data.provider] : ['anthropic']);
-                platform = data.platform || 'local';
-                if (data.platform) document.getElementById('platform-badge').textContent = data.platform.toUpperCase();
-                if (data.stage) document.getElementById('stage-badge').textContent = data.stage.toUpperCase();
-                if (data.build) document.getElementById('build-number').textContent = data.build;
-
-                renderModels(data.models || []);
-                renderSkills(
-                    data.available_skills || [],
-                    data.enabled_skills || [],
-                    data.connected_integrations || []
-                );
-
-                // Populate agent settings
-                document.getElementById('system-prompt').value = data.system_prompt_override || '';
-                document.getElementById('max-tokens').value = data.max_tokens_per_message || 4096;
-                document.getElementById('messages-per-day').value = data.messages_per_day || 1000;
-                document.getElementById('max-history').value = data.max_conversation_history || 20;
-            } catch (err) {
-                console.error('Failed to load settings:', err);
+      async function checkAuth() {
+        try {
+          const resp = await fetch("/api/auth/config");
+          const config = await resp.json();
+          if (config.enabled) {
+            const token = localStorage.getItem("t3nets_id_token");
+            if (!token) {
+              window.location.href = "/login";
+              return;
             }
-        }
-
-        // ==================== Models ====================
-        function renderModels(models) {
-            const list = document.getElementById('model-list');
-            list.innerHTML = '';
-            for (const model of models) {
-                const div = document.createElement('div');
-                div.className = 'model-option';
-                const isSelected = model.id === currentModel;
-                const isDisabled = !model.available;
-                if (isSelected) div.classList.add('selected');
-                if (isDisabled) div.classList.add('disabled');
-
-                let tagHtml = '';
-                // available_via = active providers that support this model (from backend)
-                const via = model.available_via || [];
-                const supportedBy = model.supported_by || [];
-                const isOllamaModel = supportedBy.includes('ollama') && !supportedBy.some(p => p !== 'ollama');
-                const ollamaActive = activeProviders.includes('ollama');
-                if (isSelected) tagHtml = '<span class="model-tag current">Current</span>';
-                else if (isDisabled) {
-                    let unavailLabel;
-                    if (isOllamaModel && !ollamaActive) {
-                        // Pure Ollama model but Ollama sidecar not running
-                        unavailLabel = 'Requires Ollama';
-                    } else if (!isOllamaModel && activeProviders.length === 1 && ollamaActive) {
-                        // Cloud-only model but only Ollama is active
-                        unavailLabel = 'Cloud only';
-                    } else {
-                        unavailLabel = 'Not available';
-                    }
-                    tagHtml = `<span class="model-tag unavailable">${unavailLabel}</span>`;
+            document.getElementById("logout-btn").style.display =
+              "inline-block";
+            try {
+              const meResp = await fetch("/api/auth/me", {
+                headers: getAuthHeaders(),
+              });
+              if (meResp.ok) {
+                const me = await meResp.json();
+                if (me.role === "member") {
+                  window.location.href = "/chat";
+                  return;
                 }
-                // "Free" tag for Ollama models that are available via Ollama
-                if (!isDisabled && via.includes('ollama')) tagHtml += '<span class="model-tag free">Free</span>';
+                if (me.tenant_name) {
+                  const tn = document.getElementById("nav-tenant-name");
+                  tn.textContent = me.tenant_name;
+                  tn.style.display = "inline";
+                }
+                if (me.tenant_id === "default" && me.role === "admin") {
+                  const pl = document.createElement("a");
+                  pl.href = "/platform";
+                  pl.textContent = "Platform";
+                  document.querySelector(".nav-links").appendChild(pl);
+                }
+              }
+            } catch (e) {
+              /* /api/auth/me not available */
+            }
+          } else {
+            try {
+              const meResp = await fetch("/api/auth/me");
+              if (meResp.ok) {
+                const me = await meResp.json();
+                if (me.role === "member") {
+                  window.location.href = "/chat";
+                  return;
+                }
+                if (me.tenant_name) {
+                  const tn = document.getElementById("nav-tenant-name");
+                  tn.textContent = me.tenant_name;
+                  tn.style.display = "inline";
+                }
+                if (me.tenant_id === "default" && me.role === "admin") {
+                  const pl = document.createElement("a");
+                  pl.href = "/platform";
+                  pl.textContent = "Platform";
+                  document.querySelector(".nav-links").appendChild(pl);
+                }
+              }
+            } catch (e) {
+              /* /api/auth/me not available */
+            }
+          }
+        } catch (e) {
+          /* auth not available */
+        }
+        SessionManager.init();
+      }
 
-                div.innerHTML = `
+      function logout() {
+        localStorage.removeItem("t3nets_id_token");
+        localStorage.removeItem("t3nets_access_token");
+        localStorage.removeItem("t3nets_refresh_token");
+        window.location.href = "/login";
+      }
+
+      async function tryRefreshToken() {
+        const refreshToken = localStorage.getItem("t3nets_refresh_token");
+        if (!refreshToken) return false;
+        try {
+          const resp = await fetch("/api/auth/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          if (!resp.ok) return false;
+          const data = await resp.json();
+          if (data.id_token)
+            localStorage.setItem("t3nets_id_token", data.id_token);
+          if (data.access_token)
+            localStorage.setItem("t3nets_access_token", data.access_token);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      const SessionManager = {
+        lastActivity: Date.now(),
+        _refreshTimer: null,
+        _expiredTimer: null,
+        IDLE_MS: 10 * 60 * 1000,
+        REFRESH_BEFORE_MS: 5 * 60 * 1000,
+
+        init() {
+          ["mousemove", "mousedown", "keydown", "scroll", "touchstart"].forEach(
+            (ev) =>
+              document.addEventListener(
+                ev,
+                () => {
+                  this.lastActivity = Date.now();
+                },
+                { passive: true },
+              ),
+          );
+          this.schedule();
+        },
+
+        _getExp() {
+          const token = localStorage.getItem("t3nets_id_token");
+          if (!token) return null;
+          try {
+            const b64 = token
+              .split(".")[1]
+              .replace(/-/g, "+")
+              .replace(/_/g, "/");
+            return JSON.parse(atob(b64)).exp * 1000;
+          } catch {
+            return null;
+          }
+        },
+
+        schedule() {
+          clearTimeout(this._refreshTimer);
+          clearTimeout(this._expiredTimer);
+          const exp = this._getExp();
+          if (!exp) return;
+          const msLeft = exp - Date.now();
+          if (msLeft <= 0) {
+            this._showExpired();
+            return;
+          }
+          const msToWindow = msLeft - this.REFRESH_BEFORE_MS;
+          if (msToWindow > 0)
+            this._refreshTimer = setTimeout(
+              () => this._onRefreshWindow(),
+              msToWindow,
+            );
+          else this._onRefreshWindow();
+          this._expiredTimer = setTimeout(() => this._showExpired(), msLeft);
+        },
+
+        async _onRefreshWindow() {
+          const active = Date.now() - this.lastActivity < this.IDLE_MS;
+          if (active) {
+            const ok = await tryRefreshToken();
+            if (ok) {
+              this.schedule();
+              return;
+            }
+          }
+          // idle or refresh failed — expiredTimer fires at exp
+        },
+
+        _showExpired() {
+          localStorage.removeItem("t3nets_id_token");
+          localStorage.removeItem("t3nets_access_token");
+          document.getElementById("session-expired-modal").style.display =
+            "flex";
+        },
+      };
+
+      checkAuth();
+
+      // ==================== Tabs ====================
+      function switchTab(tabName) {
+        document
+          .querySelectorAll(".tab-btn")
+          .forEach((btn) => btn.classList.remove("active"));
+        document
+          .querySelectorAll(".tab-panel")
+          .forEach((p) => p.classList.remove("active"));
+        document.getElementById("tab-" + tabName).classList.add("active");
+        const btns = document.querySelectorAll(".tab-btn");
+        btns.forEach((btn) => {
+          if (btn.textContent.toLowerCase() === tabName)
+            btn.classList.add("active");
+        });
+        // Load tab-specific data
+        if (tabName === "channels") loadChannels();
+        if (tabName === "team") loadTeam();
+      }
+
+      // ==================== Settings ====================
+      let currentModel = "";
+      let activeProviders = [];
+      let platform = "local";
+      let settingsData = {};
+
+      async function loadSettings() {
+        try {
+          const resp = await fetch("/api/settings", {
+            headers: getAuthHeaders(),
+          });
+          const data = await resp.json();
+          settingsData = data;
+          currentModel = data.ai_model || "";
+          activeProviders =
+            data.providers || (data.provider ? [data.provider] : ["anthropic"]);
+          platform = data.platform || "local";
+          if (data.platform)
+            document.getElementById("platform-badge").textContent =
+              data.platform.toUpperCase();
+          if (data.stage)
+            document.getElementById("stage-badge").textContent =
+              data.stage.toUpperCase();
+          if (data.build)
+            document.getElementById("build-number").textContent = data.build;
+
+          renderModels(data.models || []);
+          renderSkills(
+            data.available_skills || [],
+            data.enabled_skills || [],
+            data.connected_integrations || [],
+          );
+
+          // Populate agent settings
+          document.getElementById("system-prompt").value =
+            data.system_prompt_override || "";
+          document.getElementById("max-tokens").value =
+            data.max_tokens_per_message || 4096;
+          document.getElementById("messages-per-day").value =
+            data.messages_per_day || 1000;
+          document.getElementById("max-history").value =
+            data.max_conversation_history || 20;
+        } catch (err) {
+          console.error("Failed to load settings:", err);
+        }
+      }
+
+      // ==================== Models ====================
+      function renderModels(models) {
+        const list = document.getElementById("model-list");
+        list.innerHTML = "";
+        for (const model of models) {
+          const div = document.createElement("div");
+          div.className = "model-option";
+          const isSelected = model.id === currentModel;
+          const isDisabled = !model.available;
+          if (isSelected) div.classList.add("selected");
+          if (isDisabled) div.classList.add("disabled");
+
+          let tagHtml = "";
+          // available_via = active providers that support this model (from backend)
+          const via = model.available_via || [];
+          const supportedBy = model.supported_by || [];
+          const isOllamaModel =
+            supportedBy.includes("ollama") &&
+            !supportedBy.some((p) => p !== "ollama");
+          const ollamaActive = activeProviders.includes("ollama");
+          if (isSelected)
+            tagHtml = '<span class="model-tag current">Current</span>';
+          else if (isDisabled) {
+            let unavailLabel;
+            if (isOllamaModel && !ollamaActive) {
+              // Pure Ollama model but Ollama sidecar not running
+              unavailLabel = "Requires Ollama";
+            } else if (
+              !isOllamaModel &&
+              activeProviders.length === 1 &&
+              ollamaActive
+            ) {
+              // Cloud-only model but only Ollama is active
+              unavailLabel = "Cloud only";
+            } else {
+              unavailLabel = "Not available";
+            }
+            tagHtml = `<span class="model-tag unavailable">${unavailLabel}</span>`;
+          }
+          // "Free" tag for Ollama models that are available via Ollama
+          if (!isDisabled && via.includes("ollama"))
+            tagHtml += '<span class="model-tag free">Free</span>';
+
+          div.innerHTML = `
                     <div class="model-radio"></div>
                     <div class="model-info">
                         <div class="model-name">${model.display_name}</div>
@@ -922,68 +1356,77 @@
                     </div>
                     ${tagHtml}
                 `;
-                if (!isDisabled) div.addEventListener('click', () => selectModel(model.id));
-                list.appendChild(div);
-            }
+          if (!isDisabled)
+            div.addEventListener("click", () => selectModel(model.id));
+          list.appendChild(div);
+        }
+      }
+
+      async function selectModel(modelId) {
+        if (modelId === currentModel) return;
+        try {
+          const resp = await fetch("/api/settings", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify({ ai_model: modelId }),
+          });
+          if (resp.ok) {
+            currentModel = modelId;
+            loadSettings();
+            showToast("Model updated");
+          }
+        } catch (err) {
+          showToast("Failed to update model");
+        }
+      }
+
+      // ==================== Skills ====================
+      function renderSkills(available, enabled, connected) {
+        const list = document.getElementById("skill-list");
+        list.innerHTML = "";
+
+        if (available.length === 0) {
+          list.innerHTML =
+            '<div style="color:var(--text-faint);font-size:13px;">No skills registered</div>';
+          return;
         }
 
-        async function selectModel(modelId) {
-            if (modelId === currentModel) return;
-            try {
-                const resp = await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ ai_model: modelId }),
-                });
-                if (resp.ok) {
-                    currentModel = modelId;
-                    loadSettings();
-                    showToast('Model updated');
-                }
-            } catch (err) {
-                showToast('Failed to update model');
+        for (const skill of available) {
+          const isEnabled = enabled.includes(skill.name);
+          const integration = skill.requires_integration;
+          const isConnected = integration
+            ? connected.includes(integration)
+            : true;
+
+          const card = document.createElement("div");
+          card.className = "skill-card";
+
+          // Badges
+          let badgesHtml = "";
+          if (integration) {
+            badgesHtml += `<span class="skill-integration-tag">${integration}</span>`;
+            if (isConnected) {
+              badgesHtml +=
+                '<span class="skill-connected-tag">Connected</span>';
+            } else {
+              badgesHtml +=
+                '<span class="skill-disconnected-tag">Not connected</span>';
             }
-        }
+          }
 
-        // ==================== Skills ====================
-        function renderSkills(available, enabled, connected) {
-            const list = document.getElementById('skill-list');
-            list.innerHTML = '';
+          // Expand button (only for skills with integrations)
+          let expandBtnHtml = "";
+          if (integration) {
+            expandBtnHtml = `<button class="skill-expand-btn" data-integration="${integration}" data-skill="${skill.name}" onclick="toggleIntegrationConfig(this)">Configure ▾</button>`;
+          }
 
-            if (available.length === 0) {
-                list.innerHTML = '<div style="color:var(--text-faint);font-size:13px;">No skills registered</div>';
-                return;
-            }
-
-            for (const skill of available) {
-                const isEnabled = enabled.includes(skill.name);
-                const integration = skill.requires_integration;
-                const isConnected = integration ? connected.includes(integration) : true;
-
-                const card = document.createElement('div');
-                card.className = 'skill-card';
-
-                // Badges
-                let badgesHtml = '';
-                if (integration) {
-                    badgesHtml += `<span class="skill-integration-tag">${integration}</span>`;
-                    if (isConnected) {
-                        badgesHtml += '<span class="skill-connected-tag">Connected</span>';
-                    } else {
-                        badgesHtml += '<span class="skill-disconnected-tag">Not connected</span>';
-                    }
-                }
-
-                // Expand button (only for skills with integrations)
-                let expandBtnHtml = '';
-                if (integration) {
-                    expandBtnHtml = `<button class="skill-expand-btn" data-integration="${integration}" data-skill="${skill.name}" onclick="toggleIntegrationConfig(this)">Configure ▾</button>`;
-                }
-
-                card.innerHTML = `
+          card.innerHTML = `
                     <div class="skill-header">
                         <label class="skill-toggle">
-                            <input type="checkbox" data-skill="${skill.name}" ${isEnabled ? 'checked' : ''}>
+                            <input type="checkbox" data-skill="${skill.name}" ${isEnabled ? "checked" : ""}>
                             <span class="slider"></span>
                         </label>
                         <div class="skill-info">
@@ -993,85 +1436,98 @@
                         <div class="skill-badges">${badgesHtml}</div>
                         ${expandBtnHtml}
                     </div>
-                    ${integration ? `<div class="integration-config" id="config-${skill.name}"></div>` : ''}
+                    ${integration ? `<div class="integration-config" id="config-${skill.name}"></div>` : ""}
                 `;
 
-                const checkbox = card.querySelector('input[type="checkbox"]');
-                checkbox.addEventListener('change', () => toggleSkill(skill.name, checkbox.checked));
-                list.appendChild(card);
-            }
+          const checkbox = card.querySelector('input[type="checkbox"]');
+          checkbox.addEventListener("change", () =>
+            toggleSkill(skill.name, checkbox.checked),
+          );
+          list.appendChild(card);
+        }
+      }
+
+      async function toggleSkill(skillName, enabled) {
+        const checkboxes = document.querySelectorAll(
+          '#skill-list input[type="checkbox"]',
+        );
+        const enabledSkills = [];
+        checkboxes.forEach((cb) => {
+          if (cb.checked) enabledSkills.push(cb.dataset.skill);
+        });
+
+        try {
+          const resp = await fetch("/api/settings", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify({ enabled_skills: enabledSkills }),
+          });
+          if (resp.ok) {
+            showToast(
+              enabled ? `${skillName} enabled` : `${skillName} disabled`,
+            );
+          } else {
+            const err = await resp.json();
+            showToast(err.error || "Failed to update skills");
+            loadSettings();
+          }
+        } catch (err) {
+          showToast("Failed to update skills");
+          loadSettings();
+        }
+      }
+
+      // ==================== Integration Config ====================
+      async function toggleIntegrationConfig(btn) {
+        const skillName = btn.dataset.skill;
+        const integration = btn.dataset.integration;
+        const pane = document.getElementById("config-" + skillName);
+
+        if (pane.classList.contains("open")) {
+          pane.classList.remove("open");
+          btn.textContent = "Configure ▾";
+          return;
         }
 
-        async function toggleSkill(skillName, enabled) {
-            const checkboxes = document.querySelectorAll('#skill-list input[type="checkbox"]');
-            const enabledSkills = [];
-            checkboxes.forEach(cb => { if (cb.checked) enabledSkills.push(cb.dataset.skill); });
-
-            try {
-                const resp = await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ enabled_skills: enabledSkills }),
-                });
-                if (resp.ok) {
-                    showToast(enabled ? `${skillName} enabled` : `${skillName} disabled`);
-                } else {
-                    const err = await resp.json();
-                    showToast(err.error || 'Failed to update skills');
-                    loadSettings();
-                }
-            } catch (err) {
-                showToast('Failed to update skills');
-                loadSettings();
-            }
+        // Load integration config
+        btn.textContent = "Loading...";
+        try {
+          const resp = await fetch(`/api/integrations/${integration}`, {
+            headers: getAuthHeaders(),
+          });
+          const data = await resp.json();
+          renderIntegrationForm(pane, data, integration);
+          pane.classList.add("open");
+          btn.textContent = "Configure ▴";
+        } catch (err) {
+          showToast("Failed to load integration config");
+          btn.textContent = "Configure ▾";
         }
+      }
 
-        // ==================== Integration Config ====================
-        async function toggleIntegrationConfig(btn) {
-            const skillName = btn.dataset.skill;
-            const integration = btn.dataset.integration;
-            const pane = document.getElementById('config-' + skillName);
+      function renderIntegrationForm(pane, data, integrationName) {
+        const fields = data.fields || [];
+        const config = data.config || {};
 
-            if (pane.classList.contains('open')) {
-                pane.classList.remove('open');
-                btn.textContent = 'Configure ▾';
-                return;
-            }
-
-            // Load integration config
-            btn.textContent = 'Loading...';
-            try {
-                const resp = await fetch(`/api/integrations/${integration}`, { headers: getAuthHeaders() });
-                const data = await resp.json();
-                renderIntegrationForm(pane, data, integration);
-                pane.classList.add('open');
-                btn.textContent = 'Configure ▴';
-            } catch (err) {
-                showToast('Failed to load integration config');
-                btn.textContent = 'Configure ▾';
-            }
-        }
-
-        function renderIntegrationForm(pane, data, integrationName) {
-            const fields = data.fields || [];
-            const config = data.config || {};
-
-            let fieldsHtml = '';
-            for (const field of fields) {
-                const value = config[field.key] || '';
-                const inputType = field.type === 'password' ? 'password' : 'text';
-                const required = field.required ? ' required' : '';
-                fieldsHtml += `
+        let fieldsHtml = "";
+        for (const field of fields) {
+          const value = config[field.key] || "";
+          const inputType = field.type === "password" ? "password" : "text";
+          const required = field.required ? " required" : "";
+          fieldsHtml += `
                     <div class="field-group">
-                        <label>${field.label}${field.required ? ' *' : ''}</label>
+                        <label>${field.label}${field.required ? " *" : ""}</label>
                         <input type="${inputType}" data-key="${field.key}"
-                               value="${value === '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' ? '' : escapeHtml(value)}"
-                               placeholder="${escapeHtml(field.placeholder || '')}"${required}>
+                               value="${value === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" ? "" : escapeHtml(value)}"
+                               placeholder="${escapeHtml(field.placeholder || "")}"${required}>
                     </div>
                 `;
-            }
+        }
 
-            pane.innerHTML = `
+        pane.innerHTML = `
                 ${fieldsHtml}
                 <div class="integration-actions">
                     <button class="btn-test" onclick="testIntegration('${integrationName}', this)">Test Connection</button>
@@ -1079,197 +1535,225 @@
                     <span class="integration-status" id="status-${integrationName}"></span>
                 </div>
             `;
+      }
+
+      function getIntegrationFormData(integrationName) {
+        // Find the config pane that contains this integration's fields
+        const panes = document.querySelectorAll(".integration-config.open");
+        for (const pane of panes) {
+          const inputs = pane.querySelectorAll("input[data-key]");
+          // Check if any input in this pane belongs to this integration
+          const data = {};
+          let found = false;
+          inputs.forEach((input) => {
+            data[input.dataset.key] = input.value;
+            found = true;
+          });
+          // Match by checking if the pane has save button for this integration
+          const saveBtn = pane.querySelector(`.btn-save`);
+          if (
+            saveBtn &&
+            saveBtn.getAttribute("onclick").includes(integrationName)
+          ) {
+            return data;
+          }
         }
+        return {};
+      }
 
-        function getIntegrationFormData(integrationName) {
-            // Find the config pane that contains this integration's fields
-            const panes = document.querySelectorAll('.integration-config.open');
-            for (const pane of panes) {
-                const inputs = pane.querySelectorAll('input[data-key]');
-                // Check if any input in this pane belongs to this integration
-                const data = {};
-                let found = false;
-                inputs.forEach(input => {
-                    data[input.dataset.key] = input.value;
-                    found = true;
-                });
-                // Match by checking if the pane has save button for this integration
-                const saveBtn = pane.querySelector(`.btn-save`);
-                if (saveBtn && saveBtn.getAttribute('onclick').includes(integrationName)) {
-                    return data;
-                }
-            }
-            return {};
-        }
+      async function testIntegration(integrationName, btn) {
+        const formData = getIntegrationFormData(integrationName);
+        const statusEl = document.getElementById("status-" + integrationName);
+        statusEl.textContent = "Testing...";
+        statusEl.className = "integration-status";
 
-        async function testIntegration(integrationName, btn) {
-            const formData = getIntegrationFormData(integrationName);
-            const statusEl = document.getElementById('status-' + integrationName);
-            statusEl.textContent = 'Testing...';
-            statusEl.className = 'integration-status';
-
-            try {
-                const resp = await fetch(`/api/integrations/${integrationName}/test`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify(formData),
-                });
-                const result = await resp.json();
-                if (result.ok) {
-                    statusEl.textContent = result.display_name
-                        ? `Connected as ${result.display_name}`
-                        : 'Connection successful';
-                    statusEl.className = 'integration-status ok';
-                } else {
-                    statusEl.textContent = result.error || 'Connection failed';
-                    statusEl.className = 'integration-status error';
-                }
-            } catch (err) {
-                statusEl.textContent = 'Connection failed';
-                statusEl.className = 'integration-status error';
-            }
-        }
-
-        async function saveIntegration(integrationName, btn) {
-            const formData = getIntegrationFormData(integrationName);
-            const statusEl = document.getElementById('status-' + integrationName);
-
-            try {
-                const resp = await fetch(`/api/integrations/${integrationName}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify(formData),
-                });
-                if (resp.ok) {
-                    showToast(`${integrationName} credentials saved`);
-                    statusEl.textContent = 'Saved';
-                    statusEl.className = 'integration-status ok';
-                    // Refresh settings to update connected status
-                    loadSettings();
-                } else {
-                    const err = await resp.json();
-                    showToast(err.error || 'Failed to save');
-                }
-            } catch (err) {
-                showToast('Failed to save credentials');
-            }
-        }
-
-        // ==================== Agent Settings ====================
-        async function saveAgentSettings() {
-            const btn = document.getElementById('save-agent-btn');
-            btn.disabled = true;
-            btn.textContent = 'Saving...';
-
-            const payload = {
-                system_prompt_override: document.getElementById('system-prompt').value,
-                max_tokens_per_message: parseInt(document.getElementById('max-tokens').value) || 4096,
-                messages_per_day: parseInt(document.getElementById('messages-per-day').value) || 1000,
-                max_conversation_history: parseInt(document.getElementById('max-history').value) || 20,
-            };
-
-            try {
-                const resp = await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify(payload),
-                });
-                if (resp.ok) {
-                    showToast('Agent settings saved');
-                } else {
-                    const err = await resp.json();
-                    showToast(err.error || 'Failed to save settings');
-                }
-            } catch (err) {
-                showToast('Failed to save settings');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Save Agent Settings';
-            }
-        }
-
-        // ==================== Channels ====================
-        // Channel definitions — which integrations are channels vs tool integrations
-        const CHANNEL_DEFS = {
-            telegram: {
-                name: 'Telegram',
-                icon: '✈',
-                iconClass: 'telegram',
-                description: 'Message your T3nets bot from any Telegram chat',
-                setupUrl: 'https://t.me/BotFather',
-                setupLabel: '@BotFather on Telegram',
-                setupSteps: [
-                    'Open Telegram and search for <strong>@BotFather</strong>',
-                    'Send <code>/newbot</code> and follow the prompts to name your bot',
-                    'Copy the <strong>Bot Token</strong> (looks like <code>123456:ABC-DEF...</code>)',
-                    'Paste it below and click <strong>Save</strong>',
-                    'T3nets will automatically register the webhook — you\'re done!',
-                ],
+        try {
+          const resp = await fetch(
+            `/api/integrations/${integrationName}/test`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...getAuthHeaders(),
+              },
+              body: JSON.stringify(formData),
             },
-            teams: {
-                name: 'Microsoft Teams',
-                icon: 'T',
-                iconClass: 'teams',
-                description: 'Receive and respond to messages from Microsoft Teams chats and channels',
-                setupUrl: 'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
-                setupLabel: 'Azure Portal',
-                setupSteps: [
-                    'Go to Azure Portal → Bot Services → Create Azure Bot',
-                    'Choose "Multi-tenant" app type and note the <strong>App ID</strong>',
-                    'Create a client secret under Certificates & Secrets',
-                    'Set the Messaging Endpoint to your T3nets webhook URL',
-                    'Paste the App ID and Secret below, then install the bot in Teams',
-                ],
+          );
+          const result = await resp.json();
+          if (result.ok) {
+            statusEl.textContent = result.display_name
+              ? `Connected as ${result.display_name}`
+              : "Connection successful";
+            statusEl.className = "integration-status ok";
+          } else {
+            statusEl.textContent = result.error || "Connection failed";
+            statusEl.className = "integration-status error";
+          }
+        } catch (err) {
+          statusEl.textContent = "Connection failed";
+          statusEl.className = "integration-status error";
+        }
+      }
+
+      async function saveIntegration(integrationName, btn) {
+        const formData = getIntegrationFormData(integrationName);
+        const statusEl = document.getElementById("status-" + integrationName);
+
+        try {
+          const resp = await fetch(`/api/integrations/${integrationName}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
             },
+            body: JSON.stringify(formData),
+          });
+          if (resp.ok) {
+            showToast(`${integrationName} credentials saved`);
+            statusEl.textContent = "Saved";
+            statusEl.className = "integration-status ok";
+            // Refresh settings to update connected status
+            loadSettings();
+          } else {
+            const err = await resp.json();
+            showToast(err.error || "Failed to save");
+          }
+        } catch (err) {
+          showToast("Failed to save credentials");
+        }
+      }
+
+      // ==================== Agent Settings ====================
+      async function saveAgentSettings() {
+        const btn = document.getElementById("save-agent-btn");
+        btn.disabled = true;
+        btn.textContent = "Saving...";
+
+        const payload = {
+          system_prompt_override:
+            document.getElementById("system-prompt").value,
+          max_tokens_per_message:
+            parseInt(document.getElementById("max-tokens").value) || 4096,
+          messages_per_day:
+            parseInt(document.getElementById("messages-per-day").value) || 1000,
+          max_conversation_history:
+            parseInt(document.getElementById("max-history").value) || 20,
         };
 
-        async function loadChannels() {
-            const list = document.getElementById('channels-list');
-            list.innerHTML = '<div style="color:var(--text-faint);font-size:13px;">Loading...</div>';
+        try {
+          const resp = await fetch("/api/settings", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify(payload),
+          });
+          if (resp.ok) {
+            showToast("Agent settings saved");
+          } else {
+            const err = await resp.json();
+            showToast(err.error || "Failed to save settings");
+          }
+        } catch (err) {
+          showToast("Failed to save settings");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Save Agent Settings";
+        }
+      }
 
-            try {
-                const resp = await fetch('/api/integrations', { headers: getAuthHeaders() });
-                const integrations = await resp.json();
+      // ==================== Channels ====================
+      // Channel definitions — which integrations are channels vs tool integrations
+      const CHANNEL_DEFS = {
+        telegram: {
+          name: "Telegram",
+          icon: "✈",
+          iconClass: "telegram",
+          description: "Message your T3nets bot from any Telegram chat",
+          setupUrl: "https://t.me/BotFather",
+          setupLabel: "@BotFather on Telegram",
+          setupSteps: [
+            "Open Telegram and search for <strong>@BotFather</strong>",
+            "Send <code>/newbot</code> and follow the prompts to name your bot",
+            "Copy the <strong>Bot Token</strong> (looks like <code>123456:ABC-DEF...</code>)",
+            "Paste it below and click <strong>Save</strong>",
+            "T3nets will automatically register the webhook — you're done!",
+          ],
+        },
+        teams: {
+          name: "Microsoft Teams",
+          icon: "T",
+          iconClass: "teams",
+          description:
+            "Receive and respond to messages from Microsoft Teams chats and channels",
+          setupUrl:
+            "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+          setupLabel: "Azure Portal",
+          setupSteps: [
+            "Go to Azure Portal → Bot Services → Create Azure Bot",
+            'Choose "Multi-tenant" app type and note the <strong>App ID</strong>',
+            "Create a client secret under Certificates & Secrets",
+            "Set the Messaging Endpoint to your T3nets webhook URL",
+            "Paste the App ID and Secret below, then install the bot in Teams",
+          ],
+        },
+      };
 
-                list.innerHTML = '';
-                let hasChannels = false;
+      async function loadChannels() {
+        const list = document.getElementById("channels-list");
+        list.innerHTML =
+          '<div style="color:var(--text-faint);font-size:13px;">Loading...</div>';
 
-                for (const integ of integrations) {
-                    const channelDef = CHANNEL_DEFS[integ.name];
-                    if (!channelDef) continue; // Skip non-channel integrations (jira, github)
-                    hasChannels = true;
+        try {
+          const resp = await fetch("/api/integrations", {
+            headers: getAuthHeaders(),
+          });
+          const integrations = await resp.json();
 
-                    const card = document.createElement('div');
-                    card.className = 'channel-card';
-                    card.id = `channel-card-${integ.name}`;
+          list.innerHTML = "";
+          let hasChannels = false;
 
-                    const statusDot = integ.connected ? 'connected' : 'disconnected';
-                    const statusText = integ.connected ? 'Connected' : 'Not configured';
+          for (const integ of integrations) {
+            const channelDef = CHANNEL_DEFS[integ.name];
+            if (!channelDef) continue; // Skip non-channel integrations (jira, github)
+            hasChannels = true;
 
-                    let fieldsHtml = '';
-                    for (const field of (integ.fields || [])) {
-                        const helpHtml = field.placeholder && !field.required
-                            ? `<div class="help-text">${escapeHtml(field.placeholder)}</div>` : '';
-                        fieldsHtml += `
+            const card = document.createElement("div");
+            card.className = "channel-card";
+            card.id = `channel-card-${integ.name}`;
+
+            const statusDot = integ.connected ? "connected" : "disconnected";
+            const statusText = integ.connected ? "Connected" : "Not configured";
+
+            let fieldsHtml = "";
+            for (const field of integ.fields || []) {
+              const helpHtml =
+                field.placeholder && !field.required
+                  ? `<div class="help-text">${escapeHtml(field.placeholder)}</div>`
+                  : "";
+              fieldsHtml += `
                             <div class="field-group">
-                                <label>${field.label}${field.required ? ' *' : ''}</label>
-                                <input type="${field.type === 'password' ? 'password' : 'text'}"
+                                <label>${field.label}${field.required ? " *" : ""}</label>
+                                <input type="${field.type === "password" ? "password" : "text"}"
                                        data-key="${field.key}"
-                                       placeholder="${escapeHtml(field.placeholder || '')}"
-                                       ${field.required ? 'required' : ''}>
+                                       placeholder="${escapeHtml(field.placeholder || "")}"
+                                       ${field.required ? "required" : ""}>
                                 ${helpHtml}
                             </div>
                         `;
-                    }
+            }
 
-                    // Build setup steps HTML
-                    let stepsHtml = '';
-                    if (channelDef.setupSteps && !integ.connected) {
-                        const stepsLi = channelDef.setupSteps.map(s => `<li>${s}</li>`).join('');
-                        stepsHtml = `<div class="channel-setup-steps"><ol>${stepsLi}</ol></div>`;
-                    }
+            // Build setup steps HTML
+            let stepsHtml = "";
+            if (channelDef.setupSteps && !integ.connected) {
+              const stepsLi = channelDef.setupSteps
+                .map((s) => `<li>${s}</li>`)
+                .join("");
+              stepsHtml = `<div class="channel-setup-steps"><ol>${stepsLi}</ol></div>`;
+            }
 
-                    card.innerHTML = `
+            card.innerHTML = `
                         <div class="channel-card-header">
                             <div class="channel-icon ${channelDef.iconClass}">${channelDef.icon}</div>
                             <div>
@@ -1277,7 +1761,7 @@
                                 <div class="channel-desc">${channelDef.description}</div>
                             </div>
                             <button class="channel-toggle-btn" onclick="toggleChannelConfig('${integ.name}')">
-                                ${integ.connected ? 'Edit' : 'Set up'}
+                                ${integ.connected ? "Edit" : "Set up"}
                             </button>
                         </div>
                         <div class="channel-status-row">
@@ -1295,195 +1779,233 @@
                         </div>
                     `;
 
-                    list.appendChild(card);
+            list.appendChild(card);
 
-                    // If connected, pre-fill the form
-                    if (integ.connected) {
-                        loadChannelConfig(integ.name);
-                    }
-                }
-
-                if (!hasChannels) {
-                    list.innerHTML = '<div style="color:var(--text-faint);font-size:13px;">No channel integrations available</div>';
-                }
-            } catch (err) {
-                console.error('Failed to load channels:', err);
-                list.innerHTML = '<div style="color:var(--error-text);font-size:13px;">Failed to load channels</div>';
+            // If connected, pre-fill the form
+            if (integ.connected) {
+              loadChannelConfig(integ.name);
             }
-        }
+          }
 
-        function toggleChannelConfig(channelName) {
-            const config = document.getElementById('channel-config-' + channelName);
-            const btn = document.querySelector(`#channel-card-${channelName} .channel-toggle-btn`);
-            if (config.classList.contains('open')) {
-                config.classList.remove('open');
-                btn.textContent = 'Configure';
-            } else {
-                config.classList.add('open');
-                btn.textContent = 'Close';
-                loadChannelConfig(channelName);
+          if (!hasChannels) {
+            list.innerHTML =
+              '<div style="color:var(--text-faint);font-size:13px;">No channel integrations available</div>';
+          }
+        } catch (err) {
+          console.error("Failed to load channels:", err);
+          list.innerHTML =
+            '<div style="color:var(--error-text);font-size:13px;">Failed to load channels</div>';
+        }
+      }
+
+      function toggleChannelConfig(channelName) {
+        const config = document.getElementById("channel-config-" + channelName);
+        const btn = document.querySelector(
+          `#channel-card-${channelName} .channel-toggle-btn`,
+        );
+        if (config.classList.contains("open")) {
+          config.classList.remove("open");
+          btn.textContent = "Configure";
+        } else {
+          config.classList.add("open");
+          btn.textContent = "Close";
+          loadChannelConfig(channelName);
+        }
+      }
+
+      async function loadChannelConfig(channelName) {
+        try {
+          const resp = await fetch(`/api/integrations/${channelName}`, {
+            headers: getAuthHeaders(),
+          });
+          const data = await resp.json();
+          if (data.config) {
+            const pane = document.getElementById(
+              "channel-config-" + channelName,
+            );
+            const inputs = pane.querySelectorAll("input[data-key]");
+            inputs.forEach((input) => {
+              const val = data.config[input.dataset.key] || "";
+              // Don't fill masked password values
+              if (
+                val &&
+                val !== "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+              ) {
+                input.value = val;
+              }
+            });
+          }
+        } catch (err) {
+          console.error("Failed to load channel config:", err);
+        }
+      }
+
+      async function testChannelConnection(channelName) {
+        const pane = document.getElementById("channel-config-" + channelName);
+        const inputs = pane.querySelectorAll("input[data-key]");
+        const formData = {};
+        inputs.forEach((input) => {
+          formData[input.dataset.key] = input.value;
+        });
+
+        const statusEl = document.getElementById(
+          "channel-status-" + channelName,
+        );
+        statusEl.textContent = "Testing...";
+        statusEl.className = "integration-status";
+
+        try {
+          const resp = await fetch(`/api/integrations/${channelName}/test`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify(formData),
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            const name = result.bot_name || result.display_name || "";
+            statusEl.textContent = name
+              ? `Connected as ${name}`
+              : "Connection successful";
+            statusEl.className = "integration-status ok";
+          } else {
+            statusEl.textContent = result.error || "Connection failed";
+            statusEl.className = "integration-status error";
+          }
+        } catch (err) {
+          statusEl.textContent = "Connection failed";
+          statusEl.className = "integration-status error";
+        }
+      }
+
+      async function saveChannelConfig(channelName) {
+        const pane = document.getElementById("channel-config-" + channelName);
+        const inputs = pane.querySelectorAll("input[data-key]");
+        const formData = {};
+        inputs.forEach((input) => {
+          formData[input.dataset.key] = input.value;
+        });
+
+        const statusEl = document.getElementById(
+          "channel-status-" + channelName,
+        );
+        statusEl.textContent = "Saving...";
+        statusEl.className = "integration-status";
+
+        try {
+          const resp = await fetch(`/api/integrations/${channelName}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeaders(),
+            },
+            body: JSON.stringify(formData),
+          });
+          if (resp.ok) {
+            statusEl.textContent = "Saved";
+            statusEl.className = "integration-status ok";
+            showToast(
+              `${CHANNEL_DEFS[channelName]?.name || channelName} credentials saved`,
+            );
+            // Refresh to update connected status
+            setTimeout(() => loadChannels(), 500);
+          } else {
+            const err = await resp.json();
+            statusEl.textContent = err.error || "Failed to save";
+            statusEl.className = "integration-status error";
+          }
+        } catch (err) {
+          statusEl.textContent = "Failed to save";
+          statusEl.className = "integration-status error";
+        }
+      }
+
+      // ==================== Team ====================
+      let tenantId = "";
+      let _lastInviteEmailText = "";
+
+      async function copyInviteText() {
+        try {
+          await navigator.clipboard.writeText(_lastInviteEmailText);
+          const btn = document.getElementById("copy-invite-btn");
+          btn.textContent = "Copied!";
+          setTimeout(() => {
+            btn.textContent = "Copy to clipboard";
+          }, 2000);
+        } catch (e) {
+          showToast("Could not copy — please select the text manually");
+        }
+      }
+
+      async function loadTeam() {
+        if (!tenantId) {
+          // Try to get tenant_id from auth/me
+          try {
+            const resp = await fetch("/api/auth/me", {
+              headers: getAuthHeaders(),
+            });
+            if (resp.ok) {
+              const me = await resp.json();
+              tenantId = me.tenant_id || "local";
             }
+          } catch (e) {
+            tenantId = "local";
+          }
         }
+        loadMembers();
+        loadInvitations();
+      }
 
-        async function loadChannelConfig(channelName) {
-            try {
-                const resp = await fetch(`/api/integrations/${channelName}`, { headers: getAuthHeaders() });
-                const data = await resp.json();
-                if (data.config) {
-                    const pane = document.getElementById('channel-config-' + channelName);
-                    const inputs = pane.querySelectorAll('input[data-key]');
-                    inputs.forEach(input => {
-                        const val = data.config[input.dataset.key] || '';
-                        // Don't fill masked password values
-                        if (val && val !== '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022') {
-                            input.value = val;
-                        }
-                    });
-                }
-            } catch (err) {
-                console.error('Failed to load channel config:', err);
-            }
-        }
-
-        async function testChannelConnection(channelName) {
-            const pane = document.getElementById('channel-config-' + channelName);
-            const inputs = pane.querySelectorAll('input[data-key]');
-            const formData = {};
-            inputs.forEach(input => { formData[input.dataset.key] = input.value; });
-
-            const statusEl = document.getElementById('channel-status-' + channelName);
-            statusEl.textContent = 'Testing...';
-            statusEl.className = 'integration-status';
-
-            try {
-                const resp = await fetch(`/api/integrations/${channelName}/test`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify(formData),
-                });
-                const result = await resp.json();
-                if (result.ok) {
-                    const name = result.bot_name || result.display_name || '';
-                    statusEl.textContent = name ? `Connected as ${name}` : 'Connection successful';
-                    statusEl.className = 'integration-status ok';
-                } else {
-                    statusEl.textContent = result.error || 'Connection failed';
-                    statusEl.className = 'integration-status error';
-                }
-            } catch (err) {
-                statusEl.textContent = 'Connection failed';
-                statusEl.className = 'integration-status error';
-            }
-        }
-
-        async function saveChannelConfig(channelName) {
-            const pane = document.getElementById('channel-config-' + channelName);
-            const inputs = pane.querySelectorAll('input[data-key]');
-            const formData = {};
-            inputs.forEach(input => { formData[input.dataset.key] = input.value; });
-
-            const statusEl = document.getElementById('channel-status-' + channelName);
-            statusEl.textContent = 'Saving...';
-            statusEl.className = 'integration-status';
-
-            try {
-                const resp = await fetch(`/api/integrations/${channelName}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify(formData),
-                });
-                if (resp.ok) {
-                    statusEl.textContent = 'Saved';
-                    statusEl.className = 'integration-status ok';
-                    showToast(`${CHANNEL_DEFS[channelName]?.name || channelName} credentials saved`);
-                    // Refresh to update connected status
-                    setTimeout(() => loadChannels(), 500);
-                } else {
-                    const err = await resp.json();
-                    statusEl.textContent = err.error || 'Failed to save';
-                    statusEl.className = 'integration-status error';
-                }
-            } catch (err) {
-                statusEl.textContent = 'Failed to save';
-                statusEl.className = 'integration-status error';
-            }
-        }
-
-        // ==================== Team ====================
-        let tenantId = '';
-        let _lastInviteEmailText = '';
-
-        async function copyInviteText() {
-            try {
-                await navigator.clipboard.writeText(_lastInviteEmailText);
-                const btn = document.getElementById('copy-invite-btn');
-                btn.textContent = 'Copied!';
-                setTimeout(() => { btn.textContent = 'Copy to clipboard'; }, 2000);
-            } catch (e) {
-                showToast('Could not copy — please select the text manually');
-            }
-        }
-
-        async function loadTeam() {
-            if (!tenantId) {
-                // Try to get tenant_id from auth/me
-                try {
-                    const resp = await fetch('/api/auth/me', { headers: getAuthHeaders() });
-                    if (resp.ok) {
-                        const me = await resp.json();
-                        tenantId = me.tenant_id || 'local';
-                    }
-                } catch (e) {
-                    tenantId = 'local';
-                }
-            }
-            loadMembers();
-            loadInvitations();
-        }
-
-        async function loadMembers() {
-            try {
-                const resp = await fetch(`/api/admin/tenants/${tenantId}/users`, { headers: getAuthHeaders() });
-                const data = await resp.json();
-                const body = document.getElementById('members-body');
-                body.innerHTML = '';
-                for (const u of (data.users || [])) {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${escapeHtml(u.display_name || u.email.split('@')[0])}</td>
+      async function loadMembers() {
+        try {
+          const resp = await fetch(`/api/admin/tenants/${tenantId}/users`, {
+            headers: getAuthHeaders(),
+          });
+          const data = await resp.json();
+          const body = document.getElementById("members-body");
+          body.innerHTML = "";
+          for (const u of data.users || []) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+                        <td>${escapeHtml(u.display_name || u.email.split("@")[0])}</td>
                         <td>${escapeHtml(u.email)}</td>
                         <td><span class="role-badge ${u.role}">${u.role}</span></td>
                     `;
-                    body.appendChild(tr);
-                }
-            } catch (err) {
-                console.error('Failed to load members:', err);
-            }
+            body.appendChild(tr);
+          }
+        } catch (err) {
+          console.error("Failed to load members:", err);
         }
+      }
 
-        async function loadInvitations() {
-            try {
-                const resp = await fetch(`/api/admin/tenants/${tenantId}/invitations`, { headers: getAuthHeaders() });
-                const data = await resp.json();
-                const invites = data.invitations || [];
-                const body = document.getElementById('invitations-body');
-                body.innerHTML = '';
+      async function loadInvitations() {
+        try {
+          const resp = await fetch(
+            `/api/admin/tenants/${tenantId}/invitations`,
+            { headers: getAuthHeaders() },
+          );
+          const data = await resp.json();
+          const invites = data.invitations || [];
+          const body = document.getElementById("invitations-body");
+          body.innerHTML = "";
 
-                if (invites.length === 0) {
-                    document.getElementById('invitations-table').style.display = 'none';
-                    document.getElementById('no-invitations').style.display = 'block';
-                    return;
-                }
+          if (invites.length === 0) {
+            document.getElementById("invitations-table").style.display = "none";
+            document.getElementById("no-invitations").style.display = "block";
+            return;
+          }
 
-                document.getElementById('invitations-table').style.display = '';
-                document.getElementById('no-invitations').style.display = 'none';
+          document.getElementById("invitations-table").style.display = "";
+          document.getElementById("no-invitations").style.display = "none";
 
-                for (const inv of invites) {
-                    const tr = document.createElement('tr');
-                    const expiresDate = new Date(inv.expires_at).toLocaleDateString();
-                    const host = window.location.origin;
-                    const invUrl = `${host}/login?invite=${inv.invite_code}`;
-                    tr.innerHTML = `
+          for (const inv of invites) {
+            const tr = document.createElement("tr");
+            const expiresDate = new Date(inv.expires_at).toLocaleDateString();
+            const host = window.location.origin;
+            const invUrl = `${host}/login?invite=${inv.invite_code}`;
+            tr.innerHTML = `
                         <td>${escapeHtml(inv.email)}</td>
                         <td><span class="role-badge ${inv.role}">${inv.role}</span></td>
                         <td>${expiresDate}</td>
@@ -1492,44 +2014,53 @@
                             <button class="btn-revoke" onclick="revokeInvitation('${inv.invite_code}')">Revoke</button>
                         </td>
                     `;
-                    body.appendChild(tr);
-                }
-            } catch (err) {
-                console.error('Failed to load invitations:', err);
-            }
+            body.appendChild(tr);
+          }
+        } catch (err) {
+          console.error("Failed to load invitations:", err);
+        }
+      }
+
+      async function createInvitation() {
+        const email = document.getElementById("invite-email").value.trim();
+        const role = document.getElementById("invite-role").value;
+
+        if (!email) {
+          showToast("Please enter an email address");
+          return;
         }
 
-        async function createInvitation() {
-            const email = document.getElementById('invite-email').value.trim();
-            const role = document.getElementById('invite-role').value;
+        const btn = document.getElementById("create-invite-btn");
+        btn.disabled = true;
+        btn.textContent = "Creating...";
 
-            if (!email) {
-                showToast('Please enter an email address');
-                return;
-            }
+        try {
+          const resp = await fetch(
+            `/api/admin/tenants/${tenantId}/invitations`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...getAuthHeaders(),
+              },
+              body: JSON.stringify({ email, role }),
+            },
+          );
+          const data = await resp.json();
 
-            const btn = document.getElementById('create-invite-btn');
-            btn.disabled = true;
-            btn.textContent = 'Creating...';
+          if (!resp.ok) {
+            showToast(data.error || "Failed to create invitation");
+            return;
+          }
 
-            try {
-                const resp = await fetch(`/api/admin/tenants/${tenantId}/invitations`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ email, role }),
-                });
-                const data = await resp.json();
-
-                if (!resp.ok) {
-                    showToast(data.error || 'Failed to create invitation');
-                    return;
-                }
-
-                // Show invite email text
-                const host = window.location.origin;
-                const invUrl = data.invite_url || `${host}/login?invite=${data.invite_code}`;
-                const tenantName = document.getElementById('nav-tenant-name').textContent.trim() || 'our team';
-                _lastInviteEmailText = `Hi,
+          // Show invite email text
+          const host = window.location.origin;
+          const invUrl =
+            data.invite_url || `${host}/login?invite=${data.invite_code}`;
+          const tenantName =
+            document.getElementById("nav-tenant-name").textContent.trim() ||
+            "our team";
+          _lastInviteEmailText = `Hi,
 
 You've been invited to join ${tenantName} on T3nets — an AI-powered productivity platform that connects your team to tools like Jira, GitHub, and more.
 
@@ -1539,85 +2070,91 @@ ${invUrl}
 
 This invitation was sent to ${email}. If you weren't expecting it, you can safely ignore this message.`;
 
-                const resultEl = document.getElementById('invite-result');
-                resultEl.innerHTML = `
+          const resultEl = document.getElementById("invite-result");
+          resultEl.innerHTML = `
                     <div class="invite-result-header">
                         <span>✓ Invitation created — paste the text below into an email</span>
                         <button class="btn-copy-invite" id="copy-invite-btn" onclick="copyInviteText()">Copy to clipboard</button>
                     </div>
                     <pre class="invite-email-body">${escapeHtml(_lastInviteEmailText)}</pre>`;
-                resultEl.style.display = 'block';
+          resultEl.style.display = "block";
 
-                showToast('Invitation created');
+          showToast("Invitation created");
 
-                // Clear form and refresh
-                document.getElementById('invite-email').value = '';
-                loadInvitations();
-            } catch (err) {
-                showToast('Failed to create invitation');
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Create Invitation';
-            }
+          // Clear form and refresh
+          document.getElementById("invite-email").value = "";
+          loadInvitations();
+        } catch (err) {
+          showToast("Failed to create invitation");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Create Invitation";
         }
+      }
 
-        function copyInviteLink(url) {
-            navigator.clipboard.writeText(url).then(() => {
-                showToast('Invite link copied');
-            }).catch(() => {
-                showToast('Failed to copy');
-            });
+      function copyInviteLink(url) {
+        navigator.clipboard
+          .writeText(url)
+          .then(() => {
+            showToast("Invite link copied");
+          })
+          .catch(() => {
+            showToast("Failed to copy");
+          });
+      }
+
+      async function revokeInvitation(code) {
+        try {
+          const resp = await fetch(
+            `/api/admin/tenants/${tenantId}/invitations/${code}`,
+            {
+              method: "DELETE",
+              headers: getAuthHeaders(),
+            },
+          );
+          if (resp.ok) {
+            showToast("Invitation revoked");
+            loadInvitations();
+          } else {
+            showToast("Failed to revoke invitation");
+          }
+        } catch (err) {
+          showToast("Failed to revoke invitation");
         }
+      }
 
-        async function revokeInvitation(code) {
-            try {
-                const resp = await fetch(`/api/admin/tenants/${tenantId}/invitations/${code}`, {
-                    method: 'DELETE',
-                    headers: getAuthHeaders(),
-                });
-                if (resp.ok) {
-                    showToast('Invitation revoked');
-                    loadInvitations();
-                } else {
-                    showToast('Failed to revoke invitation');
-                }
-            } catch (err) {
-                showToast('Failed to revoke invitation');
-            }
-        }
+      // ==================== Collapsible sections ====================
+      function toggleSection(header) {
+        const body = header.nextElementSibling;
+        header.classList.toggle("collapsed");
+        body.classList.toggle("collapsed");
+      }
 
-        // ==================== Collapsible sections ====================
-        function toggleSection(header) {
-            const body = header.nextElementSibling;
-            header.classList.toggle('collapsed');
-            body.classList.toggle('collapsed');
-        }
+      // ==================== Utilities ====================
+      function showToast(message) {
+        const toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 2000);
+      }
 
-        // ==================== Utilities ====================
-        function showToast(message) {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.classList.add('show');
-            setTimeout(() => toast.classList.remove('show'), 2000);
-        }
+      function escapeHtml(str) {
+        const div = document.createElement("div");
+        div.textContent = str;
+        return div.innerHTML;
+      }
 
-        function escapeHtml(str) {
-            const div = document.createElement('div');
-            div.textContent = str;
-            return div.innerHTML;
-        }
-
-        // ==================== Init ====================
-        loadSettings();
+      // ==================== Init ====================
+      loadSettings();
     </script>
 
     <div id="session-expired-modal" class="session-expired-modal">
-        <div class="modal-inner">
-            <h3>Session Expired</h3>
-            <p>Your session has expired. Please sign in again.</p>
-            <button onclick="window.location.href='/login'">OK</button>
-        </div>
+      <div class="modal-inner">
+        <h3>Session Expired</h3>
+        <p>Your session has expired. Please sign in again.</p>
+        <button onclick="window.location.href = '/login'">OK</button>
+      </div>
     </div>
     <script src="/theme.js"></script>
-</body>
+  </body>
 </html>
