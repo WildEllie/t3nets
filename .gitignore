@@ -43,3 +43,5 @@ dashboard/build/
 # Logs
 *.log
 .envrc
+.claude/worktrees/
+.claude/launch.json
