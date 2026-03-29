@@ -779,6 +779,8 @@
             message: data.error,
             severity: data.severity || "info",
           });
+        } else if (data.audio) {
+          addAudioMessage(data.audio, data.text || "", roundtrip, data.route, data.model);
         } else {
           addMessage(
             data.text || "No response",
@@ -1040,6 +1042,9 @@
             addErrorMessage(
               data.error ? data : { message: data.message, severity: "config" },
             );
+          } else if (data.audio) {
+            const roundtrip = (Date.now() - sendTime) / 1000;
+            addAudioMessage(data.audio, data.text || "", roundtrip, data.route, data.model);
           } else {
             const roundtrip = (Date.now() - sendTime) / 1000;
             addMessage(
@@ -1163,6 +1168,50 @@
 
           div.appendChild(meta);
         }
+
+        chatContainer.appendChild(div);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+
+      function addAudioMessage(audio, captionText, roundtripSec, route, modelName) {
+        const div = document.createElement("div");
+        div.className = "message assistant";
+
+        // Caption text
+        if (captionText) {
+          const textEl = document.createElement("div");
+          textEl.className = "content";
+          textEl.innerHTML = window.marked
+            ? marked.parse(captionText)
+            : captionText;
+          div.appendChild(textEl);
+        }
+
+        // Audio player
+        try {
+          const fmt = audio.format || "wav";
+          const audioEl = document.createElement("audio");
+          audioEl.controls = true;
+          audioEl.style.width = "100%";
+          audioEl.style.marginTop = "8px";
+          audioEl.src = "data:audio/" + fmt + ";base64," + audio.audio_b64;
+          div.appendChild(audioEl);
+        } catch (e) {
+          const err = document.createElement("div");
+          err.className = "content";
+          err.textContent = "(Audio playback unavailable)";
+          div.appendChild(err);
+        }
+
+        // Metadata line
+        const meta = document.createElement("div");
+        meta.className = "message-meta";
+        const parts = [];
+        if (route) parts.push(route);
+        if (modelName) parts.push(modelName);
+        if (roundtripSec > 0) parts.push(roundtripSec.toFixed(1) + "s");
+        if (parts.length) meta.textContent = parts.join(" · ");
+        div.appendChild(meta);
 
         chatContainer.appendChild(div);
         chatContainer.scrollTop = chatContainer.scrollHeight;

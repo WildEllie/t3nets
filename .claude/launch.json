@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "router",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "adapters.local.dev_server"],
+      "port": 8080
+    },
+    {
+      "name": "onboard-dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "dashboard/onboard",
+      "port": 5173
+    }
+  ]
+}

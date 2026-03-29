@@ -15,14 +15,14 @@ Setup:
 
 import json
 import logging
-from typing import Any, Optional
-from urllib.request import urlopen, Request
+from typing import Any
+from urllib.request import Request, urlopen
 
 from agent.channels.base import ChannelAdapter
 from agent.channels.teams_auth import BotFrameworkAuth
 from agent.models.message import (
-    ChannelType,
     ChannelCapability,
+    ChannelType,
     InboundMessage,
     OutboundMessage,
 )
@@ -157,14 +157,32 @@ class TeamsAdapter(ChannelAdapter):
             logger.error("Failed to acquire bot token for response")
             return False
 
+        # Check for audio attachment
+        audio_attachment = next(
+            (a for a in message.attachments if a.get("type") == "audio"), None
+        )
+
         # Build the Activity response
         response_activity: dict[str, Any] = {
             "type": "message",
             "text": message.text,
         }
 
+        # Add audio attachment if present
+        if audio_attachment:
+            fmt = audio_attachment.get("format", "wav")
+            response_activity["attachments"] = [
+                {
+                    "contentType": f"audio/{fmt}",
+                    "contentUrl": (
+                        f"data:audio/{fmt};base64,"
+                        f"{audio_attachment.get('audio_b64', '')}"
+                    ),
+                    "name": f"response.{fmt}",
+                }
+            ]
         # Add rich content if available (Adaptive Cards)
-        if message.rich_content:
+        elif message.rich_content:
             response_activity["attachments"] = [
                 {
                     "contentType": "application/vnd.microsoft.card.adaptive",

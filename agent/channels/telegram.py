@@ -10,17 +10,17 @@ responses via the sendMessage API. Simplest channel to set up:
 Telegram Bot API docs: https://core.telegram.org/bots/api
 """
 
-import hashlib
+import base64
 import hmac
 import json
 import logging
 from typing import Any, cast
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
 from agent.channels.base import ChannelAdapter
 from agent.models.message import (
-    ChannelType,
     ChannelCapability,
+    ChannelType,
     InboundMessage,
     OutboundMessage,
 )
@@ -121,10 +121,18 @@ class TelegramAdapter(ChannelAdapter):
 
     async def send_response(self, message: OutboundMessage) -> bool:
         """
-        Send a response via Telegram sendMessage API.
+        Send a response via Telegram sendMessage or sendAudio API.
 
-        POST https://api.telegram.org/bot{token}/sendMessage
+        If the message contains an audio attachment, sends via sendAudio.
+        Otherwise sends text via sendMessage.
         """
+        # Check for audio attachment
+        audio_attachment = next(
+            (a for a in message.attachments if a.get("type") == "audio"), None
+        )
+        if audio_attachment:
+            return await self._send_audio(message, audio_attachment)
+
         payload = {
             "chat_id": message.conversation_id,
             "text": message.text,
@@ -197,6 +205,63 @@ class TelegramAdapter(ChannelAdapter):
             logger.error(
                 f"Plain send also failed: {e}" + (f" — {error_detail}" if error_detail else "")
             )
+            return False
+
+    async def _send_audio(self, message: OutboundMessage, audio: dict[str, Any]) -> bool:
+        """Send audio via Telegram sendAudio API (multipart/form-data)."""
+        try:
+            audio_bytes = base64.b64decode(audio["audio_b64"])
+        except Exception as e:
+            logger.error(f"Failed to decode audio base64: {e}")
+            # Fallback to text-only
+            return await self._send_plain(message)
+
+        fmt = audio.get("format", "wav")
+        boundary = "----T3netsBoundary"
+        body_parts: list[bytes] = []
+
+        # chat_id field
+        body_parts.append(f"--{boundary}\r\n".encode())
+        body_parts.append(b'Content-Disposition: form-data; name="chat_id"\r\n\r\n')
+        body_parts.append(f"{message.conversation_id}\r\n".encode())
+
+        # audio file field
+        body_parts.append(f"--{boundary}\r\n".encode())
+        body_parts.append(
+            f'Content-Disposition: form-data; name="audio"; filename="response.{fmt}"\r\n'
+            .encode()
+        )
+        body_parts.append(f"Content-Type: audio/{fmt}\r\n\r\n".encode())
+        body_parts.append(audio_bytes)
+        body_parts.append(b"\r\n")
+
+        # caption field (optional)
+        if message.text:
+            caption = message.text[:1024]  # Telegram caption limit
+            body_parts.append(f"--{boundary}\r\n".encode())
+            body_parts.append(b'Content-Disposition: form-data; name="caption"\r\n\r\n')
+            body_parts.append(f"{caption}\r\n".encode())
+
+        body_parts.append(f"--{boundary}--\r\n".encode())
+        body_data = b"".join(body_parts)
+
+        try:
+            req = Request(
+                f"{self._api_base}/sendAudio",
+                data=body_data,
+                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                method="POST",
+            )
+            with urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode())
+                if result.get("ok"):
+                    logger.info(f"Sent Telegram audio to chat {message.conversation_id}")
+                    return True
+                else:
+                    logger.error(f"Telegram sendAudio error: {result.get('description')}")
+                    return False
+        except Exception as e:
+            logger.error(f"Failed to send Telegram audio: {e}")
             return False
 
     def validate_webhook(self, headers: dict[str, Any], body: bytes) -> bool:

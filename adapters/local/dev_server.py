@@ -24,6 +24,7 @@ import logging
 import os
 import sys
 import time
+import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,7 +44,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from adapters.local.anthropic_provider import AnthropicProvider
 from adapters.local.direct_bus import DirectBus
 from adapters.local.env_secrets import EnvSecretsProvider
-from adapters.local.file_store import FileStore
+from adapters.local.file_blob_store import FileStore
+from adapters.local.local_pending_store import LocalPendingStore
 from adapters.local.sqlite_rule_store import SQLiteRuleStore
 from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
@@ -94,6 +96,7 @@ training_store: SQLiteTrainingStore
 error_handler: ErrorHandler
 practices: PracticeRegistry
 blobs: FileStore
+pending_store: LocalPendingStore
 started_at: float = 0.0
 
 # Per-tenant compiled rule engines (keyed by tenant_id)
@@ -1958,7 +1961,61 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
 
 
 # ---------------------------------------------------------------------------
-# Clinical API handlers
+# Callback endpoint for async external services
+# ---------------------------------------------------------------------------
+
+
+async def handle_callback(request: Request) -> Response:
+    """POST /api/callback/{request_id} — external service delivers async result."""
+    request_id = request.path_params["request_id"]
+
+    # Validate UUID4 format
+    try:
+        uuid.UUID(request_id, version=4)
+    except ValueError:
+        return JSONResponse({"error": "Invalid request_id format"}, status_code=400)
+
+    # Look up the pending request
+    pending = pending_store.get(request_id)
+    if not pending:
+        return JSONResponse({"error": "Request not found or expired"}, status_code=404)
+
+    if pending["status"] == "completed":
+        return JSONResponse({"error": "Already completed"}, status_code=409)
+
+    # Parse the callback payload
+    body = await request.json()
+
+    # Mark completed
+    pending_store.mark_completed(request_id)
+
+    # Build SSE event payload
+    event_data: dict[str, Any] = {
+        "request_id": request_id,
+        "text": body.get("text", ""),
+        "raw": False,
+        "skill": pending.get("skill_name", ""),
+        "route": "callback",
+    }
+
+    # Include audio payload if present
+    if body.get("audio_b64"):
+        event_data["audio"] = {
+            "audio_b64": body["audio_b64"],
+            "format": body.get("format", "wav"),
+        }
+
+    # Deliver result via SSE
+    user_key = pending.get("user_key", "")
+    if user_key:
+        sse_manager.send_event(user_key, "message", event_data)
+
+    logger.info(f"Callback delivered for request {request_id[:8]}")
+    return JSONResponse({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Practice & Blob API handlers
 # ---------------------------------------------------------------------------
 
 
@@ -1979,7 +2036,7 @@ async def handle_skill_invoke(request: Request) -> Response:
                 pass
 
         # Build context with tenant and blob store
-        ctx = {"blob_store": blobs, "tenant_id": DEFAULT_TENANT}
+        ctx: dict[str, Any] = {"blob_store": blobs, "tenant_id": DEFAULT_TENANT}
         sig = inspect.signature(worker_fn)
         if len(sig.parameters) >= 3:
             result = worker_fn(body, skill_secrets, ctx)
@@ -2033,7 +2090,9 @@ async def handle_practices_upload(request: Request) -> Response:
     try:
         body = await request.body()
         data_dir = Path("data")
-        practice = practices.install_zip(body, data_dir)
+        practice = await practices.install_zip(
+            body, data_dir, blob_store=blobs, tenant_id=DEFAULT_TENANT
+        )
         # Register the new practice's skills
         practices.register_skills(skills)
         return JSONResponse(
@@ -2070,6 +2129,8 @@ async def handle_blob_read(request: Request) -> Response:
         ct = "application/octet-stream"
         if key.endswith(".json"):
             ct = "application/json"
+        elif key.endswith(".wav"):
+            ct = "audio/wav"
         elif key.endswith(".webm"):
             ct = "audio/webm"
         elif key.endswith(".html"):
@@ -2122,6 +2183,8 @@ routes = [
     Route("/api/platform/tenants", handle_platform_list_tenants, methods=["GET"]),
     Route("/api/platform/tenants", handle_platform_create_tenant, methods=["POST"]),
     Route("/api/platform/tenants/{rest:path}", handle_platform_tenant_detail),
+    # Callback endpoint for async external services
+    Route("/api/callback/{request_id}", handle_callback, methods=["POST"]),
     # Practice routes
     Route("/api/skill/{name}", handle_skill_invoke, methods=["POST"]),
     Route("/api/practices", handle_practices_list, methods=["GET"]),
@@ -2172,6 +2235,7 @@ async def init() -> None:
         error_handler, \
         practices, \
         blobs, \
+        pending_store, \
         started_at
 
     started_at = time.time()
@@ -2198,6 +2262,7 @@ async def init() -> None:
     memory = SQLiteConversationStore("data/t3nets.db")
     tenants = SQLiteTenantStore("data/t3nets.db")
     blobs = FileStore("data/blobs")
+    pending_store = LocalPendingStore()
 
     # Load skills — base skills (ping) from agent/skills/
     skills = SkillRegistry()

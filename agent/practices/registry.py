@@ -6,6 +6,8 @@ directories, registers their skills with the SkillRegistry, and
 provides page resolution for the dev server.
 """
 
+import asyncio
+import importlib.util
 import logging
 import zipfile
 from io import BytesIO
@@ -14,6 +16,7 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]
 
+from agent.interfaces.blob_store import BlobStore
 from agent.models.practice import PracticeDefinition, PracticePage
 from agent.skills.registry import SkillRegistry
 
@@ -67,9 +70,16 @@ class PracticeRegistry:
                 self._practices[practice.name] = practice
                 logger.info(f"Loaded uploaded practice: {practice.name}")
 
-    def install_zip(self, zip_bytes: bytes, data_dir: Path) -> PracticeDefinition:
+    async def install_zip(
+        self,
+        zip_bytes: bytes,
+        data_dir: Path,
+        blob_store: BlobStore | None = None,
+        tenant_id: str = "",
+    ) -> PracticeDefinition:
         """
         Validate and extract a practice ZIP to the data directory.
+        Optionally uploads assets to BlobStore and runs install hooks.
         Returns the installed PracticeDefinition.
 
         Raises ValueError if validation fails.
@@ -94,8 +104,8 @@ class PracticeRegistry:
         # Parse manifest
         manifest_data = yaml.safe_load(zf.read(manifest_path))
         name = manifest_data.get("name", "")
-        if not name or not name.isidentifier():
-            raise ValueError(f"Practice name must be a valid identifier, got: '{name}'")
+        if not name or not name.replace("-", "_").replace("_", "").isalnum():
+            raise ValueError(f"Practice name must be alphanumeric (with - or _), got: '{name}'")
 
         # Validate skills
         for skill_name in manifest_data.get("skills", []):
@@ -125,7 +135,7 @@ class PracticeRegistry:
             if member.endswith("/"):
                 continue  # skip directories
             # Strip prefix if present
-            relative = member[len(prefix) :] if prefix and member.startswith(prefix) else member
+            relative = member[len(prefix):] if prefix and member.startswith(prefix) else member
             target = dest / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(zf.read(member))
@@ -136,6 +146,21 @@ class PracticeRegistry:
         practice = self._load_manifest(dest / "practice.yaml", built_in=False)
         if not practice:
             raise ValueError("Failed to load installed practice manifest")
+
+        # Upload assets to BlobStore
+        if blob_store and tenant_id and practice.assets:
+            for asset in practice.assets:
+                asset_path = dest / "assets" / asset
+                if asset_path.exists():
+                    blob_key = f"practices/{practice.name}/assets/{asset}"
+                    await blob_store.put(tenant_id, blob_key, asset_path.read_bytes())
+                    logger.info(f"Uploaded practice asset: {blob_key}")
+
+        # Run install hooks
+        if practice.hooks.get("on_install"):
+            await self._run_install_hook(
+                practice, dest, blob_store=blob_store, tenant_id=tenant_id
+            )
 
         self._practices[practice.name] = practice
         logger.info(f"Installed practice: {practice.name} v{practice.version}")
@@ -260,6 +285,8 @@ class PracticeRegistry:
                 integrations=data.get("integrations", []),
                 skills=data.get("skills", []),
                 pages=pages,
+                assets=data.get("assets", []),
+                hooks=data.get("hooks", {}),
                 system_prompt_addon=data.get("system_prompt_addon", ""),
                 built_in=built_in,
                 base_path=str(manifest_path.parent),
@@ -274,7 +301,7 @@ class PracticeRegistry:
         practice: PracticeDefinition,
         skill_registry: SkillRegistry,
     ) -> None:
-        """Load skills from an uploaded practice using worker_path."""
+        """Load skills from a practice using worker_path."""
         from agent.skills.registry import SkillDefinition
 
         for skill_path in sorted(skills_dir.iterdir()):
@@ -300,7 +327,45 @@ class PracticeRegistry:
                 worker_path=str(worker_file.resolve()),
             )
             skill_registry.register(skill)
-            logger.info(f"Registered uploaded skill: {skill.name} (practice: {practice.name})")
+            logger.info(f"Registered practice skill: {skill.name} (practice: {practice.name})")
+
+    async def _run_install_hook(
+        self,
+        practice: PracticeDefinition,
+        practice_dir: Path,
+        blob_store: BlobStore | None = None,
+        tenant_id: str = "",
+    ) -> None:
+        """Run the on_install hook for a practice."""
+        hook_file = practice.hooks.get("on_install", "")
+        if not hook_file:
+            return
+
+        hook_path = practice_dir / hook_file
+        if not hook_path.exists():
+            logger.warning(f"Install hook not found: {hook_path}")
+            return
+
+        try:
+            spec = importlib.util.spec_from_file_location("install_hook", str(hook_path))
+            if spec is None or spec.loader is None:
+                logger.error(f"Cannot load install hook: {hook_path}")
+                return
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+
+            if hasattr(module, "on_install"):
+                ctx = {
+                    "blob_store": blob_store,
+                    "tenant_id": tenant_id,
+                    "practice_dir": str(practice_dir),
+                }
+                result = module.on_install(ctx)
+                if asyncio.iscoroutine(result):
+                    await result
+                logger.info(f"Ran install hook for practice: {practice.name}")
+        except Exception as e:
+            logger.error(f"Install hook failed for {practice.name}: {e}")
 
     def _find_manifest_in_zip(self, zf: zipfile.ZipFile) -> str | None:
         """Find practice.yaml in a ZIP — at root or one level deep."""

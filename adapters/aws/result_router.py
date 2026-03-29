@@ -127,8 +127,28 @@ class AsyncResultRouter:
             logger.warning(f"AsyncResultRouter: no user_key for dashboard result {request_id[:8]}")
             return
 
+        # For audio results, skip AI formatting and send directly
+        is_audio = result.get("type") == "audio"
+        if is_audio:
+            delivered = self.sse.send_event(
+                user_key,
+                "message",
+                {
+                    "request_id": request_id,
+                    "text": result.get("text", ""),
+                    "audio": {
+                        "audio_b64": result.get("audio_b64", ""),
+                        "format": result.get("format", "wav"),
+                    },
+                    "raw": False,
+                    "skill": skill_name,
+                    "route": route_type,
+                    "tokens": 0,
+                    "model": "",
+                },
+            )
         # For raw mode, send the result directly
-        if is_raw:
+        elif is_raw:
             delivered = self.sse.send_event(
                 user_key,
                 "message",
@@ -240,17 +260,31 @@ class AsyncResultRouter:
             adapter = TeamsAdapter(app_id, app_secret)
             adapter._service_urls[pending_req.reply_target] = service_url
 
-            # Format result
+            # Check for audio result — skip AI formatting
+            is_audio = result.get("type") == "audio"
             is_raw = pending_req.is_raw
-            if is_raw:
+
+            if is_audio:
+                formatted_text = result.get("text", "")
+                fmt_tokens, fmt_model = 0, ""
+                attachments = [
+                    {
+                        "type": "audio",
+                        "audio_b64": result.get("audio_b64", ""),
+                        "format": result.get("format", "wav"),
+                    }
+                ]
+            elif is_raw:
                 formatted_text = json.dumps(result, indent=2)
                 fmt_tokens, fmt_model = 0, ""
+                attachments = []
             else:
                 formatted_text, fmt_tokens, fmt_model = self._format_result(
                     result,
                     skill_name,
                     pending_req,
                 )
+                attachments = []
 
             # Send response
             outbound = OutboundMessage(
@@ -258,6 +292,7 @@ class AsyncResultRouter:
                 conversation_id=pending_req.reply_target,
                 recipient_id="",
                 text=formatted_text,
+                attachments=attachments,
             )
             _run_async(adapter.send_response(outbound))
 
@@ -325,17 +360,31 @@ class AsyncResultRouter:
 
             adapter = TelegramAdapter(bot_token)
 
-            # Format result
+            # Check for audio result — skip AI formatting
+            is_audio = result.get("type") == "audio"
             is_raw = pending_req.is_raw
-            if is_raw:
+
+            if is_audio:
+                formatted_text = result.get("text", "")
+                fmt_tokens, fmt_model = 0, ""
+                attachments = [
+                    {
+                        "type": "audio",
+                        "audio_b64": result.get("audio_b64", ""),
+                        "format": result.get("format", "wav"),
+                    }
+                ]
+            elif is_raw:
                 formatted_text = json.dumps(result, indent=2)
                 fmt_tokens, fmt_model = 0, ""
+                attachments = []
             else:
                 formatted_text, fmt_tokens, fmt_model = self._format_result(
                     result,
                     skill_name,
                     pending_req,
                 )
+                attachments = []
 
             # Truncate for Telegram's 4096 char limit
             if len(formatted_text) > 4096:
@@ -347,6 +396,7 @@ class AsyncResultRouter:
                 conversation_id=pending_req.reply_target,
                 recipient_id="",
                 text=formatted_text,
+                attachments=attachments,
             )
             sent = _run_async(adapter.send_response(outbound))
             if not sent:

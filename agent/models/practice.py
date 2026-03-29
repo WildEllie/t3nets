@@ -34,6 +34,8 @@ class PracticeDefinition:
     integrations: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     pages: list[PracticePage] = field(default_factory=list)
+    assets: list[str] = field(default_factory=list)  # files in assets/ directory
+    hooks: dict[str, str] = field(default_factory=dict)  # e.g. {"on_install": "hooks/setup.py"}
     system_prompt_addon: str = ""
     built_in: bool = False  # True for practices in the codebase
     base_path: str = ""  # Filesystem path for resolving pages/skills
