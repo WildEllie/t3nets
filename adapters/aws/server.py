@@ -38,6 +38,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import inspect
+
 from adapters.aws.admin_api import AdminAPI
 from adapters.aws.auth_middleware import AuthError, extract_auth
 from adapters.aws.bedrock_provider import BedrockProvider
@@ -77,6 +79,7 @@ from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, 
 from agent.router.models import TrainingExample
 from agent.router.rule_engine_builder import RuleEngineBuilder
 from agent.router.rule_router import RuleBasedRouter
+from agent.practices.registry import PracticeRegistry
 from agent.skills.registry import SkillRegistry
 from agent.sse import SSEConnectionManager
 
@@ -97,6 +100,8 @@ event_bus: EventBridgeBus | None = None
 pending_store: PendingRequestsStore | None = None
 sqs_poller: SQSResultPoller | None = None
 result_router: AsyncResultRouter | None = None
+practices: PracticeRegistry
+blobs: Any  # S3BlobStore or None
 rule_store: DynamoDBRuleStore
 training_store: DynamoDBTrainingStore
 admin_api: AdminAPI
@@ -2150,6 +2155,130 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
 
 
 # ---------------------------------------------------------------------------
+# Practice endpoints
+# ---------------------------------------------------------------------------
+
+
+async def handle_skill_invoke(request: Request) -> Response:
+    """POST /api/skill/{name} — invoke a skill synchronously from practice pages."""
+    skill_name = request.path_params["name"]
+    try:
+        body = await request.json()
+        worker_fn = skills.get_worker(skill_name)
+
+        skill = skills.get_skill(skill_name)
+        skill_secrets: dict[str, Any] = {}
+        if skill and skill.requires_integration:
+            tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
+            try:
+                skill_secrets = await secrets.get(tenant_id, skill.requires_integration)
+            except Exception:
+                pass
+
+        tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
+        ctx: dict[str, Any] = {"blob_store": blobs, "tenant_id": tenant_id}
+        sig = inspect.signature(worker_fn)
+        if len(sig.parameters) >= 3:
+            result = worker_fn(body, skill_secrets, ctx)
+        else:
+            result = worker_fn(body, skill_secrets)
+
+        if asyncio.iscoroutine(result):
+            result = await result
+
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Skill invoke failed ({skill_name}): {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_practices_list(request: Request) -> Response:
+    """GET /api/practices — list all installed practices."""
+    result = []
+    for p in practices.list_all():
+        result.append(
+            {
+                "name": p.name,
+                "display_name": p.display_name,
+                "description": p.description,
+                "version": p.version,
+                "icon": p.icon,
+                "built_in": p.built_in,
+                "skills": p.skills,
+                "pages": [
+                    {"slug": pg.slug, "title": pg.title, "nav_label": pg.nav_label}
+                    for pg in p.pages
+                ],
+            }
+        )
+    return JSONResponse(result)
+
+
+async def handle_practices_upload(request: Request) -> Response:
+    """POST /api/practices/upload — upload and install a practice ZIP."""
+    try:
+        body = await request.body()
+        data_dir = Path("data")
+        tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
+        practice = await practices.install_zip(
+            body, data_dir, blob_store=blobs, tenant_id=tenant_id
+        )
+        practices.register_skills(skills)
+        return JSONResponse(
+            {
+                "ok": True,
+                "name": practice.name,
+                "version": practice.version,
+                "skills": practice.skills,
+            }
+        )
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"Practice upload failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_practices_pages(request: Request) -> Response:
+    """GET /api/practices/pages — pages available to current tenant."""
+    try:
+        tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
+        tenant = await tenants.get_tenant(tenant_id)
+        pages = practices.get_pages_for_tenant(tenant)
+        return JSONResponse(pages)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def practice_page(request: Request) -> Response:
+    """Serve a practice page at /p/{practice}/{page}."""
+    practice_name = request.path_params["practice"]
+    page_slug = request.path_params["page"]
+    page_path = practices.get_page_path(practice_name, page_slug)
+    if page_path and page_path.exists():
+        return FileResponse(str(page_path), media_type="text/html")
+    return Response(status_code=404, content="Practice page not found")
+
+
+async def handle_callback(request: Request) -> Response:
+    """POST /api/callback/{request_id} — external service delivers async result."""
+    request_id = request.path_params["request_id"]
+    if not pending_store:
+        return JSONResponse({"error": "Async skills not enabled"}, status_code=501)
+
+    pending = await pending_store.get(request_id)
+    if not pending:
+        return JSONResponse({"error": "Request not found or expired"}, status_code=404)
+
+    try:
+        body = await request.json()
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        logger.error(f"Callback failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
 # Starlette app
 # ---------------------------------------------------------------------------
 
@@ -2192,6 +2321,13 @@ routes = [
         handle_telegram_webhook,
         methods=["POST"],
     ),
+    # Practices
+    Route("/api/skill/{name}", handle_skill_invoke, methods=["POST"]),
+    Route("/api/practices", handle_practices_list),
+    Route("/api/practices/pages", handle_practices_pages),
+    Route("/api/practices/upload", handle_practices_upload, methods=["POST"]),
+    Route("/api/callback/{request_id}", handle_callback, methods=["POST"]),
+    Route("/p/{practice}/{page}", practice_page),
     # Admin and Platform (delegated to API objects via thread pool)
     Route("/api/admin/rules/{rest:path}", handle_rules_admin, methods=["GET", "POST"]),
     Route(
@@ -2225,7 +2361,7 @@ app = Starlette(routes=routes, middleware=middleware)
 async def init() -> None:
     global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
     global sqs_poller, result_router, rule_store, training_store, admin_api, platform_api
-    global error_handler, started_at, _fallback_router
+    global error_handler, started_at, _fallback_router, practices, blobs
 
     started_at = time.time()
 
@@ -2263,6 +2399,28 @@ async def init() -> None:
     skills_dir = Path(__file__).parent.parent.parent / "agent" / "skills"
     skills_obj.load_from_directory(skills_dir)
     skills = skills_obj
+
+    # Practices + BlobStore
+    try:
+        from adapters.aws.s3_blob_store import S3BlobStore
+
+        s3_bucket = os.getenv("S3_BUCKET_NAME", "t3nets-dev-static")
+        blobs = S3BlobStore(bucket=s3_bucket, region=region)
+        logger.info(f"S3 BlobStore: {s3_bucket}")
+    except Exception as e:
+        logger.warning(f"S3BlobStore init failed ({e}), blobs disabled")
+        blobs = None
+
+    practices_obj = PracticeRegistry()
+    practices_dir = Path(__file__).parent.parent.parent / "agent" / "practices"
+    practices_obj.load_builtin(practices_dir)
+    # Load uploaded practices from data dir
+    data_dir = Path("data")
+    if data_dir.exists():
+        practices_obj.load_uploaded(data_dir)
+    practices_obj.register_skills(skills)
+    practices = practices_obj
+    logger.info(f"Loaded practices: {[p.name for p in practices.list_all()]}")
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
     _fallback_router = RuleBasedRouter(skills)
