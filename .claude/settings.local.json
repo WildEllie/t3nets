@@ -18,8 +18,19 @@
       "Bash(grep -nE '#[0-9a-fA-F]{3,6}' /Users/ellieportugali/projects/t3nets/adapters/local/chat.html)",
       "Bash(npx prettier:*)",
       "Bash(grep '\\\\.py$')",
-      "Bash(git checkout:*)",
-      "Bash(git rebase:*)"
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(find /Users/ellieportugali/projects/t3nets/adapters -name *blob* -o -name *store*)",
+      "Bash(find /Users/ellieportugali/projects/t3nets -name SSE* -o -name *sse*)",
+      "Bash(find /Users/ellieportugali/projects/t3nets -name practice.py -o -name *practice* -type f)",
+      "Bash(WT=/Users/ellieportugali/projects/t3nets/.claude/worktrees/sad-kalam)",
+      "Bash(MAIN=/Users/ellieportugali/projects/t3nets)",
+      "Bash(cp \"$WT/agent/practices/dev-jira/practice.yaml\" \"$MAIN/agent/practices/dev-jira/practice.yaml\")",
+      "Bash(cp \"$WT/agent/practices/dev-jira/skills/sprint_status/skill.yaml\" \"$MAIN/agent/practices/dev-jira/skills/sprint_status/skill.yaml\")",
+      "Bash(cp \"$WT/agent/practices/dev-jira/skills/sprint_status/worker.py\" \"$MAIN/agent/practices/dev-jira/skills/sprint_status/worker.py\")",
+      "Bash(python -c \"from agent.models.practice import PracticeDefinition, PracticePage; from agent.practices.registry import PracticeRegistry; from adapters.local.file_blob_store import FileStore; print\\(''All imports OK''\\)\")",
+      "Bash(pip3 install:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(python -c \"from agent.models.practice import PracticeDefinition; from agent.practices.registry import PracticeRegistry; from adapters.local.file_blob_store import FileStore; print\\(''All imports OK''\\)\")"
     ]
   }
 }

@@ -275,6 +275,8 @@ if [ -n "${S3_BUCKET}" ]; then
         --exclude "*" \
         --include "*.html" \
         --include "*.png" \
+        --include "*.css" \
+        --include "*.js" \
         --delete \
         --region "${REGION}"
     echo ""
