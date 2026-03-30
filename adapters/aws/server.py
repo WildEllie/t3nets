@@ -2420,7 +2420,7 @@ async def init() -> None:
         from adapters.aws.s3_blob_store import S3BlobStore
 
         s3_bucket = os.getenv("S3_BUCKET_NAME", "t3nets-dev-static")
-        blobs = S3BlobStore(bucket=s3_bucket, region=region)
+        blobs = S3BlobStore(bucket_name=s3_bucket, region=region)
         logger.info(f"S3 BlobStore: {s3_bucket}")
     except Exception as e:
         logger.warning(f"S3BlobStore init failed ({e}), blobs disabled")
