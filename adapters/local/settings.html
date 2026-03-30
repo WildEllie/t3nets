@@ -2209,12 +2209,12 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
 
       async function loadPractices() {
         try {
-          const resp = await fetch("/api/practices", { headers: getHeaders() });
+          const resp = await fetch("/api/practices", { headers: getAuthHeaders() });
           if (!resp.ok) throw new Error("Failed to load practices");
           const practices = await resp.json();
 
           // Also load current settings to know which practice is active
-          const sResp = await fetch("/api/settings", { headers: getHeaders() });
+          const sResp = await fetch("/api/settings", { headers: getAuthHeaders() });
           if (sResp.ok) {
             const s = await sResp.json();
             currentPrimaryPractice = s.primary_practice || "";
