@@ -110,6 +110,39 @@ INTEGRATION_SCHEMAS: dict[str, Any] = {
             },
         ],
     },
+    "voiceher": {
+        "label": "VoiceHer",
+        "fields": [
+            {
+                "key": "chatterbox_url",
+                "label": "Chatterbox Service URL",
+                "type": "url",
+                "required": True,
+                "placeholder": "http://44.202.23.198:8080",
+            },
+            {
+                "key": "chatterbox_api_token",
+                "label": "Chatterbox API Token",
+                "type": "password",
+                "required": True,
+                "placeholder": "Your Chatterbox service token",
+            },
+            {
+                "key": "anthropic_api_key",
+                "label": "Anthropic API Key",
+                "type": "password",
+                "required": True,
+                "placeholder": "sk-ant-...",
+            },
+            {
+                "key": "claude_model",
+                "label": "Claude Model",
+                "type": "text",
+                "required": False,
+                "placeholder": "claude-sonnet-4-20250514",
+            },
+        ],
+    },
 }
 
 
