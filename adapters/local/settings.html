@@ -1576,6 +1576,7 @@
       function renderIntegrationForm(pane, data, integrationName) {
         const fields = data.fields || [];
         const config = data.config || {};
+        const paneId = pane.id; // e.g. "config-voice_say"
 
         let fieldsHtml = "";
         for (const field of fields) {
@@ -1585,7 +1586,7 @@
           fieldsHtml += `
                     <div class="field-group">
                         <label>${field.label}${field.required ? " *" : ""}</label>
-                        <input type="${inputType}" data-key="${field.key}"
+                        <input type="${inputType}" data-key="${field.key}" data-integration="${integrationName}"
                                value="${value === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" ? "" : escapeHtml(value)}"
                                placeholder="${escapeHtml(field.placeholder || "")}"${required}>
                     </div>
@@ -1595,9 +1596,9 @@
         pane.innerHTML = `
                 ${fieldsHtml}
                 <div class="integration-actions">
-                    <button class="btn-test" onclick="testIntegration('${integrationName}', this)">Test Connection</button>
-                    <button class="btn-save" onclick="saveIntegration('${integrationName}', this)">Save</button>
-                    <span class="integration-status" id="status-${integrationName}"></span>
+                    <button class="btn-test" onclick="testIntegrationInPane('${integrationName}', '${paneId}', this)">Test Connection</button>
+                    <button class="btn-save" onclick="saveIntegrationInPane('${integrationName}', '${paneId}', this)">Save</button>
+                    <span class="integration-status" id="status-${paneId}"></span>
                 </div>
             `;
       }
@@ -1678,6 +1679,65 @@
             statusEl.textContent = "Saved";
             statusEl.className = "integration-status ok";
             // Refresh settings to update connected status
+            loadSettings();
+          } else {
+            const err = await resp.json();
+            showToast(err.error || "Failed to save");
+          }
+        } catch (err) {
+          showToast("Failed to save credentials");
+        }
+      }
+
+      // Pane-scoped versions (fix for multiple skills sharing same integration)
+      function getFormDataFromPane(paneId) {
+        const pane = document.getElementById(paneId);
+        if (!pane) return {};
+        const data = {};
+        pane.querySelectorAll("input[data-key]").forEach(function(input) {
+          data[input.dataset.key] = input.value;
+        });
+        return data;
+      }
+
+      async function testIntegrationInPane(integrationName, paneId, btn) {
+        const formData = getFormDataFromPane(paneId);
+        const statusEl = document.getElementById("status-" + paneId);
+        if (!statusEl) return;
+        statusEl.textContent = "Testing...";
+        statusEl.className = "integration-status";
+        try {
+          const resp = await fetch(`/api/integrations/${integrationName}/test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify(formData),
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            statusEl.textContent = result.display_name ? `Connected as ${result.display_name}` : "Connection successful";
+            statusEl.className = "integration-status ok";
+          } else {
+            statusEl.textContent = result.error || "Connection failed";
+            statusEl.className = "integration-status error";
+          }
+        } catch (err) {
+          statusEl.textContent = "Connection failed";
+          statusEl.className = "integration-status error";
+        }
+      }
+
+      async function saveIntegrationInPane(integrationName, paneId, btn) {
+        const formData = getFormDataFromPane(paneId);
+        const statusEl = document.getElementById("status-" + paneId);
+        try {
+          const resp = await fetch(`/api/integrations/${integrationName}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify(formData),
+          });
+          if (resp.ok) {
+            showToast(`${integrationName} credentials saved`);
+            if (statusEl) { statusEl.textContent = "Saved"; statusEl.className = "integration-status ok"; }
             loadSettings();
           } else {
             const err = await resp.json();
