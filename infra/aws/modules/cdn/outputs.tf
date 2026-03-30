@@ -12,3 +12,8 @@ output "s3_bucket_name" {
   description = "S3 bucket name for static HTML files"
   value       = aws_s3_bucket.static.id
 }
+
+output "s3_bucket_arn" {
+  description = "S3 bucket ARN for IAM policies"
+  value       = aws_s3_bucket.static.arn
+}

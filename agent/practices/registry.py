@@ -71,41 +71,36 @@ class PracticeRegistry:
                 logger.info(f"Loaded uploaded practice: {practice.name}")
 
     async def restore_from_blob_store(
-        self, blob_store: BlobStore, tenant_id: str, data_dir: Path
+        self,
+        blob_store: BlobStore,
+        tenant_id: str,
+        data_dir: Path,
+        installed_versions: dict[str, str] | None = None,
     ) -> int:
         """Download and extract uploaded practices from BlobStore on startup.
 
-        Pulls practice ZIPs stored during previous uploads and extracts them
-        to data/practices/ so load_uploaded() can find them.
-        Skips practices that already exist locally (built-in or previously restored).
+        Uses installed_versions (from DynamoDB tenant settings) to know which
+        practices to restore. Only downloads ZIPs for practices that aren't
+        already extracted locally.
 
         Returns count of restored practices.
         """
-        restored = 0
-        try:
-            keys = await blob_store.list_keys(tenant_id, prefix="practices/")
-        except Exception as e:
-            logger.warning(f"Cannot list practice ZIPs from BlobStore: {e}")
+        if not installed_versions:
             return 0
 
-        zip_keys = [k for k in keys if k.endswith("/practice.zip")]
-        for zip_key in zip_keys:
-            # Extract practice name from key: practices/{name}/practice.zip
-            parts = zip_key.split("/")
-            if len(parts) < 3:
-                continue
-            name = parts[1]
-
+        restored = 0
+        for name, version in installed_versions.items():
             dest = data_dir / "practices" / name
             if dest.exists():
-                continue  # Already exists (built-in or previous restore in this session)
+                continue  # Already extracted (built-in or previous restore)
 
+            zip_key = f"practices/{name}/practice.zip"
             try:
                 zip_bytes = await blob_store.get(tenant_id, zip_key)
-                # Install without blob_store to avoid re-uploading (would be circular)
+                # Install without blob_store/versions to avoid re-uploading or re-checking
                 await self.install_zip(zip_bytes, data_dir)
                 restored += 1
-                logger.info(f"Restored practice from BlobStore: {name}")
+                logger.info(f"Restored practice from S3: {name} v{version}")
             except Exception as e:
                 logger.warning(f"Failed to restore practice {name}: {e}")
 
@@ -117,12 +112,20 @@ class PracticeRegistry:
         data_dir: Path,
         blob_store: BlobStore | None = None,
         tenant_id: str = "",
+        installed_versions: dict[str, str] | None = None,
     ) -> PracticeDefinition:
         """
         Validate and extract a practice ZIP to the data directory.
         Optionally uploads assets to BlobStore and runs install hooks.
-        Returns the installed PracticeDefinition.
 
+        Args:
+            installed_versions: dict of {name: version} from tenant settings.
+                If provided, enforces version checks:
+                - Same version as installed → ValueError (duplicate)
+                - Lower version → ValueError (downgrade not allowed)
+                - Higher version → upgrade proceeds
+
+        Returns the installed PracticeDefinition.
         Raises ValueError if validation fails.
         """
         buf = BytesIO(zip_bytes)
@@ -147,6 +150,22 @@ class PracticeRegistry:
         name = manifest_data.get("name", "")
         if not name or not name.replace("-", "_").replace("_", "").isalnum():
             raise ValueError(f"Practice name must be alphanumeric (with - or _), got: '{name}'")
+
+        # Version check against installed_versions (from DynamoDB tenant settings)
+        new_version = manifest_data.get("version", "0.0.0")
+        if installed_versions and name in installed_versions:
+            cur_version = installed_versions[name]
+            new_v = self._parse_version(new_version)
+            cur_v = self._parse_version(cur_version)
+            if new_v == cur_v:
+                raise ValueError(
+                    f"Practice '{name}' v{new_version} is already installed"
+                )
+            if new_v < cur_v:
+                raise ValueError(
+                    f"Downgrade not allowed: '{name}' v{new_version} < installed v{cur_version}"
+                )
+            logger.info(f"Upgrading practice '{name}': v{cur_version} → v{new_version}")
 
         # Validate skills
         for skill_name in manifest_data.get("skills", []):
@@ -299,6 +318,14 @@ class PracticeRegistry:
             if not skills_dir.exists():
                 continue
             self._load_practice_skills(skills_dir, practice, skill_registry)
+
+    @staticmethod
+    def _parse_version(version: str) -> tuple[int, ...]:
+        """Parse a version string like '1.2.3' into a comparable tuple."""
+        try:
+            return tuple(int(x) for x in version.split("."))
+        except (ValueError, AttributeError):
+            return (0, 0, 0)
 
     # --- Private helpers ---
 

@@ -2235,10 +2235,21 @@ async def handle_practices_upload(request: Request) -> Response:
         body = await request.body()
         data_dir = Path("data")
         tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
+
+        # Get installed versions from tenant settings for version check
+        tenant = await tenants.get_tenant(tenant_id)
+        installed_versions = tenant.settings.installed_practices
+
         practice = await practices.install_zip(
-            body, data_dir, blob_store=blobs, tenant_id=tenant_id
+            body, data_dir, blob_store=blobs, tenant_id=tenant_id,
+            installed_versions=installed_versions,
         )
         practices.register_skills(skills)
+
+        # Persist version to DynamoDB
+        tenant.settings.installed_practices[practice.name] = practice.version
+        await tenants.update_tenant(tenant)
+
         return JSONResponse(
             {
                 "ok": True,
@@ -2435,8 +2446,12 @@ async def init() -> None:
     data_dir.mkdir(exist_ok=True)
     if blobs:
         try:
+            # Get installed practice versions from DynamoDB
+            default_tenant = await tenants.get_tenant(DEFAULT_TENANT)
+            installed_versions = default_tenant.settings.installed_practices
             restored = await practices_obj.restore_from_blob_store(
-                blobs, DEFAULT_TENANT, data_dir
+                blobs, DEFAULT_TENANT, data_dir,
+                installed_versions=installed_versions,
             )
             if restored:
                 logger.info(f"Restored {restored} practice(s) from S3")

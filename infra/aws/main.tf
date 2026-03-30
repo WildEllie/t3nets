@@ -141,6 +141,9 @@ module "compute" {
   # DynamoDB-backed WebSocket connection registry (cross-task fan-out)
   ws_connections_table_name = module.data.ws_connections_table_name
 
+  # S3 BlobStore (practice persistence)
+  s3_bucket_arn = module.cdn.s3_bucket_arn
+
   # Phase 5c: Ollama sidecar
   use_ollama       = var.use_ollama
   ollama_model     = var.ollama_model

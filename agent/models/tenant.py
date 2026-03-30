@@ -29,6 +29,7 @@ class TenantSettings:
     primary_practice: str = ""  # Active practice name, e.g. "engineering"
     addon_skills: list[str] = field(default_factory=list)  # Extra skills from other practices
     addon_pages: list[str] = field(default_factory=list)  # "practice/page" format
+    installed_practices: dict[str, str] = field(default_factory=dict)  # {"voiceher": "0.9.0"}
 
     # Limits
     messages_per_day: int = 1000

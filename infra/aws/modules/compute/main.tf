@@ -35,6 +35,11 @@ variable "secrets_prefix" {
   description = "Secrets Manager path prefix for tenant secrets"
   type        = string
 }
+variable "s3_bucket_arn" {
+  description = "ARN of the S3 static bucket (for BlobStore practice persistence)"
+  type        = string
+  default     = ""
+}
 variable "lambda_memory_size" {
   description = "Memory (MB) for the skill executor Lambda"
   type        = number
@@ -343,6 +348,20 @@ resource "aws_iam_role_policy" "ecs_task" {
           "dynamodb:DeleteItem",
         ]
         Resource = var.pending_requests_table_arn
+      },
+      {
+        Sid    = "S3BlobStore"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+        ]
+        Resource = var.s3_bucket_arn != "" ? [
+          var.s3_bucket_arn,
+          "${var.s3_bucket_arn}/*",
+        ] : []
       },
     ]
   })
