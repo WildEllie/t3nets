@@ -2265,7 +2265,7 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
           // Post primary_practice to settings
           const resp = await fetch("/api/settings", {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...getHeaders() },
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
             body: JSON.stringify({ primary_practice: name }),
           });
           if (!resp.ok) throw new Error("Failed to activate practice");
@@ -2286,7 +2286,7 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
         try {
           const resp = await fetch("/api/practices/upload", {
             method: "POST",
-            headers: { "Content-Type": "application/zip", ...getHeaders() },
+            headers: { "Content-Type": "application/zip", ...getAuthHeaders() },
             body: file,
           });
           const result = await resp.json();
