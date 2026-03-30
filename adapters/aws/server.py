@@ -817,6 +817,7 @@ async def handle_settings_get(request: Request) -> Response:
                 "max_tokens_per_message": s.max_tokens_per_message,
                 "messages_per_day": s.messages_per_day,
                 "max_conversation_history": s.max_conversation_history,
+                "primary_practice": s.primary_practice,
             }
         )
     except Exception as e:
@@ -890,6 +891,20 @@ async def handle_settings_post(request: Request) -> Response:
                 )
             tenant.settings.max_conversation_history = val
             changed = True
+
+        if "primary_practice" in body:
+            practice_name = body["primary_practice"]
+            tenant.settings.primary_practice = practice_name
+            # Auto-add the practice's skills to enabled_skills
+            for p in practices.list_all():
+                if p.name == practice_name:
+                    for skill_name in p.skills:
+                        if skill_name not in tenant.settings.enabled_skills:
+                            tenant.settings.enabled_skills.append(skill_name)
+                    break
+            changed = True
+            rebuild_skills = True
+            logger.info(f"Primary practice set to: {practice_name}")
 
         if changed:
             await tenants.update_tenant(tenant)

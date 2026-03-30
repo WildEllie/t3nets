@@ -811,6 +811,48 @@
         opacity: 1;
         transform: translateX(-50%) translateY(0);
       }
+
+      /* Practices tab */
+      .upload-zone {
+        border: 2px dashed var(--border);
+        border-radius: 12px;
+        padding: 32px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.15s;
+        background: var(--surface);
+      }
+      .upload-zone:hover, .upload-zone.dragover {
+        border-color: var(--accent-light);
+        background: var(--surface-3);
+      }
+      .upload-icon { font-size: 32px; margin-bottom: 8px; }
+      .upload-text { font-size: 13px; color: var(--text-dim); }
+      .upload-status { font-size: 12px; margin-top: 8px; color: var(--accent-light); }
+
+      .practice-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+        transition: all 0.15s;
+      }
+      .practice-card:hover { border-color: var(--accent-light); background: var(--surface-3); }
+      .practice-card.active-practice { border-color: var(--accent-light); border-width: 2px; }
+      .practice-header { display: flex; align-items: center; gap: 12px; }
+      .practice-radio { margin: 0; accent-color: var(--accent-light); width: 16px; height: 16px; cursor: pointer; }
+      .practice-info { flex: 1; }
+      .practice-name { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+      .practice-name .badge { font-size: 10px; font-weight: 400; padding: 1px 6px; border-radius: 4px; margin-left: 6px; background: var(--surface-3); color: var(--text-dim); }
+      .practice-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+      .practice-version { font-size: 11px; color: var(--text-muted); }
+      .practice-meta { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+      .practice-skills, .practice-pages { font-size: 11px; color: var(--text-muted); }
+      .practice-skills span, .practice-pages span {
+        display: inline-block; padding: 1px 6px; border-radius: 4px;
+        background: var(--surface-3); margin: 0 2px; font-size: 10px;
+      }
     </style>
   </head>
   <body>
@@ -897,6 +939,7 @@
           Channels
         </button>
         <button class="tab-btn" onclick="switchTab('team')">Team</button>
+        <button class="tab-btn" onclick="switchTab('practices')">Practices</button>
       </div>
 
       <!-- ===== General Tab ===== -->
@@ -1040,6 +1083,22 @@
             </div>
           </div>
           <div class="invite-result" id="invite-result"></div>
+        </div>
+      </div>
+
+      <!-- ===== Practices Tab ===== -->
+      <div class="tab-panel" id="tab-practices">
+        <div class="section-title">Upload Practice</div>
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('practice-file').click()">
+          <input type="file" id="practice-file" accept=".zip" style="display:none" onchange="uploadPractice(this.files[0])">
+          <div class="upload-icon">📦</div>
+          <div class="upload-text">Drop a practice ZIP here or click to browse</div>
+          <div class="upload-status" id="upload-status"></div>
+        </div>
+
+        <div class="section-title" style="margin-top:24px">Installed Practices</div>
+        <div id="practices-list">
+          <div style="color:var(--text-dim);font-size:13px">Loading...</div>
         </div>
       </div>
 
@@ -1256,6 +1315,7 @@
         // Load tab-specific data
         if (tabName === "channels") loadChannels();
         if (tabName === "team") loadTeam();
+        if (tabName === "practices") loadPractices();
       }
 
       // ==================== Settings ====================
@@ -2143,6 +2203,117 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
         div.textContent = str;
         return div.innerHTML;
       }
+
+      // ==================== Practices ====================
+      let currentPrimaryPractice = "";
+
+      async function loadPractices() {
+        try {
+          const resp = await fetch("/api/practices", { headers: getHeaders() });
+          if (!resp.ok) throw new Error("Failed to load practices");
+          const practices = await resp.json();
+
+          // Also load current settings to know which practice is active
+          const sResp = await fetch("/api/settings", { headers: getHeaders() });
+          if (sResp.ok) {
+            const s = await sResp.json();
+            currentPrimaryPractice = s.primary_practice || "";
+          }
+
+          renderPractices(practices);
+        } catch (err) {
+          document.getElementById("practices-list").innerHTML =
+            '<div style="color:var(--text-dim);font-size:13px">Failed to load practices</div>';
+        }
+      }
+
+      function renderPractices(practices) {
+        const list = document.getElementById("practices-list");
+        if (!practices.length) {
+          list.innerHTML = '<div style="color:var(--text-dim);font-size:13px">No practices installed. Upload a ZIP above.</div>';
+          return;
+        }
+        list.innerHTML = "";
+        for (const p of practices) {
+          const isActive = p.name === currentPrimaryPractice;
+          const card = document.createElement("div");
+          card.className = "practice-card" + (isActive ? " active-practice" : "");
+          card.innerHTML =
+            '<div class="practice-header">' +
+              '<input type="radio" name="primary-practice" class="practice-radio" value="' + p.name + '" ' + (isActive ? "checked" : "") + '>' +
+              '<div class="practice-info">' +
+                '<div class="practice-name">' + escapeHtml(p.display_name || p.name) +
+                  ' <span class="practice-version">v' + escapeHtml(p.version || "?") + '</span>' +
+                  (p.built_in ? ' <span class="badge">built-in</span>' : '') +
+                '</div>' +
+                '<div class="practice-desc">' + escapeHtml(p.description || "") + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="practice-meta">' +
+              '<div class="practice-skills">Skills: ' + (p.skills || []).map(function(s) { return '<span>' + escapeHtml(s) + '</span>'; }).join("") + '</div>' +
+              (p.pages && p.pages.length ? '<div class="practice-pages">Pages: ' + p.pages.map(function(pg) { return '<span>' + escapeHtml(pg.nav_label || pg.slug) + '</span>'; }).join("") + '</div>' : '') +
+            '</div>';
+
+          const radio = card.querySelector("input");
+          radio.addEventListener("change", function() { activatePractice(p.name, p.skills || []); });
+          list.appendChild(card);
+        }
+      }
+
+      async function activatePractice(name, practiceSkills) {
+        try {
+          // Post primary_practice to settings
+          const resp = await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getHeaders() },
+            body: JSON.stringify({ primary_practice: name }),
+          });
+          if (!resp.ok) throw new Error("Failed to activate practice");
+
+          currentPrimaryPractice = name;
+          showToast(name + " activated — " + practiceSkills.length + " skills enabled");
+          loadPractices();
+          loadSettings(); // Refresh skills list
+        } catch (err) {
+          showToast("Failed to activate practice: " + err.message);
+        }
+      }
+
+      async function uploadPractice(file) {
+        if (!file) return;
+        const statusEl = document.getElementById("upload-status");
+        statusEl.textContent = "Uploading " + file.name + "...";
+        try {
+          const resp = await fetch("/api/practices/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/zip", ...getHeaders() },
+            body: file,
+          });
+          const result = await resp.json();
+          if (!resp.ok) throw new Error(result.error || "Upload failed");
+          statusEl.textContent = "Installed: " + result.name + " v" + result.version + " (" + (result.skills || []).length + " skills)";
+          showToast("Practice " + result.name + " installed");
+          loadPractices();
+        } catch (err) {
+          statusEl.textContent = "Error: " + err.message;
+          showToast("Upload failed: " + err.message);
+        }
+      }
+
+      // Drag and drop support for upload zone
+      (function() {
+        const zone = document.getElementById("upload-zone");
+        if (!zone) return;
+        zone.addEventListener("dragover", function(e) { e.preventDefault(); zone.classList.add("dragover"); });
+        zone.addEventListener("dragleave", function() { zone.classList.remove("dragover"); });
+        zone.addEventListener("drop", function(e) {
+          e.preventDefault();
+          zone.classList.remove("dragover");
+          const file = e.dataTransfer.files[0];
+          if (file && file.name.endsWith(".zip")) uploadPractice(file);
+          else showToast("Please drop a .zip file");
+        });
+      })();
 
       // ==================== Init ====================
       loadSettings();
