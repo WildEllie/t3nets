@@ -70,6 +70,47 @@ class PracticeRegistry:
                 self._practices[practice.name] = practice
                 logger.info(f"Loaded uploaded practice: {practice.name}")
 
+    async def restore_from_blob_store(
+        self, blob_store: BlobStore, tenant_id: str, data_dir: Path
+    ) -> int:
+        """Download and extract uploaded practices from BlobStore on startup.
+
+        Pulls practice ZIPs stored during previous uploads and extracts them
+        to data/practices/ so load_uploaded() can find them.
+        Skips practices that already exist locally (built-in or previously restored).
+
+        Returns count of restored practices.
+        """
+        restored = 0
+        try:
+            keys = await blob_store.list_keys(tenant_id, prefix="practices/")
+        except Exception as e:
+            logger.warning(f"Cannot list practice ZIPs from BlobStore: {e}")
+            return 0
+
+        zip_keys = [k for k in keys if k.endswith("/practice.zip")]
+        for zip_key in zip_keys:
+            # Extract practice name from key: practices/{name}/practice.zip
+            parts = zip_key.split("/")
+            if len(parts) < 3:
+                continue
+            name = parts[1]
+
+            dest = data_dir / "practices" / name
+            if dest.exists():
+                continue  # Already exists (built-in or previous restore in this session)
+
+            try:
+                zip_bytes = await blob_store.get(tenant_id, zip_key)
+                # Install without blob_store to avoid re-uploading (would be circular)
+                await self.install_zip(zip_bytes, data_dir)
+                restored += 1
+                logger.info(f"Restored practice from BlobStore: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to restore practice {name}: {e}")
+
+        return restored
+
     async def install_zip(
         self,
         zip_bytes: bytes,
@@ -146,6 +187,12 @@ class PracticeRegistry:
         practice = self._load_manifest(dest / "practice.yaml", built_in=False)
         if not practice:
             raise ValueError("Failed to load installed practice manifest")
+
+        # Persist ZIP to BlobStore for restart durability
+        if blob_store and tenant_id:
+            zip_key = f"practices/{practice.name}/practice.zip"
+            await blob_store.put(tenant_id, zip_key, zip_bytes)
+            logger.info(f"Persisted practice ZIP to BlobStore: {zip_key}")
 
         # Upload assets to BlobStore
         if blob_store and tenant_id and practice.assets:

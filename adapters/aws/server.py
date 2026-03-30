@@ -2429,10 +2429,22 @@ async def init() -> None:
     practices_obj = PracticeRegistry()
     practices_dir = Path(__file__).parent.parent.parent / "agent" / "practices"
     practices_obj.load_builtin(practices_dir)
-    # Load uploaded practices from data dir
+
+    # Restore uploaded practices from S3 (survive container restarts/deploys)
     data_dir = Path("data")
-    if data_dir.exists():
-        practices_obj.load_uploaded(data_dir)
+    data_dir.mkdir(exist_ok=True)
+    if blobs:
+        try:
+            restored = await practices_obj.restore_from_blob_store(
+                blobs, DEFAULT_TENANT, data_dir
+            )
+            if restored:
+                logger.info(f"Restored {restored} practice(s) from S3")
+        except Exception as e:
+            logger.warning(f"Practice restore from S3 failed: {e}")
+
+    # Load uploaded practices (from restore or previous extractions)
+    practices_obj.load_uploaded(data_dir)
     practices_obj.register_skills(skills)
     practices = practices_obj
     logger.info(f"Loaded practices: {[p.name for p in practices.list_all()]}")
