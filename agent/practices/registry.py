@@ -427,7 +427,9 @@ class PracticeRegistry:
                 EventPattern=event_pattern,
                 Description=f"Route {skill_name} skill invocations to Lambda",
             )
-            rule_arn = f"{config['eventbridge_bus_arn'].rsplit('/', 1)[0]}/rule/{config['eventbridge_bus_name']}/{rule_name}"
+            # EventBridge rule ARN format: arn:aws:events:{region}:{account}:rule/{bus}/{rule}
+            account_region = config['eventbridge_bus_arn'].split(":event-bus/")[0]
+            rule_arn = f"{account_region}:rule/{config['eventbridge_bus_name']}/{rule_name}"
 
             # 4. Set Lambda as target
             events_client.put_targets(
@@ -447,6 +449,14 @@ class PracticeRegistry:
             )
 
             # 5. Grant EventBridge permission to invoke Lambda
+            # Remove old permission first (may have stale SourceArn)
+            try:
+                lambda_client.remove_permission(
+                    FunctionName=func_name,
+                    StatementId="AllowEventBridgeInvoke",
+                )
+            except Exception:
+                pass
             try:
                 lambda_client.add_permission(
                     FunctionName=func_name,
@@ -456,7 +466,7 @@ class PracticeRegistry:
                     SourceArn=rule_arn,
                 )
             except lambda_client.exceptions.ResourceConflictException:
-                pass  # Permission already exists
+                pass
 
             deployed.append(skill_name)
             logger.info(f"  Deployed Lambda + EventBridge for: {skill_name}")
