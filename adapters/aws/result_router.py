@@ -268,13 +268,12 @@ class AsyncResultRouter:
             if is_audio:
                 formatted_text = result.get("text", "")
                 fmt_tokens, fmt_model = 0, ""
-                attachments = [
-                    {
-                        "type": "audio",
-                        "audio_b64": result.get("audio_b64", ""),
-                        "format": result.get("format", "wav"),
-                    }
-                ]
+                teams_audio: dict[str, Any] = {"type": "audio", "format": result.get("format", "wav")}
+                if result.get("audio_url"):
+                    teams_audio["audio_url"] = result["audio_url"]
+                if result.get("audio_b64"):
+                    teams_audio["audio_b64"] = result["audio_b64"]
+                attachments = [teams_audio]
             elif is_raw:
                 formatted_text = json.dumps(result, indent=2)
                 fmt_tokens, fmt_model = 0, ""
@@ -368,13 +367,12 @@ class AsyncResultRouter:
             if is_audio:
                 formatted_text = result.get("text", "")
                 fmt_tokens, fmt_model = 0, ""
-                attachments = [
-                    {
-                        "type": "audio",
-                        "audio_b64": result.get("audio_b64", ""),
-                        "format": result.get("format", "wav"),
-                    }
-                ]
+                audio_att: dict[str, Any] = {"type": "audio", "format": result.get("format", "wav")}
+                if result.get("audio_url"):
+                    audio_att["audio_url"] = result["audio_url"]
+                if result.get("audio_b64"):
+                    audio_att["audio_b64"] = result["audio_b64"]
+                attachments = [audio_att]
             elif is_raw:
                 formatted_text = json.dumps(result, indent=2)
                 fmt_tokens, fmt_model = 0, ""

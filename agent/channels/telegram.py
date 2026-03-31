@@ -208,12 +208,31 @@ class TelegramAdapter(ChannelAdapter):
             return False
 
     async def _send_audio(self, message: OutboundMessage, audio: dict[str, Any]) -> bool:
-        """Send audio via Telegram sendAudio API (multipart/form-data)."""
-        try:
-            audio_bytes = base64.b64decode(audio["audio_b64"])
-        except Exception as e:
-            logger.error(f"Failed to decode audio base64: {e}")
-            # Fallback to text-only
+        """Send audio via Telegram sendAudio API (multipart/form-data).
+
+        Supports both inline base64 (audio_b64) and presigned URL (audio_url).
+        """
+        audio_bytes = None
+
+        # Try presigned URL first (large audio offloaded to S3)
+        if audio.get("audio_url"):
+            try:
+                req = Request(audio["audio_url"], method="GET")
+                with urlopen(req, timeout=30) as resp:
+                    audio_bytes = resp.read()
+                logger.info(f"Fetched audio from URL ({len(audio_bytes)} bytes)")
+            except Exception as e:
+                logger.error(f"Failed to fetch audio URL: {e}")
+
+        # Fall back to inline base64
+        if audio_bytes is None and audio.get("audio_b64"):
+            try:
+                audio_bytes = base64.b64decode(audio["audio_b64"])
+            except Exception as e:
+                logger.error(f"Failed to decode audio base64: {e}")
+
+        if audio_bytes is None:
+            logger.error("No audio data available (no URL or base64)")
             return await self._send_plain(message)
 
         fmt = audio.get("format", "wav")
