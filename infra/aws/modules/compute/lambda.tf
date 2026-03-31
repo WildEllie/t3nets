@@ -36,6 +36,11 @@ resource "aws_iam_role" "lambda_skill_executor" {
   tags = { Name = "${local.name_prefix}-lambda-skill-executor" }
 }
 
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  role       = aws_iam_role.lambda_skill_executor.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
 resource "aws_iam_role_policy" "lambda_skill_executor" {
   name = "${local.name_prefix}-lambda-skill-executor-policy"
   role = aws_iam_role.lambda_skill_executor.id
@@ -80,6 +85,27 @@ resource "aws_iam_role_policy" "lambda_skill_executor" {
         ]
         Resource = aws_sqs_queue.skill_results.arn
       },
+      {
+        Sid    = "S3BlobStore"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket",
+        ]
+        Resource = var.s3_bucket_arn != "" ? [
+          var.s3_bucket_arn,
+          "${var.s3_bucket_arn}/*",
+        ] : []
+      },
+      {
+        Sid    = "DynamoDBTenantsRead"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+        ]
+        Resource = var.dynamodb_table_arns
+      },
     ]
   })
 }
@@ -94,9 +120,15 @@ locals {
     "${local.project_root}/adapters/aws/lambda_handler.py",
     "${local.project_root}/adapters/aws/pending_requests.py",
     "${local.project_root}/adapters/aws/secrets_manager.py",
+    "${local.project_root}/adapters/aws/s3_blob_store.py",
+    "${local.project_root}/adapters/aws/dynamodb_tenant_store.py",
     "${local.project_root}/agent/skills/registry.py",
     "${local.project_root}/agent/skills/ping/worker.py",
     "${local.project_root}/agent/skills/ping/skill.yaml",
+    "${local.project_root}/agent/practices/registry.py",
+    "${local.project_root}/agent/models/practice.py",
+    "${local.project_root}/agent/models/tenant.py",
+    "${local.project_root}/agent/interfaces/blob_store.py",
   ]
 
   # Hash of all source files — triggers rebuild when any change
@@ -135,7 +167,15 @@ resource "aws_lambda_function" "skill_ping" {
       SECRETS_PREFIX         = var.secrets_prefix
       SQS_RESULTS_QUEUE_URL  = aws_sqs_queue.skill_results.id
       PENDING_REQUESTS_TABLE = var.pending_requests_table_name
+      S3_BUCKET_NAME         = var.s3_bucket_arn != "" ? split(":", var.s3_bucket_arn)[5] : ""
+      DYNAMODB_TENANTS_TABLE = "${var.project}-${var.environment}-tenants"
     }
+  }
+
+  # VPC access — needed for skills that call services in private subnets
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [aws_security_group.router.id]
   }
 
   tags = { Name = "${local.name_prefix}-skill-ping" }

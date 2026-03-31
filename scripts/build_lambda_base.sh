@@ -41,6 +41,8 @@ touch "${BUILD_DIR}/adapters/aws/__init__.py"
 cp "${PROJECT_ROOT}/adapters/aws/lambda_handler.py" "${BUILD_DIR}/adapters/aws/"
 cp "${PROJECT_ROOT}/adapters/aws/pending_requests.py" "${BUILD_DIR}/adapters/aws/"
 cp "${PROJECT_ROOT}/adapters/aws/secrets_manager.py" "${BUILD_DIR}/adapters/aws/"
+cp "${PROJECT_ROOT}/adapters/aws/s3_blob_store.py" "${BUILD_DIR}/adapters/aws/"
+cp "${PROJECT_ROOT}/adapters/aws/dynamodb_tenant_store.py" "${BUILD_DIR}/adapters/aws/"
 
 # --- Copy agent framework (interfaces, models) ---
 mkdir -p "${BUILD_DIR}/agent"
@@ -57,6 +59,13 @@ mkdir -p "${BUILD_DIR}/agent/skills/ping"
 touch "${BUILD_DIR}/agent/skills/__init__.py"
 cp "${PROJECT_ROOT}/agent/skills/registry.py" "${BUILD_DIR}/agent/skills/"
 cp -r "${PROJECT_ROOT}/agent/skills/ping/" "${BUILD_DIR}/agent/skills/ping/"
+
+# --- Copy practice registry (for loading uploaded practice skills) ---
+mkdir -p "${BUILD_DIR}/agent/practices"
+touch "${BUILD_DIR}/agent/practices/__init__.py"
+cp "${PROJECT_ROOT}/agent/practices/registry.py" "${BUILD_DIR}/agent/practices/"
+# Copy built-in practices (dev-jira etc.)
+cp -r "${PROJECT_ROOT}/agent/practices/dev-jira" "${BUILD_DIR}/agent/practices/" 2>/dev/null || true
 
 # --- Install PyYAML (boto3 is in Lambda runtime) ---
 pip3 install pyyaml -t "${BUILD_DIR}" --quiet 2>/dev/null

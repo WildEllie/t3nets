@@ -34,9 +34,15 @@ import boto3  # type: ignore[import-untyped]
 # Add project root to path so we can import agent.skills etc.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import asyncio
+import inspect
+
 from agent.skills.registry import SkillRegistry, SkillNotFound
+from agent.practices.registry import PracticeRegistry
 from adapters.aws.secrets_manager import SecretsManagerProvider
+from adapters.aws.s3_blob_store import S3BlobStore
 from adapters.aws.pending_requests import PendingRequestsStore
+from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -45,22 +51,72 @@ logger.setLevel(logging.INFO)
 _skills: SkillRegistry | None = None
 _secrets: SecretsManagerProvider | None = None
 _pending: PendingRequestsStore | None = None
+_blobs: S3BlobStore | None = None
+_tenants: DynamoDBTenantStore | None = None
 _sqs_client = None
 
 REGION = os.environ.get("AWS_REGION_NAME", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
 SQS_QUEUE_URL = os.environ.get("SQS_RESULTS_QUEUE_URL", "")
 PENDING_TABLE = os.environ.get("PENDING_REQUESTS_TABLE", "")
 SECRETS_PREFIX = os.environ.get("SECRETS_PREFIX", "/t3nets/dev")
+S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "t3nets-dev-static")
+TENANTS_TABLE = os.environ.get("DYNAMODB_TENANTS_TABLE", "t3nets-dev-tenants")
+DEFAULT_TENANT = "default"
+
+
+def _init_blobs() -> S3BlobStore:
+    """Lazy-load the S3 BlobStore."""
+    global _blobs
+    if _blobs is None:
+        _blobs = S3BlobStore(bucket_name=S3_BUCKET, region=REGION)
+    return _blobs
+
+
+def _init_tenants() -> DynamoDBTenantStore:
+    """Lazy-load the tenant store."""
+    global _tenants
+    if _tenants is None:
+        _tenants = DynamoDBTenantStore(TENANTS_TABLE, region=REGION)
+    return _tenants
 
 
 def _init_skills() -> SkillRegistry:
-    """Lazy-load the skill registry on first invocation."""
+    """Lazy-load the skill registry + uploaded practices on first invocation."""
     global _skills
     if _skills is None:
         _skills = SkillRegistry()
         skills_dir = Path(__file__).parent.parent.parent / "agent" / "skills"
         _skills.load_from_directory(skills_dir)
-        logger.info(f"Lambda: loaded skills: {_skills.list_skill_names()}")
+
+        # Load uploaded practices from S3 (same as router does on startup)
+        try:
+            practices = PracticeRegistry()
+            practices_dir = Path(__file__).parent.parent.parent / "agent" / "practices"
+            practices.load_builtin(practices_dir)
+
+            blobs = _init_blobs()
+            tenants_store = _init_tenants()
+            tenant = asyncio.get_event_loop().run_until_complete(
+                tenants_store.get_tenant(DEFAULT_TENANT)
+            )
+            installed = tenant.settings.installed_practices
+            data_dir = Path("/tmp/practices_data")
+            data_dir.mkdir(exist_ok=True)
+
+            if installed:
+                restored = asyncio.get_event_loop().run_until_complete(
+                    practices.restore_from_blob_store(blobs, DEFAULT_TENANT, data_dir, installed)
+                )
+                if restored:
+                    logger.info(f"Lambda: restored {restored} practice(s) from S3")
+                practices.load_uploaded(data_dir)
+
+            practices.register_skills(_skills)
+            logger.info(f"Lambda: loaded skills: {_skills.list_skill_names()}")
+        except Exception as e:
+            logger.warning(f"Lambda: practice loading failed: {e}")
+            logger.info(f"Lambda: loaded skills (built-in only): {_skills.list_skill_names()}")
+
     return _skills
 
 
@@ -146,7 +202,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     skill_secrets: dict[str, Any] = {}
     if skill_def and skill_def.requires_integration:
         try:
-            import asyncio
             skill_secrets = asyncio.get_event_loop().run_until_complete(
                 secrets_provider.get(tenant_id, skill_def.requires_integration)
             )
@@ -162,7 +217,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # --- Step 3: Execute the skill ---
     try:
-        result = worker_fn(params, skill_secrets)
+        # Build context with blob store and tenant for practice workers
+        ctx: dict[str, Any] = {"blob_store": _init_blobs(), "tenant_id": tenant_id}
+        sig = inspect.signature(worker_fn)
+        if len(sig.parameters) >= 3:
+            result = worker_fn(params, skill_secrets, ctx)
+        else:
+            result = worker_fn(params, skill_secrets)
+
+        # Support async workers
+        if asyncio.iscoroutine(result):
+            result = asyncio.get_event_loop().run_until_complete(result)
+
         logger.info(
             f"Lambda: skill {skill_name} completed in "
             f"{time.time() - start_time:.2f}s"
