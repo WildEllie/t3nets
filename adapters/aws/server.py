@@ -2269,19 +2269,20 @@ async def handle_practices_upload(request: Request) -> Response:
         )
         practices.register_skills(skills)
 
-        # Deploy Lambda + EventBridge for each skill with lambda.zip
-        lambda_config = _get_lambda_deploy_config()
-        deployed_skills = []
-        if lambda_config["lambda_role_arn"]:
-            deployed_skills = await practices.deploy_skill_lambdas(practice, lambda_config)
-            logger.info(f"Deployed Lambdas for: {deployed_skills}")
-
         # Persist version to DynamoDB
         tenant.settings.installed_practices[practice.name] = practice.version
         await tenants.update_tenant(tenant)
 
-        # Rebuild routing rules to include new skills
-        _fire_and_forget(_rebuild_rules(tenant_id))
+        # Deploy Lambdas + rebuild rules in background (takes 15-30s)
+        async def _deploy_and_rebuild() -> None:
+            lambda_config = _get_lambda_deploy_config()
+            if lambda_config["lambda_role_arn"]:
+                deployed = await practices.deploy_skill_lambdas(practice, lambda_config)
+                logger.info(f"Background: deployed Lambdas for {deployed}")
+            await _rebuild_rules(tenant_id)
+            logger.info(f"Background: rules rebuilt for tenant {tenant_id}")
+
+        _fire_and_forget(_deploy_and_rebuild())
 
         return JSONResponse(
             {
@@ -2289,7 +2290,7 @@ async def handle_practices_upload(request: Request) -> Response:
                 "name": practice.name,
                 "version": practice.version,
                 "skills": practice.skills,
-                "lambdas_deployed": deployed_skills,
+                "status": "Lambdas deploying in background...",
             }
         )
     except ValueError as e:
