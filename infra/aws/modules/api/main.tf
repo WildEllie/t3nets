@@ -229,6 +229,15 @@ resource "aws_apigatewayv2_route" "public_telegram_webhook" {
   target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
 }
 
+# WhatsApp webhook — Whapi.cloud sends message events here.
+# Uses path prefix matching so the token hash suffix is accepted.
+# No JWT authorizer — Whapi.cloud uses its own custom header secret.
+resource "aws_apigatewayv2_route" "public_whatsapp_webhook" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /api/channels/whatsapp/webhook/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.alb.id}"
+}
+
 resource "aws_apigatewayv2_route" "public_integrations" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "POST /api/integrations/{proxy+}"
