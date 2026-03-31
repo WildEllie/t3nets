@@ -79,6 +79,7 @@
     --channel-telegram: #0088cc;
     --channel-teams: #464EB8;
     --channel-slack: #4A154B;
+    --channel-whatsapp: #25D366;
 }
 
 [data-theme="light"] {
@@ -161,6 +162,7 @@
     --channel-telegram: #0088cc;
     --channel-teams: #464EB8;
     --channel-slack: #4A154B;
+    --channel-whatsapp: #25D366;
 }
 
 /* === Reset === */

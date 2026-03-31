@@ -529,6 +529,9 @@
       .channel-icon.slack {
         background: var(--channel-slack);
       }
+      .channel-icon.whatsapp {
+        background: var(--channel-whatsapp);
+      }
       .channel-name {
         font-size: 15px;
         font-weight: 600;
@@ -1927,6 +1930,21 @@
             "Open Telegram and search for <strong>@BotFather</strong>",
             "Send <code>/newbot</code> and follow the prompts to name your bot",
             "Copy the <strong>Bot Token</strong> (looks like <code>123456:ABC-DEF...</code>)",
+            "Paste it below and click <strong>Save</strong>",
+            "T3nets will automatically register the webhook — you're done!",
+          ],
+        },
+        whatsapp: {
+          name: "WhatsApp",
+          icon: "📱",
+          iconClass: "whatsapp",
+          description: "Send and receive WhatsApp messages via Whapi.cloud",
+          setupUrl: "https://whapi.cloud",
+          setupLabel: "Whapi.cloud Dashboard",
+          setupSteps: [
+            'Go to <a href="https://whapi.cloud" target="_blank">whapi.cloud</a> and create a channel',
+            "Scan the <strong>QR code</strong> with your WhatsApp app",
+            "Copy the <strong>API Token</strong> from the dashboard",
             "Paste it below and click <strong>Save</strong>",
             "T3nets will automatically register the webhook — you're done!",
           ],
