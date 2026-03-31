@@ -1124,6 +1124,22 @@ def _get_engine(tenant_id: str) -> CompiledRuleEngine | None:
     return _compiled_engines.get(tenant_id)
 
 
+def _enrich_match_params(match: Any, clean_text: str) -> None:
+    """Inject original user text into match params for skills that expect a 'text' field.
+
+    Called after Tier 1/2 routing, before dispatch. The router identifies the skill,
+    the skill processes the content. This ensures all channels (dashboard, Telegram,
+    Teams) behave identically.
+    """
+    if not match:
+        return
+    skill_def = skills.get_skill(match.skill_name)
+    if skill_def:
+        schema_props = skill_def.parameters.get("properties", {})
+        if "text" in schema_props and "text" not in match.params:
+            match.params["text"] = clean_text
+
+
 async def _rebuild_rules(tenant_id: str) -> None:
     """(Re)build AI-generated routing rules for a tenant and cache the engine."""
     try:
@@ -1230,13 +1246,7 @@ When you have data to present, format it clearly with structure."""
             match = router.match(clean_text, tenant.settings.enabled_skills) if router else None
 
             if match:
-                # If the skill expects a 'text' param and Tier 1 didn't extract it,
-                # inject the original user message as the text (common for TTS, translation, etc.)
-                skill_def = skills.get_skill(match.skill_name)
-                if skill_def:
-                    schema_props = skill_def.parameters.get("properties", {})
-                    if "text" in schema_props and "text" not in match.params:
-                        match.params["text"] = clean_text
+                _enrich_match_params(match, clean_text)
 
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
                     return await _handle_async_skill(
@@ -1740,6 +1750,8 @@ When you have data to present, format it clearly with structure."""
             teams_router.match(clean_text, tenant.settings.enabled_skills) if teams_router else None
         )
         if match:
+            _enrich_match_params(match, clean_text)
+
             if USE_ASYNC_SKILLS and event_bus and pending_store:
                 service_url = teams_adapter._service_urls.get(message.conversation_id, "")
                 _handle_async_channel_skill(
@@ -2054,6 +2066,8 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
         tg_router = tg_engine or _fallback_router
         match = tg_router.match(clean_text, tenant.settings.enabled_skills) if tg_router else None
         if match:
+            _enrich_match_params(match, clean_text)
+
             if USE_ASYNC_SKILLS and event_bus and pending_store:
                 _handle_async_channel_skill(
                     tenant_id=tenant_id,
