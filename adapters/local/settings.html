@@ -812,6 +812,28 @@
         transform: translateX(-50%) translateY(0);
       }
 
+      /* Skill settings (prompt editor, sliders) */
+      .skill-settings { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+      .skill-settings .section-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+      .skill-settings textarea {
+        width: 100%; min-height: 120px; padding: 10px; border: 1px solid var(--border);
+        border-radius: 8px; background: var(--surface); color: var(--text-bright);
+        font-family: 'Menlo', 'Monaco', monospace; font-size: 12px; line-height: 1.5;
+        resize: vertical;
+      }
+      .skill-settings textarea:focus { border-color: var(--accent-light); outline: none; }
+      .skill-settings .slider-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+      .skill-settings .slider-row label { font-size: 13px; color: var(--text-dim); min-width: 100px; }
+      .skill-settings .slider-row input[type="range"] { flex: 1; accent-color: var(--accent-light); }
+      .skill-settings .slider-row .slider-value { font-size: 13px; color: var(--text-bright); min-width: 36px; text-align: right; }
+      .skill-settings .btn-save-settings {
+        margin-top: 12px; padding: 8px 20px; background: var(--accent-light); color: white;
+        border: none; border-radius: 6px; font-size: 13px; cursor: pointer;
+      }
+      .skill-settings .settings-status { font-size: 12px; margin-left: 12px; }
+      .skill-settings .settings-status.ok { color: #4caf50; }
+      .skill-settings .settings-status.error { color: #ff6b6b; }
+
       /* Practices tab */
       .upload-zone {
         border: 2px dashed var(--border);
@@ -1600,7 +1622,13 @@
                     <button class="btn-save" onclick="saveIntegrationInPane('${integrationName}', '${paneId}', this)">Save</button>
                     <span class="integration-status" id="status-${paneId}"></span>
                 </div>
+                <div id="skill-settings-${paneId}"></div>
             `;
+
+        // Load skill-specific settings if this is a voiceher skill
+        if (integrationName === "voiceher") {
+          loadSkillSettings(paneId);
+        }
       }
 
       function getIntegrationFormData(integrationName) {
@@ -1686,6 +1714,103 @@
           }
         } catch (err) {
           showToast("Failed to save credentials");
+        }
+      }
+
+      // ==================== Skill Settings (voice config) ====================
+
+      async function loadSkillSettings(paneId) {
+        const container = document.getElementById("skill-settings-" + paneId);
+        if (!container) return;
+        container.innerHTML = '<div style="color:var(--text-dim);font-size:12px;margin-top:12px">Loading voice settings...</div>';
+
+        try {
+          const resp = await fetch("/api/skill/voice_config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify({ action: "get" }),
+          });
+          if (!resp.ok) throw new Error("Failed to load");
+          const config = await resp.json();
+          if (config.error) throw new Error(config.error);
+          renderSkillSettings(container, paneId, config);
+        } catch (err) {
+          container.innerHTML = '<div style="color:var(--text-dim);font-size:12px;margin-top:12px">Voice settings unavailable: ' + err.message + '</div>';
+        }
+      }
+
+      function renderSkillSettings(container, paneId, config) {
+        const prompt = config.system_prompt || "";
+        const exag = config.exaggeration || 0.35;
+        const cfg = config.cfg_weight || 0.0;
+        const model = config.claude_model || "claude-sonnet-4-20250514";
+
+        container.innerHTML = `
+          <div class="skill-settings">
+            <div class="section-label">Voice Synthesis Settings</div>
+
+            <div class="field-group">
+              <label>Claude Model</label>
+              <input type="text" id="ss-model-${paneId}" value="${escapeHtml(model)}"
+                     placeholder="claude-sonnet-4-20250514" style="background:var(--surface);color:var(--text-bright);border:1px solid var(--border);border-radius:6px;padding:8px;width:100%;font-size:13px">
+            </div>
+
+            <div class="slider-row">
+              <label>Exaggeration</label>
+              <input type="range" min="0" max="1" step="0.05" value="${exag}"
+                     id="ss-exag-${paneId}" oninput="document.getElementById('ss-exag-val-${paneId}').textContent=this.value">
+              <span class="slider-value" id="ss-exag-val-${paneId}">${exag}</span>
+            </div>
+
+            <div class="slider-row">
+              <label>Voice Match</label>
+              <input type="range" min="0" max="1" step="0.05" value="${cfg}"
+                     id="ss-cfg-${paneId}" oninput="document.getElementById('ss-cfg-val-${paneId}').textContent=this.value">
+              <span class="slider-value" id="ss-cfg-val-${paneId}">${cfg}</span>
+            </div>
+
+            <div class="field-group" style="margin-top:12px">
+              <label>Claude System Prompt <span style="font-weight:normal;color:var(--text-muted)">(leave empty for built-in prompt)</span></label>
+              <textarea id="ss-prompt-${paneId}" placeholder="Custom system prompt for restyling + nikud. Leave empty to use the built-in prompt with style examples.">${escapeHtml(prompt)}</textarea>
+            </div>
+
+            <div style="display:flex;align-items:center;margin-top:12px">
+              <button class="btn-save-settings" onclick="saveAllSkillSettings('${paneId}')">Save Voice Settings</button>
+              <span class="settings-status" id="ss-status-${paneId}"></span>
+            </div>
+          </div>
+        `;
+      }
+
+      async function saveAllSkillSettings(paneId) {
+        const statusEl = document.getElementById("ss-status-" + paneId);
+        statusEl.textContent = "Saving...";
+        statusEl.className = "settings-status";
+
+        const settings = [
+          { setting: "exaggeration", value: document.getElementById("ss-exag-" + paneId).value },
+          { setting: "cfg_weight", value: document.getElementById("ss-cfg-" + paneId).value },
+          { setting: "claude_model", value: document.getElementById("ss-model-" + paneId).value },
+          { setting: "system_prompt", value: document.getElementById("ss-prompt-" + paneId).value },
+        ];
+
+        try {
+          for (const s of settings) {
+            const resp = await fetch("/api/skill/voice_config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+              body: JSON.stringify({ action: "set", setting: s.setting, value: s.value }),
+            });
+            if (!resp.ok) throw new Error("Failed to save " + s.setting);
+            const result = await resp.json();
+            if (result.error) throw new Error(result.error);
+          }
+          statusEl.textContent = "Saved";
+          statusEl.className = "settings-status ok";
+          showToast("Voice settings saved");
+        } catch (err) {
+          statusEl.textContent = err.message;
+          statusEl.className = "settings-status error";
         }
       }
 
