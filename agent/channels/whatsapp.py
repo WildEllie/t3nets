@@ -57,6 +57,7 @@ class WhatsAppAdapter(ChannelAdapter):
         return {
             "Authorization": f"Bearer {self.api_token}",
             "Content-Type": content_type,
+            "User-Agent": "T3nets/1.0",
         }
 
     def parse_inbound(self, raw_event: dict[str, Any]) -> InboundMessage:
