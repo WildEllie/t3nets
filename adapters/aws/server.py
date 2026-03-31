@@ -127,6 +127,29 @@ started_at: float = 0.0
 USE_ASYNC_SKILLS = os.environ.get("USE_ASYNC_SKILLS", "false").lower() == "true"
 
 DEFAULT_TENANT = "default"
+
+
+def _get_lambda_deploy_config() -> dict[str, Any]:
+    """Build Lambda deployment config from environment variables."""
+    project = os.environ.get("T3NETS_STAGE", "dev")
+    name_prefix = f"t3nets-{project}"
+    subnet_str = os.environ.get("LAMBDA_SUBNET_IDS", "")
+    return {
+        "region": AWS_REGION,
+        "name_prefix": name_prefix,
+        "stage": project,
+        "lambda_role_arn": os.environ.get("LAMBDA_ROLE_ARN", ""),
+        "eventbridge_bus_name": os.environ.get("EVENTBRIDGE_BUS_NAME", ""),
+        "eventbridge_bus_arn": os.environ.get("EVENTBRIDGE_BUS_ARN", ""),
+        "eventbridge_dlq_arn": os.environ.get("EVENTBRIDGE_DLQ_ARN", ""),
+        "sqs_results_queue_url": os.environ.get("SQS_RESULTS_QUEUE_URL", ""),
+        "secrets_prefix": os.environ.get("SECRETS_PREFIX", ""),
+        "pending_requests_table": os.environ.get("PENDING_REQUESTS_TABLE", ""),
+        "s3_bucket_name": os.environ.get("S3_BUCKET_NAME", ""),
+        "dynamodb_tenants_table": os.environ.get("DYNAMODB_TENANTS_TABLE", ""),
+        "subnet_ids": subnet_str.split(",") if subnet_str else [],
+        "security_group_id": os.environ.get("LAMBDA_SECURITY_GROUP_ID", ""),
+    }
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "")
 PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")
@@ -2246,9 +2269,19 @@ async def handle_practices_upload(request: Request) -> Response:
         )
         practices.register_skills(skills)
 
+        # Deploy Lambda + EventBridge for each skill with lambda.zip
+        lambda_config = _get_lambda_deploy_config()
+        deployed_skills = []
+        if lambda_config["lambda_role_arn"]:
+            deployed_skills = await practices.deploy_skill_lambdas(practice, lambda_config)
+            logger.info(f"Deployed Lambdas for: {deployed_skills}")
+
         # Persist version to DynamoDB
         tenant.settings.installed_practices[practice.name] = practice.version
         await tenants.update_tenant(tenant)
+
+        # Rebuild routing rules to include new skills
+        _fire_and_forget(_rebuild_rules(tenant_id))
 
         return JSONResponse(
             {
@@ -2256,6 +2289,7 @@ async def handle_practices_upload(request: Request) -> Response:
                 "name": practice.name,
                 "version": practice.version,
                 "skills": practice.skills,
+                "lambdas_deployed": deployed_skills,
             }
         )
     except ValueError as e:
@@ -2464,6 +2498,16 @@ async def init() -> None:
     practices = practices_obj
     logger.info(f"Loaded practices: {[p.name for p in practices.list_all()]}")
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
+
+    # Ensure Lambdas exist for restored practice skills
+    lambda_config = _get_lambda_deploy_config()
+    if lambda_config["lambda_role_arn"]:
+        try:
+            fixed = await practices_obj.ensure_skill_lambdas(lambda_config)
+            if fixed:
+                logger.info(f"Deployed {fixed} missing practice skill Lambda(s)")
+        except Exception as e:
+            logger.warning(f"Lambda ensure check failed: {e}")
 
     _fallback_router = RuleBasedRouter(skills)
 

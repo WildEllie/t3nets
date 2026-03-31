@@ -363,6 +363,50 @@ resource "aws_iam_role_policy" "ecs_task" {
           "${var.s3_bucket_arn}/*",
         ] : []
       },
+      # Practice skill deployment — router deploys Lambda + EventBridge per skill
+      {
+        Sid    = "LambdaDeployPracticeSkills"
+        Effect = "Allow"
+        Action = [
+          "lambda:CreateFunction",
+          "lambda:UpdateFunctionCode",
+          "lambda:UpdateFunctionConfiguration",
+          "lambda:GetFunction",
+          "lambda:DeleteFunction",
+          "lambda:AddPermission",
+          "lambda:GetPolicy",
+        ]
+        Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.name_prefix}-skill-*"
+      },
+      {
+        Sid    = "PassLambdaRole"
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole",
+        ]
+        Resource = aws_iam_role.lambda_skill_executor.arn
+      },
+      {
+        Sid    = "EventBridgeManagePracticeRules"
+        Effect = "Allow"
+        Action = [
+          "events:PutRule",
+          "events:PutTargets",
+          "events:RemoveTargets",
+          "events:DeleteRule",
+          "events:DescribeRule",
+        ]
+        Resource = "arn:aws:events:${var.aws_region}:${data.aws_caller_identity.current.account_id}:rule/${aws_cloudwatch_event_bus.skills.name}/*"
+      },
+      {
+        Sid    = "CloudWatchLogsCreatePracticeSkills"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:PutRetentionPolicy",
+        ]
+        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-skill-*"
+      },
     ]
   })
 }
@@ -428,6 +472,13 @@ resource "aws_ecs_task_definition" "router" {
             { name = "PENDING_REQUESTS_TABLE", value = var.pending_requests_table_name },
             { name = "WS_API_ENDPOINT", value = var.ws_api_endpoint },
             { name = "WS_CONNECTIONS_TABLE", value = var.ws_connections_table_name },
+            { name = "S3_BUCKET_NAME", value = var.s3_bucket_arn != "" ? split(":", var.s3_bucket_arn)[5] : "" },
+            # Practice skill Lambda deployment config
+            { name = "LAMBDA_ROLE_ARN", value = aws_iam_role.lambda_skill_executor.arn },
+            { name = "EVENTBRIDGE_BUS_ARN", value = aws_cloudwatch_event_bus.skills.arn },
+            { name = "EVENTBRIDGE_DLQ_ARN", value = aws_sqs_queue.eventbridge_dlq.arn },
+            { name = "LAMBDA_SUBNET_IDS", value = join(",", var.private_subnet_ids) },
+            { name = "LAMBDA_SECURITY_GROUP_ID", value = aws_security_group.router.id },
           ],
           # Phase 5c: wire Ollama sidecar URL only when enabled
           var.use_ollama ? [

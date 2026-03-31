@@ -319,6 +319,181 @@ class PracticeRegistry:
                 continue
             self._load_practice_skills(skills_dir, practice, skill_registry)
 
+    async def deploy_skill_lambdas(
+        self,
+        practice: PracticeDefinition,
+        config: dict[str, Any],
+    ) -> list[str]:
+        """Deploy Lambda functions + EventBridge rules for each skill with a lambda.zip.
+
+        Args:
+            practice: The installed practice definition
+            config: Lambda deployment config with keys:
+                region, name_prefix, lambda_role_arn, eventbridge_bus_name,
+                eventbridge_bus_arn, eventbridge_dlq_arn, sqs_results_queue_url,
+                secrets_prefix, pending_requests_table, s3_bucket_name,
+                dynamodb_tenants_table, subnet_ids, security_group_id
+
+        Returns list of deployed skill names.
+        """
+        import json
+        import boto3  # type: ignore[import-untyped]
+
+        region = config["region"]
+        prefix = config["name_prefix"]
+        lambda_client = boto3.client("lambda", region_name=region)
+        events_client = boto3.client("events", region_name=region)
+        logs_client = boto3.client("logs", region_name=region)
+
+        deployed = []
+        practice_dir = Path(practice.base_path)
+
+        for skill_name in practice.skills:
+            lambda_zip_path = practice_dir / "skills" / skill_name / "lambda.zip"
+            if not lambda_zip_path.exists():
+                logger.warning(f"No lambda.zip for skill {skill_name}, skipping Lambda deploy")
+                continue
+
+            func_name = f"{prefix}-skill-{skill_name}"
+            log_group = f"/aws/lambda/{func_name}"
+            rule_name = f"{prefix}-skill-invoke-{skill_name}"
+            zip_bytes = lambda_zip_path.read_bytes()
+
+            logger.info(f"Deploying Lambda for skill: {skill_name} ({len(zip_bytes)} bytes)")
+
+            # 1. Create/ensure CloudWatch log group
+            try:
+                logs_client.create_log_group(logGroupName=log_group)
+                logs_client.put_retention_policy(logGroupName=log_group, retentionInDays=14)
+            except logs_client.exceptions.ResourceAlreadyExistsException:
+                pass
+
+            # 2. Create or update Lambda function
+            env_vars = {
+                "T3NETS_PLATFORM": "aws",
+                "T3NETS_STAGE": config.get("stage", "dev"),
+                "AWS_REGION_NAME": region,
+                "SECRETS_PREFIX": config["secrets_prefix"],
+                "SQS_RESULTS_QUEUE_URL": config["sqs_results_queue_url"],
+                "PENDING_REQUESTS_TABLE": config["pending_requests_table"],
+                "S3_BUCKET_NAME": config.get("s3_bucket_name", ""),
+                "DYNAMODB_TENANTS_TABLE": config.get("dynamodb_tenants_table", ""),
+            }
+            vpc_config = {}
+            if config.get("subnet_ids") and config.get("security_group_id"):
+                vpc_config = {
+                    "SubnetIds": config["subnet_ids"],
+                    "SecurityGroupIds": [config["security_group_id"]],
+                }
+
+            try:
+                lambda_client.get_function(FunctionName=func_name)
+                # Exists — update code
+                lambda_client.update_function_code(
+                    FunctionName=func_name,
+                    ZipFile=zip_bytes,
+                )
+                logger.info(f"  Updated Lambda: {func_name}")
+            except lambda_client.exceptions.ResourceNotFoundException:
+                # Create new
+                create_kwargs: dict[str, Any] = {
+                    "FunctionName": func_name,
+                    "Role": config["lambda_role_arn"],
+                    "Handler": "adapters.aws.lambda_handler.handler",
+                    "Runtime": "python3.12",
+                    "Timeout": 120,
+                    "MemorySize": 512,
+                    "Code": {"ZipFile": zip_bytes},
+                    "Environment": {"Variables": env_vars},
+                }
+                if vpc_config:
+                    create_kwargs["VpcConfig"] = vpc_config
+                lambda_client.create_function(**create_kwargs)
+                logger.info(f"  Created Lambda: {func_name}")
+
+            # Get Lambda ARN
+            func_info = lambda_client.get_function(FunctionName=func_name)
+            lambda_arn = func_info["Configuration"]["FunctionArn"]
+
+            # 3. Create/update EventBridge rule
+            event_pattern = json.dumps({
+                "source": ["agent.router"],
+                "detail-type": ["skill.invoke"],
+                "detail": {"skill_name": [skill_name]},
+            })
+            events_client.put_rule(
+                Name=rule_name,
+                EventBusName=config["eventbridge_bus_name"],
+                EventPattern=event_pattern,
+                Description=f"Route {skill_name} skill invocations to Lambda",
+            )
+            rule_arn = f"{config['eventbridge_bus_arn'].rsplit('/', 1)[0]}/rule/{config['eventbridge_bus_name']}/{rule_name}"
+
+            # 4. Set Lambda as target
+            events_client.put_targets(
+                Rule=rule_name,
+                EventBusName=config["eventbridge_bus_name"],
+                Targets=[{
+                    "Id": f"skill-{skill_name}",
+                    "Arn": lambda_arn,
+                    "RetryPolicy": {
+                        "MaximumRetryAttempts": 2,
+                        "MaximumEventAgeInSeconds": 300,
+                    },
+                    "DeadLetterConfig": {
+                        "Arn": config["eventbridge_dlq_arn"],
+                    },
+                }],
+            )
+
+            # 5. Grant EventBridge permission to invoke Lambda
+            try:
+                lambda_client.add_permission(
+                    FunctionName=func_name,
+                    StatementId="AllowEventBridgeInvoke",
+                    Action="lambda:InvokeFunction",
+                    Principal="events.amazonaws.com",
+                    SourceArn=rule_arn,
+                )
+            except lambda_client.exceptions.ResourceConflictException:
+                pass  # Permission already exists
+
+            deployed.append(skill_name)
+            logger.info(f"  Deployed Lambda + EventBridge for: {skill_name}")
+
+        return deployed
+
+    async def ensure_skill_lambdas(
+        self,
+        config: dict[str, Any],
+    ) -> int:
+        """Check that Lambdas exist for all practice skills. Deploy if missing.
+
+        Called at startup after restoring practices from S3.
+        Returns count of deployed/fixed Lambdas.
+        """
+        import boto3  # type: ignore[import-untyped]
+
+        lambda_client = boto3.client("lambda", region_name=config["region"])
+        fixed = 0
+
+        for practice in self._practices.values():
+            if practice.built_in:
+                continue  # Built-in practices are deployed by deploy.sh/Terraform
+
+            for skill_name in practice.skills:
+                func_name = f"{config['name_prefix']}-skill-{skill_name}"
+                try:
+                    lambda_client.get_function(FunctionName=func_name)
+                except Exception:
+                    # Lambda missing — deploy it
+                    logger.info(f"Lambda missing for {skill_name}, deploying...")
+                    deployed = await self.deploy_skill_lambdas(practice, config)
+                    fixed += len(deployed)
+                    break  # All skills in this practice deployed together
+
+        return fixed
+
     @staticmethod
     def _parse_version(version: str) -> tuple[int, ...]:
         """Parse a version string like '1.2.3' into a comparable tuple."""
