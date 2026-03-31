@@ -307,10 +307,17 @@ class WhatsAppAdapter(ChannelAdapter):
 
     @staticmethod
     def is_message_event(event: dict[str, Any]) -> bool:
-        """Check if a webhook event contains a user text message."""
+        """Check if a webhook event contains an inbound user text message.
+
+        Filters out:
+        - Non-text messages (images, stickers, etc.)
+        - Messages sent by the connected account (from_me=true) to prevent loops
+        """
         messages = event.get("messages", [])
         if not messages:
             return False
         msg = messages[0]
-        # Only process text messages for now
+        # Skip messages sent by the bot itself — prevents infinite loops
+        if msg.get("from_me", False):
+            return False
         return msg.get("type") == "text" and bool(msg.get("text", {}).get("body", "").strip())
