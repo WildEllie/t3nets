@@ -1023,6 +1023,13 @@ async def handle_integrations_post(request: Request) -> Response:
                 t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
                 await tenants.set_channel_mapping(tenant_id, "telegram", t_hash)
 
+        elif integration_name == "whatsapp":
+            _register_whatsapp_webhook(request, body)
+            api_token = body.get("api_token", "")
+            if api_token:
+                wa_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
+                await tenants.set_channel_mapping(tenant_id, "whatsapp", wa_hash)
+
         return JSONResponse({"ok": True})
     except Exception as e:
         logger.exception("Integration endpoint error")
@@ -1044,6 +1051,8 @@ def _test_integration(name: str, creds: dict[str, Any]) -> dict[str, Any]:
         return _test_jira(creds)
     elif name == "telegram":
         return _test_telegram(creds)
+    elif name == "whatsapp":
+        return _test_whatsapp(creds)
     return {"ok": False, "error": f"Testing not supported for '{name}'"}
 
 
@@ -1083,6 +1092,55 @@ def _test_telegram(creds: dict[str, Any]) -> dict[str, Any]:
         "ok": True,
         "bot_name": f"@{info.get('username', '')}",
         "display_name": info.get("first_name", ""),
+    }
+
+
+def _register_whatsapp_webhook(request: Request, creds: dict[str, Any]) -> None:
+    from agent.channels.whatsapp import WhatsAppAdapter
+
+    api_token = creds.get("api_token", "")
+    if not api_token:
+        return
+    try:
+        token_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
+        host = request.headers.get("host", "")
+        scheme = "https"
+        if host:
+            base_url = f"{scheme}://{host}"
+        else:
+            base_url = os.environ.get("API_BASE_URL", "")
+        if not base_url:
+            logger.warning("Cannot register WhatsApp webhook: no Host header or API_BASE_URL")
+            return
+        webhook_url = f"{base_url}/api/channels/whatsapp/webhook/{token_hash}"
+        webhook_secret = creds.get("webhook_secret", "")
+        if not webhook_secret:
+            # Auto-generate a secret
+            import secrets as _secrets
+
+            webhook_secret = _secrets.token_urlsafe(24)
+            creds["webhook_secret"] = webhook_secret
+        adapter = WhatsAppAdapter(api_token, webhook_secret)
+        result = adapter.register_webhook(webhook_url)
+        logger.info(f"WhatsApp webhook registration: {result}")
+    except Exception as e:
+        logger.error(f"Failed to register WhatsApp webhook: {e}")
+
+
+def _test_whatsapp(creds: dict[str, Any]) -> dict[str, Any]:
+    from agent.channels.whatsapp import WhatsAppAdapter
+
+    api_token = creds.get("api_token", "")
+    if not api_token:
+        return {"ok": False, "error": "API token is required"}
+    adapter = WhatsAppAdapter(api_token)
+    health = adapter.get_health()
+    if "error" in health:
+        return {"ok": False, "error": health["error"]}
+    return {
+        "ok": True,
+        "status": health.get("status", {}).get("text", "connected"),
+        "phone": health.get("contacts", {}).get("phone", ""),
     }
 
 
@@ -2215,6 +2273,241 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
 
 
 # ---------------------------------------------------------------------------
+# WhatsApp webhook (via Whapi.cloud)
+# ---------------------------------------------------------------------------
+
+
+async def handle_whatsapp_webhook(request: Request) -> Response:
+    from agent.channels.whatsapp import WhatsAppAdapter
+
+    try:
+        body_bytes = await request.body()
+        event = json.loads(body_bytes) if body_bytes else {}
+
+        token_hash = request.path_params.get("token_hash", "")
+        whatsapp_adapter = await _get_whatsapp_adapter(token_hash)
+        if not whatsapp_adapter:
+            logger.warning(f"No WhatsApp adapter for token hash {token_hash[:8]}...")
+            return JSONResponse({"error": "Not configured"}, status_code=401)
+
+        if not whatsapp_adapter.validate_webhook(dict(request.headers), body_bytes):
+            logger.warning("WhatsApp webhook secret validation failed")
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        if WhatsAppAdapter.is_message_event(event):
+            await _handle_whatsapp_message(whatsapp_adapter, event)
+
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        logger.exception("WhatsApp webhook error")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def _get_whatsapp_adapter(token_hash: str):
+    from agent.channels.whatsapp import WhatsAppAdapter
+
+    if not token_hash or token_hash == "webhook":
+        logger.warning("No token hash in WhatsApp webhook URL")
+        return None
+    try:
+        tenant = await tenants.get_by_channel_id("whatsapp", token_hash)
+        creds = await secrets.get(tenant.tenant_id, "whatsapp")
+        api_token = creds.get("api_token", "")
+        if api_token:
+            return WhatsAppAdapter(api_token, creds.get("webhook_secret", ""))
+    except Exception as e:
+        logger.warning(f"WhatsApp channel mapping lookup failed: {e}")
+    return None
+
+
+async def _handle_whatsapp_message(adapter, event: dict[str, Any]) -> None:
+    from agent.channels.whatsapp import WhatsAppAdapter
+    from agent.models.message import OutboundMessage
+
+    message = adapter.parse_inbound(event)
+    text = message.text
+    if not text:
+        return
+
+    token_hash = hashlib.sha256(adapter.api_token.encode()).hexdigest()[:16]
+    try:
+        tenant = await tenants.get_by_channel_id("whatsapp", token_hash)
+    except Exception:
+        logger.warning(f"No tenant mapped for WhatsApp {token_hash[:8]}")
+        return
+
+    tenant_id = tenant.tenant_id
+    conversation_id = f"wa-{message.conversation_id}"
+    logger.info(f"WhatsApp [{tenant_id}]: {text[:100]}")
+
+    clean_text, is_raw = strip_raw_flag(text)
+    active_provider, active_model, model_short_name = _resolve_model(tenant)
+    provider_ai = ai.for_provider(active_provider)
+    system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
+Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
+You are communicating via WhatsApp. Keep responses concise and conversational."""
+    history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
+
+    wa_engine = _get_engine(tenant_id)
+    if not is_raw and is_conversational(clean_text):
+        stats["conversational"] += 1
+        messages = history + [{"role": "user", "content": clean_text}]
+        response = await provider_ai.chat(active_model, system, messages, [])
+        assistant_text = response.text or "Hey! How can I help?"
+        total_tokens = response.input_tokens + response.output_tokens
+    else:
+        wa_router = wa_engine or _fallback_router
+        match = wa_router.match(clean_text, tenant.settings.enabled_skills) if wa_router else None
+        if match:
+            _enrich_match_params(match, clean_text)
+
+            if USE_ASYNC_SKILLS and event_bus and pending_store:
+                _handle_async_channel_skill(
+                    tenant_id=tenant_id,
+                    channel="whatsapp",
+                    skill_name=match.skill_name,
+                    params=match.params,
+                    conversation_id=conversation_id,
+                    reply_target=message.conversation_id,
+                    user_key=message.channel_user_id,
+                    user_message=clean_text,
+                    is_raw=is_raw,
+                    route_type="rule",
+                    model_id=active_model,
+                    model_short_name=model_short_name,
+                )
+                return
+
+            request_id = f"wa-rule-{conversation_id}"
+            await bus.publish_skill_invocation(
+                tenant_id,
+                match.skill_name,
+                match.params,
+                conversation_id,
+                request_id,
+                "whatsapp",
+                message.channel_user_id,
+            )
+            skill_result = bus.get_result(request_id) or {"error": "No result"}
+            stats["rule_routed"] += 1
+            if is_raw and wa_engine and wa_engine.supports_raw(match.skill_name):
+                stats["raw"] += 1
+                assistant_text = _format_raw_json(skill_result)
+                total_tokens = 0
+            else:
+                prompt = (
+                    f'{system}\n\nThe user asked: "{clean_text}"\n\n'
+                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
+                    f"Format this clearly and concisely for WhatsApp."
+                )
+                messages = history + [{"role": "user", "content": prompt}]
+                response = await provider_ai.chat(active_model, system, messages, [])
+                assistant_text = response.text or "Got data but couldn't format."
+                total_tokens = response.input_tokens + response.output_tokens
+        elif wa_engine and (disabled_skill := wa_engine.check_disabled_skill(clean_text)):
+            skill_display = disabled_skill.replace("_", " ")
+            assistant_text = (
+                f"The {skill_display} feature isn't enabled for your workspace. "
+                f"Contact your admin to enable it."
+            )
+            total_tokens = 0
+            _fire_and_forget(
+                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
+            )
+        else:
+            stats["ai_routed"] += 1
+            tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
+            messages = history + [{"role": "user", "content": clean_text}]
+            response = await provider_ai.chat(active_model, system, messages, tools)
+            if response.has_tool_use:
+                tc = response.tool_calls[0]
+                if USE_ASYNC_SKILLS and event_bus and pending_store:
+                    _handle_async_channel_skill(
+                        tenant_id=tenant_id,
+                        channel="whatsapp",
+                        skill_name=tc.tool_name,
+                        params=tc.tool_params,
+                        conversation_id=conversation_id,
+                        reply_target=message.conversation_id,
+                        user_key=message.channel_user_id,
+                        user_message=clean_text,
+                        is_raw=is_raw,
+                        route_type="ai",
+                        model_id=active_model,
+                        model_short_name=model_short_name,
+                    )
+                    return
+
+                request_id = f"wa-ai-{conversation_id}"
+                await bus.publish_skill_invocation(
+                    tenant_id,
+                    tc.tool_name,
+                    tc.tool_params,
+                    conversation_id,
+                    request_id,
+                    "whatsapp",
+                    message.channel_user_id,
+                )
+                skill_result = bus.get_result(request_id) or {"error": "No result"}
+                _fire_and_forget(
+                    _log_training(
+                        tenant_id,
+                        clean_text,
+                        tc.tool_name,
+                        tc.tool_params.get("action"),
+                    )
+                )
+                messages_with_tool = messages + [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": tc.tool_use_id,
+                                "name": tc.tool_name,
+                                "input": tc.tool_params,
+                            }
+                        ],
+                    }
+                ]
+                final = await provider_ai.chat_with_tool_result(
+                    active_model,
+                    system,
+                    messages_with_tool,
+                    tools,
+                    tc.tool_use_id,
+                    skill_result,
+                )
+                assistant_text = final.text or "Got data but couldn't format."
+                total_tokens = (
+                    response.input_tokens
+                    + response.output_tokens
+                    + final.input_tokens
+                    + final.output_tokens
+                )
+            else:
+                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
+                assistant_text = response.text or "Not sure how to help."
+                total_tokens = response.input_tokens + response.output_tokens
+
+    stats["total_tokens"] += total_tokens
+    await memory.save_turn(
+        tenant_id,
+        conversation_id,
+        clean_text,
+        assistant_text,
+        metadata={"route": "whatsapp", "model": model_short_name, "tokens": total_tokens},
+    )
+    outbound = OutboundMessage(
+        channel=ChannelType.WHATSAPP,
+        conversation_id=message.conversation_id,
+        recipient_id=message.channel_user_id,
+        text=assistant_text,
+    )
+    await adapter.send_response(outbound)
+
+
+# ---------------------------------------------------------------------------
 # Practice endpoints
 # ---------------------------------------------------------------------------
 
@@ -2402,6 +2695,11 @@ routes = [
     Route(
         "/api/channels/telegram/webhook/{token_hash}",
         handle_telegram_webhook,
+        methods=["POST"],
+    ),
+    Route(
+        "/api/channels/whatsapp/webhook/{token_hash}",
+        handle_whatsapp_webhook,
         methods=["POST"],
     ),
     # Practices

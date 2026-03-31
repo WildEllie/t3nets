@@ -108,6 +108,8 @@ class AsyncResultRouter:
             self._route_teams(request_id, result, skill_name, pending_req, message)
         elif reply_channel == "telegram":
             self._route_telegram(request_id, result, skill_name, pending_req, message)
+        elif reply_channel == "whatsapp":
+            self._route_whatsapp(request_id, result, skill_name, pending_req, message)
         else:
             logger.warning(f"AsyncResultRouter: unknown channel '{reply_channel}'")
 
@@ -433,6 +435,103 @@ class AsyncResultRouter:
             )
         except Exception as e:
             logger.exception(f"AsyncResultRouter: Telegram routing failed: {e}")
+
+    def _route_whatsapp(
+        self,
+        request_id: str,
+        result: dict[str, Any],
+        skill_name: str,
+        pending_req: Optional[PendingRequest],
+        message: dict[str, Any],
+    ) -> None:
+        """Send result back to WhatsApp via Whapi.cloud API."""
+        from agent.channels.whatsapp import WhatsAppAdapter
+        from agent.models.message import ChannelType, OutboundMessage
+
+        if not pending_req:
+            logger.warning(f"AsyncResultRouter: no pending request for WhatsApp {request_id[:8]}")
+            return
+
+        try:
+            if not self.secrets:
+                logger.error("AsyncResultRouter: no secrets provider configured")
+                return
+            creds = _run_async(self.secrets.get(pending_req.tenant_id, "whatsapp"))
+            api_token = creds.get("api_token", "")
+            if not api_token:
+                logger.error(
+                    f"AsyncResultRouter: missing WhatsApp api_token for "
+                    f"tenant {pending_req.tenant_id}"
+                )
+                return
+
+            adapter = WhatsAppAdapter(api_token)
+
+            is_audio = result.get("type") == "audio"
+            is_raw = pending_req.is_raw
+
+            if is_audio:
+                formatted_text = result.get("text", "")
+                fmt_tokens, fmt_model = 0, ""
+                audio_att: dict[str, Any] = {"type": "audio", "format": result.get("format", "wav")}
+                if result.get("audio_url"):
+                    audio_att["audio_url"] = result["audio_url"]
+                # Whapi.cloud voice needs a URL — skip base64
+                attachments = [audio_att] if audio_att.get("audio_url") else []
+            elif is_raw:
+                formatted_text = json.dumps(result, indent=2)
+                fmt_tokens, fmt_model = 0, ""
+                attachments = []
+            else:
+                formatted_text, fmt_tokens, fmt_model = self._format_result(
+                    result,
+                    skill_name,
+                    pending_req,
+                )
+                attachments = []
+
+            outbound = OutboundMessage(
+                channel=ChannelType.WHATSAPP,
+                conversation_id=pending_req.reply_target,
+                recipient_id="",
+                text=formatted_text,
+                attachments=attachments,
+            )
+            sent = _run_async(adapter.send_response(outbound))
+            if not sent:
+                logger.error(
+                    f"AsyncResultRouter: WhatsApp send_response returned False for {request_id[:8]}"
+                )
+
+            if self.memory:
+                import time as _time
+
+                route_type = pending_req.route_type or "rule"
+                roundtrip_sec = (
+                    round(_time.time() - pending_req.created_at, 1) if pending_req.created_at else 0
+                )
+                _run_async(
+                    self.memory.save_turn(
+                        pending_req.tenant_id,
+                        pending_req.conversation_id,
+                        pending_req.user_message,
+                        formatted_text,
+                        metadata={
+                            "route": route_type,
+                            "skill": skill_name,
+                            "tokens": fmt_tokens,
+                            "model": fmt_model,
+                            "channel": "whatsapp",
+                            "roundtrip_sec": roundtrip_sec,
+                        },
+                    )
+                )
+
+            logger.info(
+                f"AsyncResultRouter: WhatsApp reply sent to chat {pending_req.reply_target}"
+            )
+        except Exception as e:
+            logger.exception(f"AsyncResultRouter: WhatsApp routing failed: {e}")
 
     def _format_result(
         self,

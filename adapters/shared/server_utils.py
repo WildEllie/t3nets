@@ -110,6 +110,31 @@ INTEGRATION_SCHEMAS: dict[str, Any] = {
             },
         ],
     },
+    "whatsapp": {
+        "label": "WhatsApp (Whapi.cloud)",
+        "fields": [
+            {
+                "key": "api_token",
+                "label": "API Token",
+                "type": "password",
+                "required": True,
+                "placeholder": "Paste from Whapi.cloud dashboard",
+            },
+            {
+                "key": "webhook_secret",
+                "label": "Webhook Secret",
+                "type": "text",
+                "required": False,
+                "placeholder": "Optional — auto-generated if blank",
+            },
+        ],
+        "setup_steps": [
+            "1. Go to whapi.cloud and create a channel",
+            "2. Scan the QR code with your WhatsApp",
+            "3. Copy the API token and paste it above",
+            "4. Click Save — webhook is registered automatically",
+        ],
+    },
     "voiceher": {
         "label": "VoiceHer",
         "fields": [
