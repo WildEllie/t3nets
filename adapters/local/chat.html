@@ -1205,14 +1205,30 @@
           div.appendChild(err);
         }
 
-        // Metadata line
+        // Metadata line (same badge styling as regular messages)
         const meta = document.createElement("div");
-        meta.className = "message-meta";
-        const parts = [];
-        if (route) parts.push(route);
-        if (modelName) parts.push(modelName);
-        if (roundtripSec > 0) parts.push(roundtripSec.toFixed(1) + "s");
-        if (parts.length) meta.textContent = parts.join(" · ");
+        meta.className = "meta";
+
+        if (route) {
+          const badge = document.createElement("span");
+          badge.className = "route-badge " + route;
+          const labels = {
+            rule: "rule-based",
+            ai: "ai-routed",
+            tier2: "ai-routed",
+            conversational: "chat",
+            callback: "callback",
+          };
+          badge.textContent = labels[route] || route;
+          meta.appendChild(badge);
+        }
+
+        if (roundtripSec > 0) {
+          const timeBadge = document.createElement("span");
+          timeBadge.className = "route-badge model";
+          timeBadge.textContent = roundtripSec.toFixed(1) + "s";
+          meta.appendChild(timeBadge);
+        }
         div.appendChild(meta);
 
         chatContainer.appendChild(div);
