@@ -2428,6 +2428,7 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
           const isActive = p.name === currentPrimaryPractice;
           const card = document.createElement("div");
           card.className = "practice-card" + (isActive ? " active-practice" : "");
+          const hasConfig = !p.built_in && p.skills && p.skills.some(function(s) { return s.indexOf("voice") >= 0; });
           card.innerHTML =
             '<div class="practice-header">' +
               '<label class="practice-toggle">' +
@@ -2441,11 +2442,13 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
                 '</div>' +
                 '<div class="practice-desc">' + escapeHtml(p.description || "") + '</div>' +
               '</div>' +
+              (hasConfig ? '<button class="skill-expand-btn" onclick="togglePracticeConfig(this, \'' + p.name + '\')">Configure ▾</button>' : '') +
             '</div>' +
             '<div class="practice-meta">' +
               '<div class="practice-skills">Skills: ' + (p.skills || []).map(function(s) { return '<span>' + escapeHtml(s) + '</span>'; }).join("") + '</div>' +
               (p.pages && p.pages.length ? '<div class="practice-pages">Pages: ' + p.pages.map(function(pg) { return '<span>' + escapeHtml(pg.nav_label || pg.slug) + '</span>'; }).join("") + '</div>' : '') +
-            '</div>';
+            '</div>' +
+            '<div class="integration-config" id="pconfig-' + p.name + '"></div>';
 
           const toggle = card.querySelector("input");
           toggle.addEventListener("change", function() {
@@ -2456,6 +2459,105 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
             }
           });
           list.appendChild(card);
+        }
+      }
+
+      async function togglePracticeConfig(btn, practiceName) {
+        const pane = document.getElementById("pconfig-" + practiceName);
+        if (pane.classList.contains("open")) {
+          pane.classList.remove("open");
+          btn.textContent = "Configure ▾";
+          return;
+        }
+        btn.textContent = "Loading...";
+        try {
+          const resp = await fetch("/api/skill/voice_config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify({ action: "get" }),
+          });
+          if (!resp.ok) throw new Error("Failed to load config");
+          const config = await resp.json();
+          if (config.error) throw new Error(config.error);
+          renderPracticeSettings(pane, practiceName, config);
+          pane.classList.add("open");
+          btn.textContent = "Configure ▴";
+        } catch (err) {
+          pane.innerHTML = '<div style="color:var(--text-dim);padding:12px">Config unavailable: ' + err.message + '</div>';
+          pane.classList.add("open");
+          btn.textContent = "Configure ▴";
+        }
+      }
+
+      function renderPracticeSettings(pane, practiceName, config) {
+        const prompt = config.system_prompt || "";
+        const builtinPrompt = config.builtin_prompt || "(built-in prompt not available)";
+        const exag = config.exaggeration || 0.35;
+        const cfg = config.cfg_weight || 0.0;
+        const model = config.claude_model || "claude-sonnet-4-20250514";
+        const pid = practiceName;
+
+        pane.innerHTML =
+          '<div class="skill-settings">' +
+            '<div class="section-label">Voice Synthesis Settings</div>' +
+            '<div class="field-group">' +
+              '<label>Claude Model</label>' +
+              '<input type="text" id="pc-model-' + pid + '" value="' + escapeHtml(model) + '" placeholder="claude-sonnet-4-20250514" style="background:var(--surface);color:var(--text-bright);border:1px solid var(--border);border-radius:6px;padding:8px;width:100%;font-size:13px">' +
+            '</div>' +
+            '<div class="slider-row">' +
+              '<label>Exaggeration</label>' +
+              '<input type="range" min="0" max="1" step="0.05" value="' + exag + '" id="pc-exag-' + pid + '" oninput="document.getElementById(\'pc-exag-val-' + pid + '\').textContent=this.value">' +
+              '<span class="slider-value" id="pc-exag-val-' + pid + '">' + exag + '</span>' +
+            '</div>' +
+            '<div class="slider-row">' +
+              '<label>Voice Match</label>' +
+              '<input type="range" min="0" max="1" step="0.05" value="' + cfg + '" id="pc-cfg-' + pid + '" oninput="document.getElementById(\'pc-cfg-val-' + pid + '\').textContent=this.value">' +
+              '<span class="slider-value" id="pc-cfg-val-' + pid + '">' + cfg + '</span>' +
+            '</div>' +
+            '<div class="field-group" style="margin-top:12px">' +
+              '<label>Claude System Prompt <span style="font-weight:normal;color:var(--text-muted)">(leave empty for built-in)</span></label>' +
+              '<textarea id="pc-prompt-' + pid + '" rows="12" placeholder="Custom system prompt..." style="background:var(--surface);color:var(--text-bright);border:1px solid var(--border);border-radius:8px;padding:10px;width:100%;font-family:Menlo,Monaco,monospace;font-size:12px;line-height:1.5;resize:vertical">' + escapeHtml(prompt) + '</textarea>' +
+            '</div>' +
+            '<div style="margin-top:6px">' +
+              '<button style="font-size:11px;padding:4px 10px;background:var(--surface-3);color:var(--text-dim);border:1px solid var(--border);border-radius:4px;cursor:pointer" onclick="document.getElementById(\'pc-prompt-' + pid + '\').value=document.getElementById(\'pc-builtin-' + pid + '\').value;showToast(\'Built-in prompt loaded\')">Load built-in prompt as baseline</button>' +
+              '<textarea id="pc-builtin-' + pid + '" style="display:none">' + escapeHtml(builtinPrompt) + '</textarea>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;margin-top:12px">' +
+              '<button class="btn-save-settings" onclick="savePracticeSettings(\'' + pid + '\')" style="padding:8px 20px;background:var(--accent-light);color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer">Save Settings</button>' +
+              '<span class="settings-status" id="pc-status-' + pid + '" style="font-size:12px;margin-left:12px"></span>' +
+            '</div>' +
+          '</div>';
+      }
+
+      async function savePracticeSettings(pid) {
+        const statusEl = document.getElementById("pc-status-" + pid);
+        statusEl.textContent = "Saving...";
+        statusEl.style.color = "var(--text-dim)";
+
+        const settings = [
+          { setting: "exaggeration", value: document.getElementById("pc-exag-" + pid).value },
+          { setting: "cfg_weight", value: document.getElementById("pc-cfg-" + pid).value },
+          { setting: "claude_model", value: document.getElementById("pc-model-" + pid).value },
+          { setting: "system_prompt", value: document.getElementById("pc-prompt-" + pid).value },
+        ];
+
+        try {
+          for (const s of settings) {
+            const resp = await fetch("/api/skill/voice_config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+              body: JSON.stringify({ action: "set", setting: s.setting, value: s.value }),
+            });
+            if (!resp.ok) throw new Error("Failed to save " + s.setting);
+            const result = await resp.json();
+            if (result.error) throw new Error(result.error);
+          }
+          statusEl.textContent = "Saved";
+          statusEl.style.color = "#4caf50";
+          showToast("Voice settings saved");
+        } catch (err) {
+          statusEl.textContent = err.message;
+          statusEl.style.color = "#ff6b6b";
         }
       }
 
