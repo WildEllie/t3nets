@@ -252,8 +252,43 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return {"statusCode": 200, "body": "OK"}
 
 
+SQS_MAX_BYTES = 250_000  # SQS limit is 262144, leave margin for envelope
+
+
+def _offload_audio_to_s3(result: dict[str, Any], tenant_id: str) -> dict[str, Any]:
+    """If result has large audio_b64, upload to S3 and replace with presigned URL."""
+    audio_b64 = result.get("audio_b64", "")
+    if not audio_b64 or not S3_BUCKET:
+        return result
+
+    import base64
+    import uuid
+
+    audio_bytes = base64.b64decode(audio_b64)
+    if len(audio_b64) < SQS_MAX_BYTES:
+        return result  # Small enough for inline
+
+    s3 = boto3.client("s3", region_name=REGION)
+    key = f"{tenant_id}/audio/{uuid.uuid4().hex}.wav"
+    s3.put_object(Bucket=S3_BUCKET, Key=key, Body=audio_bytes, ContentType="audio/wav")
+    url = s3.generate_presigned_url(
+        "get_object", Params={"Bucket": S3_BUCKET, "Key": key}, ExpiresIn=3600,
+    )
+    logger.info(f"Lambda: audio offloaded to S3 ({len(audio_bytes)} bytes)")
+
+    # Replace inline audio with URL
+    result = dict(result)
+    del result["audio_b64"]
+    result["audio_url"] = url
+    return result
+
+
 def _send_result(request_id: str, detail: dict[str, Any], result: dict[str, Any]) -> None:
     """Publish skill result to SQS for the router to pick up."""
+    # Offload large audio to S3 before sending via SQS
+    if result.get("type") == "audio" and result.get("audio_b64"):
+        result = _offload_audio_to_s3(result, detail.get("tenant_id", "default"))
+
     sqs = _init_sqs()
     message = {
         "request_id": request_id,

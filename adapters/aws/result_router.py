@@ -138,6 +138,7 @@ class AsyncResultRouter:
                     "text": result.get("text", ""),
                     "audio": {
                         "audio_b64": result.get("audio_b64", ""),
+                        "audio_url": result.get("audio_url", ""),
                         "format": result.get("format", "wav"),
                     },
                     "raw": False,

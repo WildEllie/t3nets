@@ -1194,7 +1194,9 @@
           audioEl.controls = true;
           audioEl.style.width = "100%";
           audioEl.style.marginTop = "8px";
-          audioEl.src = "data:audio/" + fmt + ";base64," + audio.audio_b64;
+          audioEl.src = audio.audio_url
+            ? audio.audio_url
+            : "data:audio/" + fmt + ";base64," + audio.audio_b64;
           div.appendChild(audioEl);
         } catch (e) {
           const err = document.createElement("div");
