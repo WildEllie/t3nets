@@ -1230,6 +1230,14 @@ When you have data to present, format it clearly with structure."""
             match = router.match(clean_text, tenant.settings.enabled_skills) if router else None
 
             if match:
+                # If the skill expects a 'text' param and Tier 1 didn't extract it,
+                # inject the original user message as the text (common for TTS, translation, etc.)
+                skill_def = skills.get_skill(match.skill_name)
+                if skill_def:
+                    schema_props = skill_def.parameters.get("properties", {})
+                    if "text" in schema_props and "text" not in match.params:
+                        match.params["text"] = clean_text
+
                 if USE_ASYNC_SKILLS and event_bus and pending_store:
                     return await _handle_async_skill(
                         tenant_id,
