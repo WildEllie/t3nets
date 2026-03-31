@@ -387,6 +387,16 @@ resource "aws_iam_role_policy" "ecs_task" {
         Resource = aws_iam_role.lambda_skill_executor.arn
       },
       {
+        Sid    = "EC2ForVPCLambda"
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs",
+        ]
+        Resource = "*"
+      },
+      {
         Sid    = "EventBridgeManagePracticeRules"
         Effect = "Allow"
         Action = [
