@@ -2157,6 +2157,33 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
             )
             skill_result = bus.get_result(request_id) or {"error": "No result"}
             stats["rule_routed"] += 1
+
+            # Audio results: send directly with attachment, skip AI formatting
+            if skill_result.get("type") == "audio":
+                assistant_text = skill_result.get("text", "")
+                total_tokens = 0
+                audio_att: dict[str, Any] = {
+                    "type": "audio",
+                    "format": skill_result.get("format", "wav"),
+                }
+                if skill_result.get("audio_url"):
+                    audio_att["audio_url"] = skill_result["audio_url"]
+                if skill_result.get("audio_b64"):
+                    audio_att["audio_b64"] = skill_result["audio_b64"]
+                outbound = OutboundMessage(
+                    channel=ChannelType.TELEGRAM,
+                    conversation_id=message.conversation_id,
+                    recipient_id=message.channel_user_id,
+                    text=assistant_text,
+                    attachments=[audio_att],
+                )
+                await adapter.send_response(outbound)
+                await memory.save_turn(
+                    tenant_id, conversation_id, clean_text, assistant_text,
+                    metadata={"route": "rule", "skill": match.skill_name, "channel": "telegram"},
+                )
+                return
+
             if is_raw and tg_engine and tg_engine.supports_raw(match.skill_name):
                 stats["raw"] += 1
                 assistant_text = _format_raw_json(skill_result)
@@ -2393,6 +2420,33 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
             )
             skill_result = bus.get_result(request_id) or {"error": "No result"}
             stats["rule_routed"] += 1
+
+            # Audio results: send directly with attachment, skip AI formatting
+            if skill_result.get("type") == "audio":
+                assistant_text = skill_result.get("text", "")
+                total_tokens = 0
+                audio_att_wa: dict[str, Any] = {
+                    "type": "audio",
+                    "format": skill_result.get("format", "wav"),
+                }
+                if skill_result.get("audio_url"):
+                    audio_att_wa["audio_url"] = skill_result["audio_url"]
+                if skill_result.get("audio_b64"):
+                    audio_att_wa["audio_b64"] = skill_result["audio_b64"]
+                outbound = OutboundMessage(
+                    channel=ChannelType.WHATSAPP,
+                    conversation_id=message.conversation_id,
+                    recipient_id=message.channel_user_id,
+                    text=assistant_text,
+                    attachments=[audio_att_wa],
+                )
+                await adapter.send_response(outbound)
+                await memory.save_turn(
+                    tenant_id, conversation_id, clean_text, assistant_text,
+                    metadata={"route": "rule", "skill": match.skill_name, "channel": "whatsapp"},
+                )
+                return
+
             if is_raw and wa_engine and wa_engine.supports_raw(match.skill_name):
                 stats["raw"] += 1
                 assistant_text = _format_raw_json(skill_result)
