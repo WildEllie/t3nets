@@ -316,7 +316,8 @@ Practices are complete team experience bundles: skills + custom console pages + 
 
 ### Phase 12: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
-- [ ] Additional channels (Slack, WhatsApp)
+- [ ] Additional channels (Slack, ~~WhatsApp~~)
+      ↳ ✅ WhatsApp adapter completed via Whapi.cloud — see [handoff](../handoffs/022-whatsapp-channel-telegram-fixes.md)
 - [ ] OSS contributor guides
 - [ ] **Milestone:** Public release
 
@@ -367,7 +368,7 @@ Practices are complete team experience bundles: skills + custom console pages + 
 
 ### Channels
 - [ ] Slack adapter
-- [ ] WhatsApp adapter
+- [x] WhatsApp adapter (Whapi.cloud) — [handoff](../handoffs/022-whatsapp-channel-telegram-fixes.md)
 - [ ] SMS adapter (Twilio)
 - [ ] Voice adapter (Twilio / Amazon Connect)
 - [x] Telegram adapter
