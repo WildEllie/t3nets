@@ -2044,11 +2044,13 @@ def _handle_async_channel_skill(
 
 
 async def handle_telegram_webhook(request: Request) -> Response:
+    # ALWAYS return 200 to Telegram — otherwise it retries indefinitely.
+    # Auth failures are the only exception (401 stops Telegram from retrying
+    # an invalid webhook URL, which is the correct behavior).
     try:
         body_bytes = await request.body()
         update = json.loads(body_bytes) if body_bytes else {}
 
-        # Extract token hash from URL path
         token_hash = request.path_params.get("token_hash", "")
         telegram_adapter = await _get_telegram_adapter(token_hash)
         if not telegram_adapter:
@@ -2060,12 +2062,12 @@ async def handle_telegram_webhook(request: Request) -> Response:
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         if TelegramAdapter.is_message_update(update):
-            await _handle_telegram_message(telegram_adapter, update)
+            _fire_and_forget(_handle_telegram_message(telegram_adapter, update))
 
-        return JSONResponse({"ok": True})
     except Exception as e:
         logger.exception("Telegram webhook error")
-        return JSONResponse({"error": str(e)}, status_code=500)
+
+    return JSONResponse({"ok": True})
 
 
 async def _get_telegram_adapter(token_hash: str) -> TelegramAdapter | None:
@@ -2280,6 +2282,7 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
 async def handle_whatsapp_webhook(request: Request) -> Response:
     from agent.channels.whatsapp import WhatsAppAdapter
 
+    # ALWAYS return 200 to Whapi.cloud — otherwise it retries indefinitely.
     try:
         body_bytes = await request.body()
         event = json.loads(body_bytes) if body_bytes else {}
@@ -2295,12 +2298,12 @@ async def handle_whatsapp_webhook(request: Request) -> Response:
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         if WhatsAppAdapter.is_message_event(event):
-            await _handle_whatsapp_message(whatsapp_adapter, event)
+            _fire_and_forget(_handle_whatsapp_message(whatsapp_adapter, event))
 
-        return JSONResponse({"ok": True})
     except Exception as e:
         logger.exception("WhatsApp webhook error")
-        return JSONResponse({"error": str(e)}, status_code=500)
+
+    return JSONResponse({"ok": True})
 
 
 async def _get_whatsapp_adapter(token_hash: str):
