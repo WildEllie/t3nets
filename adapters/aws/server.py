@@ -1332,6 +1332,30 @@ When you have data to present, format it clearly with structure."""
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
 
+                # Audio results: return directly with audio data, skip AI formatting
+                if skill_result.get("type") == "audio":
+                    roundtrip_sec = round(time.time() - request_start, 1)
+                    await memory.save_turn(
+                        tenant_id, conversation_id, clean_text,
+                        skill_result.get("text", ""),
+                        metadata={"route": "rule", "skill": match.skill_name},
+                    )
+                    return JSONResponse({
+                        "text": skill_result.get("text", ""),
+                        "audio": {
+                            "audio_b64": skill_result.get("audio_b64", ""),
+                            "audio_url": skill_result.get("audio_url", ""),
+                            "format": skill_result.get("format", "wav"),
+                        },
+                        "conversation_id": conversation_id,
+                        "tokens": 0,
+                        "route": "rule",
+                        "skill": match.skill_name,
+                        "raw": False,
+                        "model": "",
+                        "roundtrip_sec": roundtrip_sec,
+                    })
+
                 if is_raw and engine and engine.supports_raw(match.skill_name):
                     stats["raw"] += 1
                     stats["rule_routed"] += 1
@@ -1404,6 +1428,30 @@ When you have data to present, format it clearly with structure."""
                             tc.tool_params.get("action"),
                         )
                     )
+
+                    # Audio results: return directly, skip AI formatting
+                    if skill_result.get("type") == "audio":
+                        roundtrip_sec = round(time.time() - request_start, 1)
+                        await memory.save_turn(
+                            tenant_id, conversation_id, clean_text,
+                            skill_result.get("text", ""),
+                            metadata={"route": "ai", "skill": tc.tool_name},
+                        )
+                        return JSONResponse({
+                            "text": skill_result.get("text", ""),
+                            "audio": {
+                                "audio_b64": skill_result.get("audio_b64", ""),
+                                "audio_url": skill_result.get("audio_url", ""),
+                                "format": skill_result.get("format", "wav"),
+                            },
+                            "conversation_id": conversation_id,
+                            "tokens": 0,
+                            "route": "ai",
+                            "skill": tc.tool_name,
+                            "raw": False,
+                            "model": "",
+                            "roundtrip_sec": roundtrip_sec,
+                        })
 
                     if is_raw and engine and engine.supports_raw(tc.tool_name):
                         stats["raw"] += 1
