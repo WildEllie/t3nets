@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** March 7, 2026 (Phase 5c Ollama integration complete)
+**Last Updated:** April 3, 2026 (Phase 7b Practices framework complete; 7c deployment gap identified)
 
 ---
 
@@ -240,6 +240,24 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 - [x] Unit tests for OllamaProvider (mock HTTP, tool call mapping)
 - [x] **Milestone:** Free models selectable for any tenant; zero-cost local dev without API key
 
+### Phase 5d: Server Architecture Refactor
+
+Extract ~1,400 lines of duplicated handler logic from the two monolithic server files into a shared handler layer. Both servers become thin wiring layers over shared business logic — eliminating dual-pathway debugging and making the codebase testable per-handler.
+
+- [ ] Create `adapters/shared/handlers/` — settings, integrations, chat, history, training, health, practices, webhooks
+- [ ] Extract `SettingsHandlers` — `GET/POST /api/settings` (~150 lines, 95% duplicated)
+- [ ] Extract `IntegrationHandlers` — list/get/post/test integrations (~200 lines, 95% duplicated)
+- [ ] Extract `ChatHandlers` — Tier 0/1/2 routing, skill dispatch, AI fallback (~250 lines, 85% shared; inject `skill_invoker` callable for async/sync divergence)
+- [ ] Extract `HistoryHandlers`, `TrainingHandlers`, `HealthHandlers` (~200 lines combined)
+- [ ] Extract `PracticeHandlers` + `WebhookHandlers` (Teams/Telegram/WhatsApp dispatch logic)
+- [ ] Slim `adapters/aws/server.py` to ~400 lines (Cognito auth, SQS, WebSocket, Lambda deploy, route wiring)
+- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (env auth, DirectBus, route wiring)
+- [ ] Split `agent/practices/registry.py` (643 lines) → `registry` + `installer` + `deployer` + `assets`
+- [ ] Fix `adapters/aws/admin_api.py`: replace manual path parsing + remove `asyncio.run()` calls
+- [ ] **Milestone:** No handler logic duplicated across servers; each handler file independently testable
+
+      ↳ 📋 Full handoff: `.claude/plans/server-refactor-handoff.md`
+
 ### Phase 6: Expand Skills
 - [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
       ↳ ✅ Completed — see [handoff notes](../handoffs/001-fix-release-notes-skill.md)
@@ -255,31 +273,49 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 Practices are complete team experience bundles: skills + custom console pages + functionality, uploadable as ZIPs. Pages interact with data through skills (same async EventBus flow as chat). One primary practice per tenant + add-on skills/pages from other practices.
 
 **Phase 7a — Core Practice Framework**
-- [ ] Practice data models (`PracticeDefinition`, `PracticePage`) and `PracticeRegistry`
-- [ ] Built-in engineering practice: move existing skills into `agent/practices/engineering/`
-- [ ] Practice manifest format (`practice.yaml`: skills, pages, integrations, system_prompt_addon)
-- [ ] `POST /api/skill/{name}` — async skill invocation for pages (returns 202, result via WebSocket/SSE)
-- [ ] `GET /api/practices/pages` — pages for tenant's dynamic nav injection
-- [ ] `GET /api/practices` — list installed practices
-- [ ] Practice page serving: `/p/{practice}/{page}` (local: FileResponse; AWS: S3 + CloudFront CDN)
-- [ ] Dynamic nav: practice page links injected after `checkAuth()` in all HTML pages
-- [ ] TenantSettings: `primary_practice`, `addon_skills`, `addon_pages`
-- [ ] Server startup: `PracticeRegistry.load_builtin()` replaces direct `SkillRegistry.load_from_directory()`
-- [ ] **Milestone:** Built-in engineering practice works with pages served at `/p/engineering/sprint`
+- [x] Practice data models (`PracticeDefinition`, `PracticePage`) and `PracticeRegistry`
+      ↳ ✅ `agent/models/practice.py`, `agent/practices/registry.py`
+- [x] Built-in engineering practice: move existing skills into `agent/practices/engineering/`
+      ↳ ✅ `agent/practices/dev-jira/` with `practice.yaml` and skills
+- [x] Practice manifest format (`practice.yaml`: skills, pages, integrations, system_prompt_addon)
+      ↳ ✅ `agent/practices/dev-jira/practice.yaml`
+- [x] `POST /api/skill/{name}` — async skill invocation for pages (returns 202, result via WebSocket/SSE)
+      ↳ ✅ Both servers: `aws/server.py:2573`, `local/dev_server.py:2037`
+- [x] `GET /api/practices/pages` — pages for tenant's dynamic nav injection
+      ↳ ✅ Both servers: `aws/server.py:2676`, `local/dev_server.py:2093`
+- [x] `GET /api/practices` — list installed practices
+      ↳ ✅ Both servers: `aws/server.py:2606`, `local/dev_server.py:2071`
+- [x] Practice page serving: `/p/{practice}/{page}` (local: FileResponse; AWS: S3 + CloudFront CDN)
+      ↳ ✅ Both servers: `aws/server.py:2686`, `local/dev_server.py:253`
+- [x] Dynamic nav: practice page links injected after `checkAuth()` in all HTML pages
+      ↳ ✅ `settings.html:881-882` and other pages
+- [x] TenantSettings: `primary_practice`, `addon_skills`, `addon_pages`
+      ↳ ✅ `agent/models/tenant.py:29-31`
+- [x] Server startup: `PracticeRegistry.load_builtin()` replaces direct `SkillRegistry.load_from_directory()`
+      ↳ ✅ Both servers call it on init
+- [x] **Milestone:** Built-in engineering practice works with pages served at `/p/engineering/sprint`
 
 **Phase 7b — Practice Upload & Management**
-- [ ] `POST /api/practices/upload` — ZIP upload, validation (structure, safety, name uniqueness), extraction
-- [ ] Settings UI: Practices tab (select primary, upload, manage add-ons)
-- [ ] Practice persistence (DynamoDB for AWS, SQLite for local)
-- [ ] S3-backed practice storage for uploaded ZIPs (pages + skills)
-- [ ] Skill versioning and rollback
-- [ ] **Milestone:** Admin can upload a practice ZIP and activate it for their tenant
+- [x] `POST /api/practices/upload` — ZIP upload, validation (structure, safety, name uniqueness), extraction
+      ↳ ✅ Both servers: `aws/server.py:2628`, `local/dev_server.py:2103`
+- [x] Settings UI: Practices tab (select primary, upload, manage add-ons)
+      ↳ ✅ `adapters/local/settings.html:972` (tab), lines 1119-1348 (upload UI)
+- [x] Practice persistence (DynamoDB for AWS, SQLite for local)
+      ↳ ✅ Registry loads from `data/practices/`; stored in tenant settings
+- [x] S3-backed practice storage for uploaded ZIPs (pages + skills)
+      ↳ ✅ `adapters/aws/s3_blob_store.py`; ZIPs stored at `practices/{name}/practice.zip`
+- [x] Skill versioning and rollback
+      ↳ ✅ `PracticeRegistry.install_zip()` version checking at lines 154-168
+- [x] **Milestone:** Admin can upload a practice ZIP and activate it for their tenant
 
 **Phase 7c — AWS Deployment**
 - [ ] `deploy.sh`: sync built-in practice pages to S3 under `p/` prefix
+      ↳ ⚠️ deploy.sh only syncs HTML/CSS/JS/PNG — practice assets not included
 - [ ] CloudFront: `/p/*` cache behavior pointing to S3 origin
+      ↳ ⚠️ `infra/aws/modules/cdn/main.tf` has no `/p/*` behavior — practice pages will 404 on AWS
 - [ ] ECS task role: S3 GetObject/PutObject for `practices/*` prefix
-- [ ] Lambda hot-reload — pull uploaded practice skills from S3 on cold start
+- [x] Lambda hot-reload — pull uploaded practice skills from S3 on cold start
+      ↳ ✅ `adapters/aws/lambda_handler.py:83-115` loads practices via `PracticeRegistry`
 - [ ] **Milestone:** Practices work end-to-end on AWS
 
 ### Phase 8: Dashboard & UX
@@ -288,11 +324,15 @@ Practices are complete team experience bundles: skills + custom console pages + 
       ↳ ✅ Completed — `infra/aws/modules/cdn/`
 - [x] CloudFront Function: extensionless path rewriting (`/chat` → `/chat.html`) at viewer-request stage
 - [x] `deploy.sh`: HTML sync to S3 + CloudFront invalidation (`/*`) after ECS stabilises
-- [ ] Dashboard theming — polished design system (dark mode, consistent components)
+- [x] Dashboard theming — dark mode toggle
+      ↳ ✅ `adapters/local/theme.js`; `data-theme` attribute in HTML pages
+- [x] Skill configuration UI
+      ↳ ✅ Settings page references `/api/skill/voice_config` and per-skill config panels
 - [ ] Make the console/dashboard a full SPA with client-side routing
 - [ ] Mobile-responsive layout
+      ↳ ⚠️ No `@media` queries in chat.html — not responsive
 - [ ] Conversation history browser
-- [ ] Skill configuration UI
+      ↳ ⚠️ History loads inline in chat via `/api/history`; no dedicated browsing UI
 
 ### Phase 9: Multi-cloud
 - [ ] Set up another cloud (Azure or GCP)
@@ -307,14 +347,7 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
 - [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
 
-### Phase 11: Email Delivery
-- [ ] SES domain verification + IAM in Terraform
-- [ ] HTML invite email template with tenant branding
-- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
-- [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
-- [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
-
-### Phase 12: Long-Term Memory & Polish
+### Phase 11: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
 - [ ] Additional channels (Slack, ~~WhatsApp~~)
       ↳ ✅ WhatsApp adapter completed via Whapi.cloud — see [handoff](../handoffs/022-whatsapp-channel-telegram-fixes.md)
@@ -354,6 +387,10 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] Local development docker-compose with hot reload
 - [x] Unit test suite for router, rule engine, skills (tenant isolation, release notes, error handler)
 - [ ] Integration test harness
+
+### Settings & Integrations
+- [ ] Partial save for integration secrets — null fields preserve existing DB values, blank/space intentionally clears. UI: existing hidden values show asterisk (no placeholder tooltip), empty fields show placeholder tooltip.
+- [ ] Practice-level integration secrets — shared credentials (e.g., Chatterbox URL/token) scoped to a practice, accessible by all its skills. Replaces per-skill duplication.
 
 ### Platform
 - [ ] Rate limiting per tenant
