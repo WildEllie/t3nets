@@ -2251,6 +2251,32 @@ Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
                         tc.tool_params.get("action"),
                     )
                 )
+
+                # Audio results: send directly with attachment, skip AI formatting
+                if skill_result.get("type") == "audio":
+                    ai_text = skill_result.get("text", "")
+                    ai_audio: dict[str, Any] = {
+                        "type": "audio",
+                        "format": skill_result.get("format", "wav"),
+                    }
+                    if skill_result.get("audio_url"):
+                        ai_audio["audio_url"] = skill_result["audio_url"]
+                    if skill_result.get("audio_b64"):
+                        ai_audio["audio_b64"] = skill_result["audio_b64"]
+                    outbound = OutboundMessage(
+                        channel=ChannelType.TELEGRAM,
+                        conversation_id=message.conversation_id,
+                        recipient_id=message.channel_user_id,
+                        text=ai_text,
+                        attachments=[ai_audio],
+                    )
+                    await adapter.send_response(outbound)
+                    await memory.save_turn(
+                        tenant_id, conversation_id, clean_text, ai_text,
+                        metadata={"route": "ai", "skill": tc.tool_name, "channel": "telegram"},
+                    )
+                    return
+
                 messages_with_tool = messages + [
                     {
                         "role": "assistant",
@@ -2514,6 +2540,32 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
                         tc.tool_params.get("action"),
                     )
                 )
+
+                # Audio results: send directly with attachment, skip AI formatting
+                if skill_result.get("type") == "audio":
+                    ai_text_wa = skill_result.get("text", "")
+                    ai_audio_wa: dict[str, Any] = {
+                        "type": "audio",
+                        "format": skill_result.get("format", "wav"),
+                    }
+                    if skill_result.get("audio_url"):
+                        ai_audio_wa["audio_url"] = skill_result["audio_url"]
+                    if skill_result.get("audio_b64"):
+                        ai_audio_wa["audio_b64"] = skill_result["audio_b64"]
+                    outbound = OutboundMessage(
+                        channel=ChannelType.WHATSAPP,
+                        conversation_id=message.conversation_id,
+                        recipient_id=message.channel_user_id,
+                        text=ai_text_wa,
+                        attachments=[ai_audio_wa],
+                    )
+                    await adapter.send_response(outbound)
+                    await memory.save_turn(
+                        tenant_id, conversation_id, clean_text, ai_text_wa,
+                        metadata={"route": "ai", "skill": tc.tool_name, "channel": "whatsapp"},
+                    )
+                    return
+
                 messages_with_tool = messages + [
                     {
                         "role": "assistant",
