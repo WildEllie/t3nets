@@ -1013,7 +1013,27 @@ async def handle_integrations_post(request: Request) -> Response:
         if tenant_id == DEFAULT_TENANT and body.get("tenant_id"):
             tenant_id = body["tenant_id"]
 
-        await secrets.put(tenant_id, integration_name, body)
+        # Partial save: merge with existing secrets.
+        # - null/missing fields → preserve existing value
+        # - blank (whitespace-only) → intentionally clear the value
+        # - non-empty value → update
+        try:
+            existing = await secrets.get(tenant_id, integration_name)
+        except Exception:
+            existing = {}
+
+        merged = dict(existing)
+        for key, value in body.items():
+            if key == "tenant_id":
+                continue  # Skip metadata field
+            if value is None:
+                pass  # Null → preserve existing
+            elif isinstance(value, str) and value.strip() == "":
+                merged[key] = ""  # Blank/space → intentionally clear
+            else:
+                merged[key] = value  # Non-empty → update
+
+        await secrets.put(tenant_id, integration_name, merged)
         logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
 
         if integration_name == "telegram":

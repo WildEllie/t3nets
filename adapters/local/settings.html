@@ -1605,15 +1605,24 @@
 
         let fieldsHtml = "";
         for (const field of fields) {
-          const value = config[field.key] || "";
+          const rawValue = config[field.key] || "";
+          const isMasked = rawValue === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+          const hasExisting = rawValue !== "" && rawValue !== undefined;
           const inputType = field.type === "password" ? "password" : "text";
           const required = field.required ? " required" : "";
+          // Show asterisk if value exists in DB (masked or real)
+          const existingBadge = hasExisting ? ' <span style="color:var(--accent);font-size:11px;" title="Value stored — leave empty to keep">●</span>' : "";
+          // Empty input → null (preserve). Space → "" (clear).
+          const placeholder = hasExisting && isMasked
+            ? "Leave empty to keep existing value"
+            : escapeHtml(field.placeholder || "");
           fieldsHtml += `
                     <div class="field-group">
-                        <label>${field.label}${field.required ? " *" : ""}</label>
+                        <label>${field.label}${field.required ? " *" : ""}${existingBadge}</label>
                         <input type="${inputType}" data-key="${field.key}" data-integration="${integrationName}"
-                               value="${value === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" ? "" : escapeHtml(value)}"
-                               placeholder="${escapeHtml(field.placeholder || "")}"${required}>
+                               data-has-existing="${hasExisting}"
+                               value="${isMasked ? "" : escapeHtml(rawValue)}"
+                               placeholder="${placeholder}"${required}>
                     </div>
                 `;
         }
@@ -1639,21 +1648,26 @@
         const panes = document.querySelectorAll(".integration-config.open");
         for (const pane of panes) {
           const inputs = pane.querySelectorAll("input[data-key]");
-          // Check if any input in this pane belongs to this integration
           const data = {};
-          let found = false;
-          inputs.forEach((input) => {
-            data[input.dataset.key] = input.value;
-            found = true;
-          });
-          // Match by checking if the pane has save button for this integration
           const saveBtn = pane.querySelector(`.btn-save`);
           if (
-            saveBtn &&
-            saveBtn.getAttribute("onclick").includes(integrationName)
+            !saveBtn ||
+            !saveBtn.getAttribute("onclick").includes(integrationName)
           ) {
-            return data;
+            continue;
           }
+          inputs.forEach((input) => {
+            const val = input.value;
+            const hasExisting = input.dataset.hasExisting === "true";
+            if (val === "" && hasExisting) {
+              // Empty input + existing value → null (preserve)
+              data[input.dataset.key] = null;
+            } else {
+              // Non-empty → update; space-only → intentionally clear
+              data[input.dataset.key] = val;
+            }
+          });
+          return data;
         }
         return {};
       }
@@ -2094,11 +2108,18 @@
             const inputs = pane.querySelectorAll("input[data-key]");
             inputs.forEach((input) => {
               const val = data.config[input.dataset.key] || "";
-              // Don't fill masked password values
-              if (
-                val &&
-                val !== "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
-              ) {
+              const isMasked = val === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
+              const hasExisting = val !== "" && val !== undefined;
+              input.dataset.hasExisting = hasExisting ? "true" : "false";
+              if (hasExisting && isMasked) {
+                input.value = "";
+                input.placeholder = "Leave empty to keep existing value";
+                // Add indicator dot to label
+                const label = input.closest(".field-group")?.querySelector("label");
+                if (label && !label.querySelector(".existing-dot")) {
+                  label.insertAdjacentHTML("beforeend", ' <span class="existing-dot" style="color:var(--accent);font-size:11px;" title="Value stored — leave empty to keep">\u25cf</span>');
+                }
+              } else if (hasExisting) {
                 input.value = val;
               }
             });
@@ -2153,7 +2174,13 @@
         const inputs = pane.querySelectorAll("input[data-key]");
         const formData = {};
         inputs.forEach((input) => {
-          formData[input.dataset.key] = input.value;
+          const val = input.value;
+          const hasExisting = input.dataset.hasExisting === "true";
+          if (val === "" && hasExisting) {
+            formData[input.dataset.key] = null; // Preserve existing
+          } else {
+            formData[input.dataset.key] = val; // Update or clear
+          }
         });
 
         const statusEl = document.getElementById(
