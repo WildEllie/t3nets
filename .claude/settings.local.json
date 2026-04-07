@@ -30,7 +30,58 @@
       "Bash(python -c \"from agent.models.practice import PracticeDefinition, PracticePage; from agent.practices.registry import PracticeRegistry; from adapters.local.file_blob_store import FileStore; print\\(''All imports OK''\\)\")",
       "Bash(pip3 install:*)",
       "Bash(source venv/bin/activate)",
-      "Bash(python -c \"from agent.models.practice import PracticeDefinition; from agent.practices.registry import PracticeRegistry; from adapters.local.file_blob_store import FileStore; print\\(''All imports OK''\\)\")"
+      "Bash(python -c \"from agent.models.practice import PracticeDefinition; from agent.practices.registry import PracticeRegistry; from adapters.local.file_blob_store import FileStore; print\\(''All imports OK''\\)\")",
+      "Bash(git push:*)",
+      "Bash(find /Users/ellieportugali/projects/t3nets/agent -type f -name \"*.py\" -not -path \"*/.claude/*\" -exec wc -l {} +)",
+      "Bash(wc -l /Users/ellieportugali/projects/t3nets/adapters/aws/*.py)",
+      "Bash(find /Users/ellieportugali/projects/t3nets/adapters -type f -name \"*.py\" -not -path \"*/.claude/*\" -exec wc -l {} +)",
+      "Bash(wc -l /Users/ellieportugali/projects/t3nets/adapters/local/*.py)",
+      "Bash(wc -l /Users/ellieportugali/projects/t3nets/agent/channels/*.py)",
+      "Bash(wc -l /Users/ellieportugali/projects/t3nets/agent/router/*.py)",
+      "Bash(wc -l /Users/ellieportugali/projects/t3nets/agent/models/*.py)",
+      "Read(//tmp/**)",
+      "Bash(find /Users/ellieportugali/projects/t3nets/adapters -name \"*.py\" -exec wc -l {} \\\\;)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "Bash(grep -l \"class.*Provider\\\\|class.*Store\" /Users/ellieportugali/projects/t3nets/adapters/aws/*.py)",
+      "WebFetch(domain:paperclip.ing)"
     ]
+  },
+  "mcpServers": {
+    "pare-git": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@paretools/git"
+      ]
+    },
+    "pare-npm": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@paretools/npm"
+      ]
+    },
+    "pare-build": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@paretools/build"
+      ]
+    },
+    "pare-lint": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@paretools/lint"
+      ]
+    },
+    "pare-test": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@paretools/test"
+      ]
+    }
   }
 }

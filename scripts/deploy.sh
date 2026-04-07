@@ -28,8 +28,8 @@ ECR_REPO="${NAME_PREFIX}-router"
 
 echo "╔══════════════════════════════════════╗"
 echo "║  T3nets Deploy                       ║"
-echo "║  Tag: $TAG"
-echo "║  Env: $ENVIRONMENT"
+echo "║  Tag: $TAG                         ║"
+echo "║  Env: $ENVIRONMENT                        ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
 
