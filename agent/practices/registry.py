@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
+from t3nets_sdk.manifest import parse_practice_yaml
 
 from agent.interfaces.blob_store import BlobStore
 from agent.models.practice import PracticeDefinition, PracticePage
@@ -145,45 +146,44 @@ class PracticeRegistry:
         if len(parts) > 1:
             prefix = "/".join(parts[:-1]) + "/"
 
-        # Parse manifest
-        manifest_data = yaml.safe_load(zf.read(manifest_path))
-        name = manifest_data.get("name", "")
-        if not name or not name.replace("-", "_").replace("_", "").isalnum():
-            raise ValueError(f"Practice name must be alphanumeric (with - or _), got: '{name}'")
+        # Parse + validate manifest via the SDK pydantic schema. ManifestError
+        # is a ValueError subclass, so existing callers that `except ValueError`
+        # keep working.
+        manifest = parse_practice_yaml(zf.read(manifest_path).decode("utf-8"))
+        name = manifest.name
 
         # Version check against installed_versions (from DynamoDB tenant settings)
-        new_version = manifest_data.get("version", "0.0.0")
+        new_version = manifest.version
         if installed_versions and name in installed_versions:
             cur_version = installed_versions[name]
             new_v = self._parse_version(new_version)
             cur_v = self._parse_version(cur_version)
             if new_v == cur_v:
-                raise ValueError(
-                    f"Practice '{name}' v{new_version} is already installed"
-                )
+                raise ValueError(f"Practice '{name}' v{new_version} is already installed")
             if new_v < cur_v:
                 raise ValueError(
                     f"Downgrade not allowed: '{name}' v{new_version} < installed v{cur_version}"
                 )
             logger.info(f"Upgrading practice '{name}': v{cur_version} → v{new_version}")
 
-        # Validate skills
-        for skill_name in manifest_data.get("skills", []):
+        # Validate skill files are present in the ZIP.
+        names = set(zf.namelist())
+        for skill_name in manifest.skills:
             skill_yaml = f"{prefix}skills/{skill_name}/skill.yaml"
             skill_worker = f"{prefix}skills/{skill_name}/worker.py"
-            if skill_yaml not in zf.namelist():
+            if skill_yaml not in names:
                 raise ValueError(f"Missing skill.yaml for skill '{skill_name}'")
-            if skill_worker not in zf.namelist():
+            if skill_worker not in names:
                 raise ValueError(f"Missing worker.py for skill '{skill_name}'")
 
-        # Validate pages
-        for page in manifest_data.get("pages", []):
-            page_file = f"{prefix}{page['file']}"
-            if page_file not in zf.namelist():
-                raise ValueError(f"Missing page file: {page['file']}")
+        # Validate page files are present in the ZIP.
+        for page in manifest.pages:
+            page_file = f"{prefix}{page.file}"
+            if page_file not in names:
+                raise ValueError(f"Missing page file: {page.file}")
 
         # Security: reject path traversal
-        for member in zf.namelist():
+        for member in names:
             if ".." in member or member.startswith("/"):
                 raise ValueError(f"Invalid path in ZIP: {member}")
 
@@ -195,7 +195,7 @@ class PracticeRegistry:
             if member.endswith("/"):
                 continue  # skip directories
             # Strip prefix if present
-            relative = member[len(prefix):] if prefix and member.startswith(prefix) else member
+            relative = member[len(prefix) :] if prefix and member.startswith(prefix) else member
             target = dest / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(zf.read(member))
@@ -224,9 +224,7 @@ class PracticeRegistry:
 
         # Run install hooks
         if practice.hooks.get("on_install"):
-            await self._run_install_hook(
-                practice, dest, blob_store=blob_store, tenant_id=tenant_id
-            )
+            await self._run_install_hook(practice, dest, blob_store=blob_store, tenant_id=tenant_id)
 
         self._practices[practice.name] = practice
         logger.info(f"Installed practice: {practice.name} v{practice.version}")
@@ -337,6 +335,7 @@ class PracticeRegistry:
         Returns list of deployed skill names.
         """
         import json
+
         import boto3  # type: ignore[import-untyped]
 
         region = config["region"]
@@ -416,11 +415,13 @@ class PracticeRegistry:
             lambda_arn = func_info["Configuration"]["FunctionArn"]
 
             # 3. Create/update EventBridge rule
-            event_pattern = json.dumps({
-                "source": ["agent.router"],
-                "detail-type": ["skill.invoke"],
-                "detail": {"skill_name": [skill_name]},
-            })
+            event_pattern = json.dumps(
+                {
+                    "source": ["agent.router"],
+                    "detail-type": ["skill.invoke"],
+                    "detail": {"skill_name": [skill_name]},
+                }
+            )
             events_client.put_rule(
                 Name=rule_name,
                 EventBusName=config["eventbridge_bus_name"],
@@ -428,24 +429,26 @@ class PracticeRegistry:
                 Description=f"Route {skill_name} skill invocations to Lambda",
             )
             # EventBridge rule ARN format: arn:aws:events:{region}:{account}:rule/{bus}/{rule}
-            account_region = config['eventbridge_bus_arn'].split(":event-bus/")[0]
+            account_region = config["eventbridge_bus_arn"].split(":event-bus/")[0]
             rule_arn = f"{account_region}:rule/{config['eventbridge_bus_name']}/{rule_name}"
 
             # 4. Set Lambda as target
             events_client.put_targets(
                 Rule=rule_name,
                 EventBusName=config["eventbridge_bus_name"],
-                Targets=[{
-                    "Id": f"skill-{skill_name}",
-                    "Arn": lambda_arn,
-                    "RetryPolicy": {
-                        "MaximumRetryAttempts": 2,
-                        "MaximumEventAgeInSeconds": 300,
-                    },
-                    "DeadLetterConfig": {
-                        "Arn": config["eventbridge_dlq_arn"],
-                    },
-                }],
+                Targets=[
+                    {
+                        "Id": f"skill-{skill_name}",
+                        "Arn": lambda_arn,
+                        "RetryPolicy": {
+                            "MaximumRetryAttempts": 2,
+                            "MaximumEventAgeInSeconds": 300,
+                        },
+                        "DeadLetterConfig": {
+                            "Arn": config["eventbridge_dlq_arn"],
+                        },
+                    }
+                ],
             )
 
             # 5. Grant EventBridge permission to invoke Lambda

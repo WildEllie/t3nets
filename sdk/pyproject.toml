@@ -11,7 +11,12 @@ authors = [
 
 # Intentionally minimal: zero cloud SDKs, zero web framework deps.
 # Practice repos depend on this and nothing else from t3nets.
-dependencies = []
+# pydantic is used only for manifest parsing (practice.yaml / skill.yaml),
+# never on the request hot path — those models stay as stdlib dataclasses.
+dependencies = [
+    "pydantic>=2.0",
+    "PyYAML>=6.0",
+]
 
 [project.optional-dependencies]
 dev = [
