@@ -1,0 +1,43 @@
+[project]
+name = "t3nets-sdk"
+version = "0.1.0"
+description = "Public SDK for building t3nets practices — contracts, models, interfaces, test doubles."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [
+    {name = "Outlocks", email = "dev@outlocks.com"},
+]
+
+# Intentionally minimal: zero cloud SDKs, zero web framework deps.
+# Practice repos depend on this and nothing else from t3nets.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["t3nets_sdk*"]
+
+[tool.setuptools.package-data]
+t3nets_sdk = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

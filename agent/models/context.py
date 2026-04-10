@@ -1,40 +1,10 @@
 """
-Request Context — flows through the entire request pipeline.
+Re-export shim — canonical definitions live in t3nets_sdk.models.context.
+
+Kept for backwards-compatible imports of the form:
+    from agent.models.context import RequestContext
 """
 
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from t3nets_sdk.models.context import RequestContext
 
-from agent.models.message import ChannelType
-from agent.models.tenant import Tenant, TenantUser
-
-
-@dataclass
-class RequestContext:
-    """
-    Immutable context for a single request.
-    Created at the start of message handling, passed to every component.
-    """
-
-    tenant: Tenant
-    user: TenantUser
-    channel: ChannelType
-    conversation_id: str
-    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-    @property
-    def tenant_id(self) -> str:
-        return self.tenant.tenant_id
-
-    @property
-    def user_id(self) -> str:
-        return self.user.user_id
-
-    def log_prefix(self) -> str:
-        """For structured logging."""
-        return (
-            f"[{self.tenant_id}:{self.user.display_name}"
-            f":{self.channel.value}:{self.request_id[:8]}]"
-        )
+__all__ = ["RequestContext"]
