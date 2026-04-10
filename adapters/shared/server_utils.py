@@ -1,7 +1,20 @@
 """Shared server utilities — constants and pure functions used by both local and AWS servers."""
 
+import asyncio
 import json
 from typing import Any
+
+# Strong refs to fire-and-forget tasks so GC cannot collect them before completion.
+_bg_tasks: set[asyncio.Task[None]] = set()
+
+
+def fire_and_forget(coro: Any) -> None:  # type: ignore[type-arg]
+    """Schedule a coroutine as a background task, retaining a strong reference
+    so the GC cannot collect it before it completes."""
+    task: asyncio.Task[None] = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
 
 # Integration field schemas — defines the config form per integration type.
 # Used by GET /api/integrations to tell the frontend which fields to render.

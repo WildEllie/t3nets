@@ -3,9 +3,9 @@ T3nets Local Development Server
 
 A simple HTTP server that wires all local adapters together.
 Uses HYBRID ROUTING:
-  1. Conversational → Claude direct (no tools, fewer tokens)
-  2. Rule-matched → Skill direct, then Claude formats (1 API call instead of 2)
-  3. Ambiguous → Full Claude with tools (2 API calls)
+  1. Conversational -> Claude direct (no tools, fewer tokens)
+  2. Rule-matched -> Skill direct, then Claude formats (1 API call instead of 2)
+  3. Ambiguous -> Full Claude with tools (2 API calls)
 
 Debug mode:
   Append --raw to any message to skip Claude formatting and see raw skill output.
@@ -18,13 +18,11 @@ Usage:
 import asyncio
 import base64
 import hashlib
-import inspect
 import json
 import logging
 import os
 import sys
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,13 +49,15 @@ from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
 from adapters.local.sqlite_training_store import SQLiteTrainingStore
 from adapters.ollama.provider import OllamaProvider
+from adapters.shared.handlers.chat import ChatHandlers
+from adapters.shared.handlers.health import HealthHandlers
+from adapters.shared.handlers.history import HistoryHandlers
+from adapters.shared.handlers.integrations import IntegrationHandlers
+from adapters.shared.handlers.practices import PracticeHandlers
+from adapters.shared.handlers.settings import SettingsHandlers
+from adapters.shared.handlers.training import TrainingHandlers
+from adapters.shared.handlers.webhooks import WebhookHandlers
 from adapters.shared.multi_provider import MultiAIProvider
-from adapters.shared.server_utils import (
-    INTEGRATION_SCHEMAS,
-    _format_raw_json,
-    _strip_metadata,
-    _uptime_human,
-)
 from agent.channels.base import ChannelRegistry
 from agent.channels.dashboard import DashboardAdapter
 from agent.channels.teams import TeamsAdapter
@@ -67,14 +67,10 @@ from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
     get_model_for_provider,
-    get_models_for_providers,
 )
-from agent.models.message import ChannelType
 from agent.models.tenant import Invitation
 from agent.practices.registry import PracticeRegistry
-from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
-from agent.router.models import TrainingExample
-from agent.router.rule_engine_builder import RuleEngineBuilder
+from agent.router.compiled_engine import CompiledRuleEngine
 from agent.skills.registry import SkillRegistry
 from agent.sse import SSEConnectionManager
 
@@ -99,6 +95,16 @@ blobs: FileStore
 pending_store: LocalPendingStore
 started_at: float = 0.0
 
+# Shared handler instances (initialized in init())
+settings_handlers: SettingsHandlers
+integration_handlers: IntegrationHandlers
+chat_handlers: ChatHandlers
+history_handlers: HistoryHandlers
+training_handlers: TrainingHandlers
+health_handlers: HealthHandlers
+practice_handlers: PracticeHandlers
+webhook_handlers: WebhookHandlers
+
 # Per-tenant compiled rule engines (keyed by tenant_id)
 _compiled_engines: dict[str, CompiledRuleEngine] = {}
 _bg_tasks: set[asyncio.Task[None]] = set()  # strong refs to fire-and-forget tasks
@@ -116,12 +122,12 @@ DEFAULT_TENANT = "local"
 DEFAULT_CONVERSATION = "dashboard-default"
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "")
 
-# Build number — read from version.txt at startup
+# Build number -- read from version.txt at startup
 _version_path = Path(__file__).resolve().parent.parent.parent / "version.txt"
 BUILD_NUMBER = _version_path.read_text().strip() if _version_path.exists() else "0"
 
 # Stats for the session
-stats = {
+stats: dict[str, int] = {
     "rule_routed": 0,
     "ai_routed": 0,
     "conversational": 0,
@@ -153,7 +159,7 @@ def _resolve_model(tenant: Any) -> tuple[str, str, str]:
                 break
 
     if not selected_provider:
-        # Model not supported by any active provider — use a safe fallback
+        # Model not supported by any active provider -- use a safe fallback
         selected_provider = active[0]
         fallback_id = "llama-3.2-3b" if "ollama" in active else DEFAULT_MODEL_ID
         logger.warning(
@@ -197,6 +203,17 @@ def _extract_user_key(request: Request) -> str:
         except Exception:
             pass
     return user_key
+
+
+def _enrich_match_params(match: Any, clean_text: str) -> None:
+    """Inject original user text into match params for skills that expect a 'text' field."""
+    if not match:
+        return
+    skill_def = skills.get_skill(match.skill_name)
+    if skill_def:
+        schema_props = skill_def.parameters.get("properties", {})
+        if "text" in schema_props and "text" not in match.params:
+            match.params["text"] = clean_text
 
 
 # ---------------------------------------------------------------------------
@@ -321,86 +338,139 @@ async def sse_endpoint(request: Request) -> StreamingResponse:
 
 
 # ---------------------------------------------------------------------------
-# Health / status
+# Thin wrappers: delegate to shared handler classes
 # ---------------------------------------------------------------------------
 
 
 async def handle_health_api(request: Request) -> Response:
-    """Rich health/status JSON endpoint."""
-    try:
-        uptime_secs = time.time() - started_at
-        tenant = await tenants.get_tenant(DEFAULT_TENANT)
-        connected_integrations = await secrets.list_integrations(DEFAULT_TENANT)
+    return await health_handlers.handle_health_api(request)
 
-        all_integrations = {
-            "jira": {"connected": "jira" in connected_integrations},
-            "github": {"connected": "github" in connected_integrations},
-            "teams": {"connected": "teams" in connected_integrations},
-            "telegram": {"connected": "telegram" in connected_integrations},
-            "twilio": {"connected": "twilio" in connected_integrations},
-        }
 
-        skills_info = []
-        for skill in skills.list_skills():
-            skills_info.append(
-                {
-                    "name": skill.name,
-                    "description": skill.description.strip()[:120],
-                    "requires_integration": skill.requires_integration,
-                    "supports_raw": skill.supports_raw,
-                    "triggers": skill.triggers[:8],
-                }
-            )
+async def handle_settings_get(request: Request) -> Response:
+    return await settings_handlers.get_settings(request, DEFAULT_TENANT)
 
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if len(api_key) > 12:
-            key_preview = api_key[:8] + "..." + api_key[-4:]
-        else:
-            key_preview = "not set" if not api_key else "***"
 
-        health = {
-            "status": "ok",
-            "platform": os.getenv("T3NETS_PLATFORM", "local"),
-            "stage": os.getenv("T3NETS_STAGE", "dev"),
-            "started_at": datetime.fromtimestamp(started_at, tz=timezone.utc).isoformat(),
-            "uptime_seconds": round(uptime_secs, 1),
-            "uptime_human": _uptime_human(uptime_secs),
-            "python_version": (
-                f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-            ),
-            "tenant": {
-                "tenant_id": tenant.tenant_id,
-                "name": tenant.name,
-                "status": tenant.status,
-                "enabled_skills": tenant.settings.enabled_skills,
-                "ai_model": tenant.settings.ai_model,
-            },
-            "ai": {
-                "providers": ai.active_providers,
-                "model": _resolve_model(tenant)[1],
-                "api_key_preview": key_preview,
-                "total_tokens": stats["total_tokens"],
-            },
-            "routing": {
-                "rule_routed": stats["rule_routed"],
-                "ai_routed": stats["ai_routed"],
-                "conversational": stats["conversational"],
-                "raw": stats["raw"],
-                "errors": stats["errors"],
-            },
-            "integrations": all_integrations,
-            "skills": skills_info,
-            "sse_connections": sse_manager.connection_count,
-        }
-        return JSONResponse(health)
+async def handle_settings_post(request: Request) -> Response:
+    return await settings_handlers.post_settings(request, DEFAULT_TENANT)
 
-    except Exception as e:
-        logger.exception("Health check error")
-        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+
+async def handle_history(request: Request) -> Response:
+    return await history_handlers.get_history(request, DEFAULT_TENANT, DEFAULT_CONVERSATION)
+
+
+async def handle_integrations_list(request: Request) -> Response:
+    return await integration_handlers.list_integrations(request, DEFAULT_TENANT)
+
+
+async def handle_integration_get(request: Request) -> Response:
+    return await integration_handlers.get_integration(request, DEFAULT_TENANT)
+
+
+async def handle_integrations_post(request: Request) -> Response:
+    return await integration_handlers.post_integration(request, DEFAULT_TENANT)
+
+
+async def handle_integrations_test(request: Request) -> Response:
+    return await integration_handlers.test_integration(request, DEFAULT_TENANT)
+
+
+async def handle_chat(request: Request) -> Response:
+    return await chat_handlers.handle_chat(request)
+
+
+async def handle_clear(request: Request) -> Response:
+    return await chat_handlers.handle_clear(request)
+
+
+async def handle_teams_webhook(request: Request) -> Response:
+    return await webhook_handlers.handle_teams_webhook(request)
+
+
+async def handle_telegram_webhook(request: Request) -> Response:
+    return await webhook_handlers.handle_telegram_webhook(request)
+
+
+async def handle_skill_invoke(request: Request) -> Response:
+    return await practice_handlers.invoke_skill(request, DEFAULT_TENANT)
+
+
+async def handle_practices_list(request: Request) -> Response:
+    return await practice_handlers.list_practices(request, DEFAULT_TENANT)
+
+
+async def handle_practices_pages(request: Request) -> Response:
+    return await practice_handlers.list_practice_pages(request, DEFAULT_TENANT)
+
+
+async def handle_practices_upload(request: Request) -> Response:
+    return await practice_handlers.upload_practice(request, DEFAULT_TENANT)
+
+
+async def handle_callback(request: Request) -> Response:
+    return await practice_handlers.handle_callback(request, DEFAULT_TENANT)
 
 
 # ---------------------------------------------------------------------------
-# Auth stubs (local dev — always unauthenticated)
+# Training & rules admin (thin wrappers)
+# ---------------------------------------------------------------------------
+
+
+async def handle_training_admin(request: Request) -> Response:
+    """Handle /api/admin/training and /api/admin/training/{id} routes."""
+    method = request.method
+    path = str(request.url.path)
+    parts = path.rstrip("/").split("/")
+    example_id = parts[4] if len(parts) > 4 else ""
+
+    try:
+        if method == "GET" and not example_id:
+            limit = int(request.query_params.get("limit", "50"))
+            unannotated = request.query_params.get("unannotated", "false").lower() == "true"
+            data, status = await training_handlers.list_training(
+                DEFAULT_TENANT, limit=limit, unannotated=unannotated
+            )
+            return JSONResponse(data, status_code=status)
+
+        elif method == "PATCH" and example_id:
+            body = await request.json()
+            data, status = await training_handlers.annotate_training(
+                DEFAULT_TENANT, example_id, body
+            )
+            return JSONResponse(data, status_code=status)
+
+        elif method == "DELETE" and example_id:
+            data, status = await training_handlers.delete_training(DEFAULT_TENANT, example_id)
+            return JSONResponse(data, status_code=status)
+
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    except Exception as e:
+        logger.exception("Training admin error")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def handle_rules_admin(request: Request) -> Response:
+    """Handle /api/admin/rules/rebuild and /api/admin/rules/status."""
+    method = request.method
+    path = str(request.url.path)
+
+    try:
+        if method == "POST" and path.endswith("/rebuild"):
+            _fire_and_forget(chat_handlers.rebuild_rules(DEFAULT_TENANT))
+            data, status = await training_handlers.rebuild_rules(DEFAULT_TENANT)
+            return JSONResponse(data, status_code=status)
+
+        if method == "GET" and path.endswith("/status"):
+            data, status = await training_handlers.rules_status(DEFAULT_TENANT)
+            return JSONResponse(data, status_code=status)
+
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    except Exception as e:
+        logger.exception("Rules admin error")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Auth stubs (local dev -- always unauthenticated)
 # ---------------------------------------------------------------------------
 
 
@@ -428,640 +498,6 @@ async def handle_auth_me(request: Request) -> Response:
             "tenant_name": tenant.name,
         }
     )
-
-
-# ---------------------------------------------------------------------------
-# Settings
-# ---------------------------------------------------------------------------
-
-
-async def handle_settings_get(request: Request) -> Response:
-    """Return current settings and available models."""
-    try:
-        tenant = await tenants.get_tenant(DEFAULT_TENANT)
-        s = tenant.settings
-        available_skills = [
-            {
-                "name": sk.name,
-                "description": sk.description.strip(),
-                "requires_integration": sk.requires_integration,
-            }
-            for sk in skills.list_skills()
-        ]
-        connected_integrations = await secrets.list_integrations(DEFAULT_TENANT)
-        return JSONResponse(
-            {
-                "ai_model": s.ai_model or DEFAULT_MODEL_ID,
-                "providers": ai.active_providers,
-                "models": get_models_for_providers(ai.active_providers),
-                "platform": os.getenv("T3NETS_PLATFORM", "local"),
-                "stage": os.getenv("T3NETS_STAGE", "dev"),
-                "build": BUILD_NUMBER,
-                "enabled_skills": s.enabled_skills,
-                "available_skills": available_skills,
-                "connected_integrations": connected_integrations,
-                "enabled_channels": s.enabled_channels,
-                "system_prompt_override": s.system_prompt_override,
-                "max_tokens_per_message": s.max_tokens_per_message,
-                "messages_per_day": s.messages_per_day,
-                "max_conversation_history": s.max_conversation_history,
-                "primary_practice": s.primary_practice,
-            }
-        )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_settings_post(request: Request) -> Response:
-    """Update tenant settings."""
-    try:
-        body = await request.json()
-        tenant = await tenants.get_tenant(DEFAULT_TENANT)
-        changed = False
-        rebuild_skills = False
-
-        if "ai_model" in body:
-            model_id = body["ai_model"]
-            model = get_model(model_id)
-            if not model:
-                return JSONResponse({"error": f"Unknown model: {model_id}"}, status_code=400)
-            active = ai.active_providers
-            if not any(p in model.providers for p in active):
-                return JSONResponse(
-                    {"error": f"Model '{model_id}' not available for {active}"}, status_code=400
-                )
-            tenant.settings.ai_model = model_id
-            changed = True
-            logger.info(f"Model changed to: {model.display_name} ({model_id})")
-
-        if "enabled_skills" in body:
-            skill_list = body["enabled_skills"]
-            if not isinstance(skill_list, list):
-                return JSONResponse({"error": "enabled_skills must be a list"}, status_code=400)
-            known = set(skills.list_skill_names())
-            unknown = [s for s in skill_list if s not in known]
-            if unknown:
-                return JSONResponse(
-                    {"error": f"Unknown skills: {', '.join(unknown)}"}, status_code=400
-                )
-            tenant.settings.enabled_skills = skill_list
-            changed = True
-            logger.info(f"Enabled skills updated: {skill_list}")
-            rebuild_skills = True
-
-        if "system_prompt_override" in body:
-            tenant.settings.system_prompt_override = body["system_prompt_override"]
-            changed = True
-
-        if "max_tokens_per_message" in body:
-            val = body["max_tokens_per_message"]
-            if not isinstance(val, int) or val < 256 or val > 16384:
-                return JSONResponse(
-                    {"error": "max_tokens_per_message must be 256-16384"}, status_code=400
-                )
-            tenant.settings.max_tokens_per_message = val
-            changed = True
-
-        if "messages_per_day" in body:
-            val = body["messages_per_day"]
-            if not isinstance(val, int) or val < 1:
-                return JSONResponse(
-                    {"error": "messages_per_day must be a positive integer"}, status_code=400
-                )
-            tenant.settings.messages_per_day = val
-            changed = True
-
-        if "max_conversation_history" in body:
-            val = body["max_conversation_history"]
-            if not isinstance(val, int) or val < 1 or val > 100:
-                return JSONResponse(
-                    {"error": "max_conversation_history must be 1-100"}, status_code=400
-                )
-            tenant.settings.max_conversation_history = val
-            changed = True
-
-        if "primary_practice" in body:
-            practice_name = body["primary_practice"]
-            tenant.settings.primary_practice = practice_name
-            for p in practices.list_all():
-                if p.name == practice_name:
-                    for skill_name in p.skills:
-                        if skill_name not in tenant.settings.enabled_skills:
-                            tenant.settings.enabled_skills.append(skill_name)
-                    break
-            changed = True
-            rebuild_skills = True
-            logger.info(f"Primary practice set to: {practice_name}")
-
-        if changed:
-            await tenants.update_tenant(tenant)
-        if rebuild_skills:
-            _fire_and_forget(_rebuild_rules(DEFAULT_TENANT))
-        return JSONResponse({"ok": True})
-
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_history(request: Request) -> Response:
-    """Return conversation history for the default conversation."""
-    try:
-        history = await memory.get_conversation(DEFAULT_TENANT, DEFAULT_CONVERSATION)
-        return JSONResponse(
-            {
-                "messages": history,
-                "platform": os.getenv("T3NETS_PLATFORM", "local"),
-                "stage": os.getenv("T3NETS_STAGE", "dev"),
-            }
-        )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# Integrations
-# ---------------------------------------------------------------------------
-
-
-async def handle_integrations_list(request: Request) -> Response:
-    """GET /api/integrations — list all integrations with status and field schemas."""
-    try:
-        connected = await secrets.list_integrations(DEFAULT_TENANT)
-        result = []
-        for name, schema in INTEGRATION_SCHEMAS.items():
-            result.append(
-                {
-                    "name": name,
-                    "label": schema["label"],
-                    "connected": name in connected,
-                    "fields": schema["fields"],
-                }
-            )
-        return JSONResponse(result)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_integration_get(request: Request) -> Response:
-    """GET /api/integrations/{name} — return current config with sensitive fields masked."""
-    try:
-        integration_name = request.path_params["name"]
-        if integration_name not in INTEGRATION_SCHEMAS:
-            return JSONResponse(
-                {"error": f"Unknown integration: {integration_name}"}, status_code=404
-            )
-        schema = INTEGRATION_SCHEMAS[integration_name]
-        connected = False
-        config = {}
-        try:
-            stored = await secrets.get(DEFAULT_TENANT, integration_name)
-            connected = True
-            password_keys = {f["key"] for f in schema["fields"] if f["type"] == "password"}
-            for key, value in stored.items():
-                if key in password_keys and value:
-                    config[key] = "\u2022" * 8
-                else:
-                    config[key] = value
-        except Exception:
-            pass
-        return JSONResponse(
-            {
-                "name": integration_name,
-                "label": schema["label"],
-                "connected": connected,
-                "config": config,
-                "fields": schema["fields"],
-            }
-        )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_integrations_post(request: Request) -> Response:
-    """POST /api/integrations/{name} — save integration credentials."""
-    try:
-        integration_name = request.path_params["name"]
-        body = await request.json()
-        tenant_id = body.get("tenant_id") or DEFAULT_TENANT
-        await secrets.put(tenant_id, integration_name, body)
-        logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
-        if integration_name == "telegram":
-            _register_telegram_webhook(request, body)
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        logger.exception("Integration endpoint error")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_integrations_test(request: Request) -> Response:
-    """POST /api/integrations/{name}/test — test integration credentials."""
-    try:
-        integration_name = request.path_params["name"]
-        body = await request.json()
-        result = _test_integration(integration_name, body)
-        return JSONResponse(result, status_code=200 if result.get("ok") else 400)
-    except Exception as e:
-        logger.exception("Integration test error")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-def _test_integration(name: str, creds: dict[str, Any]) -> dict[str, Any]:
-    if name == "jira":
-        return _test_jira(creds)
-    elif name == "telegram":
-        return _test_telegram(creds)
-    return {"ok": False, "error": f"Testing not supported for '{name}'"}
-
-
-def _register_telegram_webhook(request: Request, creds: dict[str, Any]) -> None:
-    """Register the Telegram webhook URL after saving credentials."""
-    bot_token = creds.get("bot_token", "")
-    if not bot_token:
-        return
-    try:
-        token_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
-        host = request.headers.get("host", "localhost:8080")
-        scheme = "https" if "443" in host else "http"
-        base_url = f"{scheme}://{host}"
-        webhook_url = f"{base_url}/api/channels/telegram/webhook/{token_hash}"
-        webhook_secret = creds.get("webhook_secret", "")
-        adapter = TelegramAdapter(bot_token, webhook_secret)
-        result = adapter.register_webhook(webhook_url)
-        logger.info(f"Telegram webhook registration: {result}")
-    except Exception as e:
-        logger.error(f"Failed to register Telegram webhook: {e}")
-
-
-def _test_telegram(creds: dict[str, Any]) -> dict[str, Any]:
-    bot_token = creds.get("bot_token", "")
-    if not bot_token:
-        return {"ok": False, "error": "Bot token is required"}
-    adapter = TelegramAdapter(bot_token)
-    info = adapter.get_bot_info()
-    if "error" in info:
-        return {"ok": False, "error": info["error"]}
-    return {
-        "ok": True,
-        "bot_name": f"@{info.get('username', '')}",
-        "display_name": info.get("first_name", ""),
-    }
-
-
-def _test_jira(creds: dict[str, Any]) -> dict[str, Any]:
-    import urllib.error
-    import urllib.request
-
-    url = creds.get("url", "").rstrip("/")
-    email = creds.get("email", "")
-    api_token = creds.get("api_token", "")
-    if not all([url, email, api_token]):
-        return {"ok": False, "error": "url, email, and api_token are required"}
-    try:
-        auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-        req = urllib.request.Request(
-            f"{url}/rest/api/3/myself",
-            headers={"Authorization": f"Basic {auth}", "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-            return {
-                "ok": True,
-                "user": data.get("emailAddress", email),
-                "display_name": data.get("displayName", ""),
-            }
-    except urllib.error.HTTPError as e:
-        return {"ok": False, "error": f"Jira returned {e.code}: {e.reason}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# Rule engine helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_engine(tenant_id: str) -> CompiledRuleEngine | None:
-    """Return the compiled rule engine for a tenant, or None if not yet built."""
-    return _compiled_engines.get(tenant_id)
-
-
-async def _rebuild_rules(tenant_id: str) -> None:
-    """(Re)build AI-generated routing rules for a tenant and cache the engine."""
-    try:
-        tenant = await tenants.get_tenant(tenant_id)
-        all_skills = skills.list_skills()
-        enabled = [s for s in all_skills if s.name in tenant.settings.enabled_skills]
-        disabled = [s for s in all_skills if s.name not in tenant.settings.enabled_skills]
-
-        # Increment version from the last saved rule set
-        existing = await rule_store.load_rule_set(tenant_id)
-        old_version = existing.version if existing else 0
-
-        # Include recent training data to improve patterns
-        training_data = await training_store.list_examples(tenant_id, limit=50)
-
-        active_provider, api_model, _ = _resolve_model(tenant)
-        builder = RuleEngineBuilder()
-        rule_set = await builder.build_rules(
-            tenant_id=tenant_id,
-            enabled_skills=enabled,
-            disabled_skills=disabled,
-            ai=ai.for_provider(active_provider),
-            model=api_model,
-            training_data=training_data or None,
-        )
-        rule_set.version = old_version + 1
-
-        await rule_store.save_rule_set(rule_set)
-        _compiled_engines[tenant_id] = CompiledRuleEngine(rule_set, skills)
-        logger.info(f"Rules rebuilt for tenant '{tenant_id}' (v{rule_set.version})")
-    except Exception:
-        logger.exception(f"Failed to rebuild rules for tenant '{tenant_id}'")
-
-
-async def _log_training(
-    tenant_id: str,
-    message_text: str,
-    matched_skill: str | None,
-    matched_action: str | None,
-    was_disabled_skill: bool = False,
-) -> None:
-    """Fire-and-forget: log a Tier 2 routing decision as training data."""
-    import uuid as _uuid
-    from datetime import datetime as _dt
-    from datetime import timezone as _tz
-
-    try:
-        example = TrainingExample(
-            tenant_id=tenant_id,
-            example_id=_uuid.uuid4().hex,
-            message_text=message_text,
-            timestamp=_dt.now(_tz.utc).isoformat(),
-            matched_skill=matched_skill,
-            matched_action=matched_action,
-            was_disabled_skill=was_disabled_skill,
-        )
-        await training_store.log_example(example)
-    except Exception:
-        logger.exception("Failed to log training example")
-
-
-# ---------------------------------------------------------------------------
-# Chat & clear
-# ---------------------------------------------------------------------------
-
-
-async def handle_chat(request: Request) -> Response:
-    """Handle a chat message with hybrid routing."""
-    try:
-        body = await request.json()
-        text = body.get("text", "").strip()
-        if not text:
-            return JSONResponse({"error": "Empty message"}, status_code=400)
-
-        conversation_id = body.get("conversation_id", DEFAULT_CONVERSATION)
-
-        # Extract user email from JWT (if present)
-        user_email = ""
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            try:
-                payload_b64 = auth_header[7:].split(".")[1]
-                padding = 4 - len(payload_b64) % 4
-                if padding != 4:
-                    payload_b64 += "=" * padding
-                claims = json.loads(base64.urlsafe_b64decode(payload_b64))
-                user_email = claims.get("email", "")
-            except Exception:
-                pass
-
-        clean_text, is_raw = strip_raw_flag(text)
-        logger.info(f"Chat: {text[:100]}" + (" [RAW]" if is_raw else ""))
-        is_raw_response = False
-
-        history = _strip_metadata(await memory.get_conversation(DEFAULT_TENANT, conversation_id))
-        tenant = await tenants.get_tenant(DEFAULT_TENANT)
-        active_provider, active_model, model_short_name = _resolve_model(tenant)
-        provider_ai = ai.for_provider(active_provider)
-
-        system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
-Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
-When you have data to present, format it clearly with structure."""
-
-        # === TIER 0: Conversational ===
-        if not is_raw and is_conversational(clean_text):
-            logger.info("Route: CONVERSATIONAL (no tools)")
-            stats["conversational"] += 1
-            messages = history + [{"role": "user", "content": clean_text}]
-            response = await provider_ai.chat(
-                model=active_model, system=system, messages=messages, tools=[]
-            )
-            assistant_text = response.text or "Hey! How can I help?"
-            total_tokens = response.input_tokens + response.output_tokens
-            route_type = "conversational"
-
-        else:
-            # === TIER 1: Compiled rule engine ===
-            engine = _get_engine(DEFAULT_TENANT)
-            match = engine.match(clean_text, tenant.settings.enabled_skills) if engine else None
-
-            if match:
-                logger.info(
-                    f"Route: RULE-BASED → {match.skill_name}.{match.action}"
-                    + (" [RAW]" if is_raw else "")
-                )
-                request_id = f"rule-{conversation_id}"
-                await bus.publish_skill_invocation(
-                    tenant_id=DEFAULT_TENANT,
-                    skill_name=match.skill_name,
-                    params=match.params,
-                    session_id=conversation_id,
-                    request_id=request_id,
-                    reply_channel="dashboard",
-                    reply_target="dashboard-user",
-                )
-                skill_result = bus.get_result(request_id)
-                if not skill_result:
-                    skill_result = {"error": "Skill returned no result"}
-
-                if is_raw and engine and engine.supports_raw(match.skill_name):
-                    logger.info(f"Returning raw output for {match.skill_name}")
-                    stats["raw"] += 1
-                    stats["rule_routed"] += 1
-                    assistant_text = _format_raw_json(skill_result)
-                    total_tokens = 0
-                    route_type = "rule"
-                    is_raw_response = True
-                else:
-                    if is_raw:
-                        logger.info(
-                            f"Skill '{match.skill_name}' does not support --raw, "
-                            f"falling back to Claude formatting"
-                        )
-                    stats["rule_routed"] += 1
-                    logger.info(f"Skill result: {json.dumps(skill_result)[:300]}")
-                    format_prompt = f"""{system}
-
-The user asked: "{clean_text}"
-
-You called the {match.skill_name} tool and got this data:
-{json.dumps(skill_result, indent=2)}
-
-Format this data into a clear, helpful response for the user.
-Include risk assessment and actionable suggestions where relevant."""
-                    messages = history + [{"role": "user", "content": format_prompt}]
-                    response = await provider_ai.chat(
-                        model=active_model, system=system, messages=messages, tools=[]
-                    )
-                    assistant_text = response.text or "Got the data but couldn't format it."
-                    total_tokens = response.input_tokens + response.output_tokens
-                    route_type = "rule"
-
-            # Check for disabled skill before falling through to Claude
-            elif engine and (disabled_skill := engine.check_disabled_skill(clean_text)):
-                skill_display = disabled_skill.replace("_", " ")
-                logger.info(f"Route: DISABLED SKILL → {disabled_skill}")
-                assistant_text = (
-                    f"The {skill_display} feature isn't enabled for your workspace. "
-                    f"Contact your admin to enable it."
-                )
-                total_tokens = 0
-                route_type = "disabled_skill"
-                _fire_and_forget(
-                    _log_training(DEFAULT_TENANT, clean_text, None, None, was_disabled_skill=True)
-                )
-
-            # === TIER 2: Full Claude routing (freeform chat + skill selection) ===
-            else:
-                if is_raw:
-                    logger.info("--raw flag ignored: no rule match, using AI routing")
-                logger.info("Route: AI (full Claude with tools)")
-                stats["ai_routed"] += 1
-
-                tools = skills.get_tools_for_tenant(type("Ctx", (), {"tenant": tenant})())
-                messages = history + [{"role": "user", "content": clean_text}]
-                response = await provider_ai.chat(
-                    model=active_model, system=system, messages=messages, tools=tools
-                )
-
-                if response.has_tool_use:
-                    tool_call = response.tool_calls[0]
-                    logger.info(f"AI chose skill: {tool_call.tool_name}")
-                    request_id = f"ai-{conversation_id}"
-                    await bus.publish_skill_invocation(
-                        tenant_id=DEFAULT_TENANT,
-                        skill_name=tool_call.tool_name,
-                        params=tool_call.tool_params,
-                        session_id=conversation_id,
-                        request_id=request_id,
-                        reply_channel="dashboard",
-                        reply_target="dashboard-user",
-                    )
-                    skill_result = bus.get_result(request_id)
-                    if not skill_result:
-                        skill_result = {"error": "Skill returned no result"}
-
-                    _fire_and_forget(
-                        _log_training(
-                            DEFAULT_TENANT,
-                            clean_text,
-                            tool_call.tool_name,
-                            tool_call.tool_params.get("action"),
-                        )
-                    )
-
-                    if is_raw and engine and engine.supports_raw(tool_call.tool_name):
-                        logger.info(f"Returning raw output for {tool_call.tool_name} (AI-routed)")
-                        stats["raw"] += 1
-                        assistant_text = _format_raw_json(skill_result)
-                        total_tokens = response.input_tokens + response.output_tokens
-                        route_type = "ai"
-                        is_raw_response = True
-                    else:
-                        messages_with_tool = messages + [
-                            {
-                                "role": "assistant",
-                                "content": [
-                                    {
-                                        "type": "tool_use",
-                                        "id": tool_call.tool_use_id,
-                                        "name": tool_call.tool_name,
-                                        "input": tool_call.tool_params,
-                                    }
-                                ],
-                            }
-                        ]
-                        final_response = await provider_ai.chat_with_tool_result(
-                            model=active_model,
-                            system=system,
-                            messages=messages_with_tool,
-                            tools=tools,
-                            tool_use_id=tool_call.tool_use_id,
-                            tool_result=skill_result,
-                        )
-                        assistant_text = (
-                            final_response.text or "Got the data but couldn't format it."
-                        )
-                        total_tokens = (
-                            response.input_tokens
-                            + response.output_tokens
-                            + final_response.input_tokens
-                            + final_response.output_tokens
-                        )
-                        route_type = "ai"
-                else:
-                    # Freeform chat response — no skill matched
-                    _fire_and_forget(_log_training(DEFAULT_TENANT, clean_text, None, None))
-                    assistant_text = response.text or "I'm not sure how to help with that."
-                    total_tokens = response.input_tokens + response.output_tokens
-                    route_type = "ai"
-
-        stats["total_tokens"] += total_tokens
-
-        chat_metadata: dict[str, Any] = {
-            "route": route_type,
-            "model": model_short_name,
-            "tokens": total_tokens,
-        }
-        if user_email:
-            chat_metadata["user_email"] = user_email
-        if not is_raw_response:
-            await memory.save_turn(
-                DEFAULT_TENANT,
-                conversation_id,
-                clean_text,
-                assistant_text,
-                metadata=chat_metadata,
-            )
-
-        return JSONResponse(
-            {
-                "text": assistant_text,
-                "conversation_id": conversation_id,
-                "tokens": total_tokens,
-                "route": route_type,
-                "raw": is_raw_response,
-                "model": model_short_name,
-                "user_email": user_email,
-            }
-        )
-
-    except Exception as e:
-        logger.exception("Chat error")
-        stats["errors"] += 1
-        friendly = error_handler.handle(e, context="chat")
-        return JSONResponse({"error": friendly.message, **friendly.to_dict()}, status_code=500)
-
-
-async def handle_clear(request: Request) -> Response:
-    """Clear conversation history."""
-    try:
-        body = await request.json()
-        conversation_id = body.get("conversation_id", DEFAULT_CONVERSATION)
-        await memory.clear_conversation(DEFAULT_TENANT, conversation_id)
-        return JSONResponse({"cleared": True})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -1097,7 +533,7 @@ async def handle_invitation_validate(request: Request) -> Response:
 
 
 async def handle_invitation_accept(request: Request) -> Response:
-    """Accept an invitation — link user to tenant."""
+    """Accept an invitation -- link user to tenant."""
     try:
         body = await request.json()
         invite_code = body.get("invite_code", "")
@@ -1159,12 +595,12 @@ async def handle_invitation_accept(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Admin tenant management (local dev — no auth required)
+# Admin tenant management (local dev -- no auth required)
 # ---------------------------------------------------------------------------
 
 
 async def handle_create_tenant(request: Request) -> Response:
-    """POST /api/admin/tenants — create a tenant."""
+    """POST /api/admin/tenants -- create a tenant."""
     try:
         body = await request.json()
         tenant_id = body.get("tenant_id", "").strip()
@@ -1204,7 +640,7 @@ async def handle_create_tenant(request: Request) -> Response:
 
 
 async def handle_admin_tenant_detail(request: Request) -> Response:
-    """Catch-all for /api/admin/tenants/{rest:path} — dispatch by method + sub-path."""
+    """Catch-all for /api/admin/tenants/{rest:path} -- dispatch by method + sub-path."""
     rest = request.path_params["rest"]
     method = request.method
     path = f"/api/admin/tenants/{rest}"
@@ -1369,7 +805,7 @@ async def _admin_revoke_invitation(path: str) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Platform API (local dev — no auth)
+# Platform API (local dev -- no auth)
 # ---------------------------------------------------------------------------
 
 
@@ -1474,7 +910,7 @@ async def handle_platform_create_tenant(request: Request) -> Response:
 
 
 async def handle_platform_tenant_detail(request: Request) -> Response:
-    """Catch-all for /api/platform/tenants/{rest:path} — dispatch by method + sub-path."""
+    """Catch-all for /api/platform/tenants/{rest:path} -- dispatch by method + sub-path."""
     rest = request.path_params["rest"]
     method = request.method
     path = f"/api/platform/tenants/{rest}"
@@ -1517,614 +953,12 @@ async def handle_platform_tenant_detail(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Training data admin handlers (local dev — no strict auth)
+# Blob upload/download (local FileStore)
 # ---------------------------------------------------------------------------
-
-
-async def handle_training_admin(request: Request) -> Response:
-    """Handle /api/admin/training and /api/admin/training/{id} routes."""
-    method = request.method
-    path = str(request.url.path)
-    parts = path.rstrip("/").split("/")
-    # parts: ['', 'api', 'admin', 'training', maybe id]
-    example_id = parts[4] if len(parts) > 4 else ""
-
-    try:
-        if method == "GET" and not example_id:
-            limit = int(request.query_params.get("limit", "50"))
-            unannotated = request.query_params.get("unannotated", "false").lower() == "true"
-            examples = await training_store.list_examples(DEFAULT_TENANT, limit=limit)
-            if unannotated:
-                examples = [e for e in examples if not e.admin_override_skill]
-            return JSONResponse(
-                {
-                    "examples": [
-                        {
-                            "example_id": e.example_id,
-                            "message_text": e.message_text,
-                            "timestamp": e.timestamp,
-                            "matched_skill": e.matched_skill,
-                            "matched_action": e.matched_action,
-                            "was_disabled_skill": e.was_disabled_skill,
-                            "confidence": e.confidence,
-                            "admin_override_skill": e.admin_override_skill,
-                            "admin_override_action": e.admin_override_action,
-                        }
-                        for e in examples
-                    ],
-                    "count": len(examples),
-                }
-            )
-
-        elif method == "PATCH" and example_id:
-            body = await request.json()
-            skill = body.get("skill", "")
-            action = body.get("action", "")
-            found = await training_store.annotate_example(DEFAULT_TENANT, example_id, skill, action)
-            if not found:
-                return JSONResponse({"error": "Example not found"}, status_code=404)
-            return JSONResponse({"example_id": example_id, "annotated": True})
-
-        elif method == "DELETE" and example_id:
-            found = await training_store.delete_example(DEFAULT_TENANT, example_id)
-            if not found:
-                return JSONResponse({"error": "Example not found"}, status_code=404)
-            return JSONResponse({"example_id": example_id, "deleted": True})
-
-        return JSONResponse({"error": "Not found"}, status_code=404)
-    except Exception as e:
-        logger.exception("Training admin error")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_rules_admin(request: Request) -> Response:
-    """Handle /api/admin/rules/rebuild and /api/admin/rules/status."""
-    method = request.method
-    path = str(request.url.path)
-
-    try:
-        if method == "POST" and path.endswith("/rebuild"):
-            _fire_and_forget(_rebuild_rules(DEFAULT_TENANT))
-            return JSONResponse({"rebuilding": True, "tenant_id": DEFAULT_TENANT})
-
-        if method == "GET" and path.endswith("/status"):
-            rule_set = await rule_store.load_rule_set(DEFAULT_TENANT)
-            engine = _compiled_engines.get(DEFAULT_TENANT)
-            return JSONResponse(
-                {
-                    "tenant_id": DEFAULT_TENANT,
-                    "version": rule_set.version if rule_set else 0,
-                    "generated_at": rule_set.generated_at if rule_set else None,
-                    "skill_count": len(rule_set.rules) if rule_set else 0,
-                    "engine_loaded": engine is not None,
-                }
-            )
-
-        return JSONResponse({"error": "Not found"}, status_code=404)
-    except Exception as e:
-        logger.exception("Rules admin error")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# Teams webhook
-# ---------------------------------------------------------------------------
-
-
-async def handle_teams_webhook(request: Request) -> Response:
-    """Handle incoming Teams webhook for local development."""
-    try:
-        body_bytes = await request.body()
-        activity = json.loads(body_bytes) if body_bytes else {}
-        activity_type = activity.get("type", "")
-        logger.info(f"Teams webhook (local): type={activity_type}")
-
-        teams_adapter = await _get_teams_adapter_local()
-        if not teams_adapter:
-            logger.warning("No Teams config — using mock adapter for emulator")
-            teams_adapter = TeamsAdapter("local-test-app", "local-test-secret")
-
-        if TeamsAdapter.is_message_activity(activity):
-            await _handle_teams_message_local(teams_adapter, activity)
-        elif TeamsAdapter.is_bot_added(activity):
-            logger.info("Teams: bot added to conversation (local)")
-
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        logger.exception("Teams webhook error (local)")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def _get_teams_adapter_local() -> TeamsAdapter | None:
-    try:
-        creds = await secrets.get(DEFAULT_TENANT, "teams")
-        app_id = creds.get("app_id", "")
-        app_secret = creds.get("app_secret", "")
-        if app_id and app_secret:
-            return TeamsAdapter(app_id, app_secret)
-    except Exception:
-        pass
-    app_id = os.environ.get("TEAMS_APP_ID", "")
-    app_secret = os.environ.get("TEAMS_APP_SECRET", "")
-    if app_id and app_secret:
-        return TeamsAdapter(app_id, app_secret)
-    return None
-
-
-async def _handle_teams_message_local(
-    teams_adapter: TeamsAdapter, activity: dict[str, Any]
-) -> None:
-    from agent.models.message import OutboundMessage
-
-    message = teams_adapter.parse_inbound(activity)
-    text = message.text
-    if not text:
-        return
-
-    tenant = await tenants.get_tenant(DEFAULT_TENANT)
-    tenant_id = tenant.tenant_id
-    conversation_id = f"teams-{message.conversation_id}"
-    logger.info(f"Teams [{tenant_id}]: {text[:100]}")
-
-    clean_text, is_raw = strip_raw_flag(text)
-    active_provider, active_model, model_short_name = _resolve_model(tenant)
-    provider_ai = ai.for_provider(active_provider)
-    system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
-Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
-You are communicating via Microsoft Teams. Keep responses clear and well-formatted.
-When you have data to present, format it clearly with structure."""
-    history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
-
-    teams_engine = _get_engine(tenant_id)
-    if not is_raw and is_conversational(clean_text):
-        stats["conversational"] += 1
-        messages = history + [{"role": "user", "content": clean_text}]
-        response = await provider_ai.chat(active_model, system, messages, [])
-        assistant_text = response.text or "Hey! How can I help?"
-        total_tokens = response.input_tokens + response.output_tokens
-    else:
-        match = (
-            teams_engine.match(clean_text, tenant.settings.enabled_skills) if teams_engine else None
-        )
-        if match:
-            request_id = f"teams-rule-{conversation_id}"
-            await bus.publish_skill_invocation(
-                tenant_id,
-                match.skill_name,
-                match.params,
-                conversation_id,
-                request_id,
-                "teams",
-                message.channel_user_id,
-            )
-            skill_result = bus.get_result(request_id) or {"error": "No result"}
-            stats["rule_routed"] += 1
-            if is_raw and teams_engine and teams_engine.supports_raw(match.skill_name):
-                stats["raw"] += 1
-                assistant_text = _format_raw_json(skill_result)
-                total_tokens = 0
-            else:
-                prompt = (
-                    f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly."
-                )
-                messages = history + [{"role": "user", "content": prompt}]
-                response = await provider_ai.chat(active_model, system, messages, [])
-                assistant_text = response.text or "Got data but couldn't format."
-                total_tokens = response.input_tokens + response.output_tokens
-        elif teams_engine and (disabled_skill := teams_engine.check_disabled_skill(clean_text)):
-            skill_display = disabled_skill.replace("_", " ")
-            assistant_text = (
-                f"The {skill_display} feature isn't enabled for your workspace. "
-                f"Contact your admin to enable it."
-            )
-            total_tokens = 0
-            _fire_and_forget(
-                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
-            )
-        else:
-            stats["ai_routed"] += 1
-            tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
-            messages = history + [{"role": "user", "content": clean_text}]
-            response = await provider_ai.chat(active_model, system, messages, tools)
-            if response.has_tool_use:
-                tc = response.tool_calls[0]
-                request_id = f"teams-ai-{conversation_id}"
-                await bus.publish_skill_invocation(
-                    tenant_id,
-                    tc.tool_name,
-                    tc.tool_params,
-                    conversation_id,
-                    request_id,
-                    "teams",
-                    message.channel_user_id,
-                )
-                skill_result = bus.get_result(request_id) or {"error": "No result"}
-                _fire_and_forget(
-                    _log_training(
-                        tenant_id,
-                        clean_text,
-                        tc.tool_name,
-                        tc.tool_params.get("action"),
-                    )
-                )
-                messages_with_tool = messages + [
-                    {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "id": tc.tool_use_id,
-                                "name": tc.tool_name,
-                                "input": tc.tool_params,
-                            }
-                        ],
-                    }
-                ]
-                final = await provider_ai.chat_with_tool_result(
-                    active_model, system, messages_with_tool, tools, tc.tool_use_id, skill_result
-                )
-                assistant_text = final.text or "Got data but couldn't format."
-                total_tokens = (
-                    response.input_tokens
-                    + response.output_tokens
-                    + final.input_tokens
-                    + final.output_tokens
-                )
-            else:
-                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
-                assistant_text = response.text or "Not sure how to help."
-                total_tokens = response.input_tokens + response.output_tokens
-
-    stats["total_tokens"] += total_tokens
-    await memory.save_turn(
-        tenant_id,
-        conversation_id,
-        clean_text,
-        assistant_text,
-        metadata={"route": "teams", "model": model_short_name, "tokens": total_tokens},
-    )
-    outbound = OutboundMessage(
-        channel=ChannelType.TEAMS,
-        conversation_id=message.conversation_id,
-        recipient_id=message.channel_user_id,
-        text=assistant_text,
-    )
-    await teams_adapter.send_response(outbound)
-
-
-# ---------------------------------------------------------------------------
-# Telegram webhook
-# ---------------------------------------------------------------------------
-
-
-async def handle_telegram_webhook(request: Request) -> Response:
-    """Handle incoming Telegram webhook for local development."""
-    try:
-        body_bytes = await request.body()
-        update = json.loads(body_bytes) if body_bytes else {}
-        logger.info(f"Telegram webhook (local): update_id={update.get('update_id', '?')}")
-
-        adapter = await _get_telegram_adapter_local()
-        if not adapter:
-            logger.warning("No Telegram config found")
-            return JSONResponse({"error": "Telegram not configured"}, status_code=400)
-
-        if TelegramAdapter.is_message_update(update):
-            await _handle_telegram_message_local(adapter, update)
-
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        logger.exception("Telegram webhook error (local)")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def _get_telegram_adapter_local() -> TelegramAdapter | None:
-    try:
-        creds = await secrets.get(DEFAULT_TENANT, "telegram")
-        bot_token = creds.get("bot_token", "")
-        if bot_token:
-            return TelegramAdapter(bot_token, creds.get("webhook_secret", ""))
-    except Exception:
-        pass
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    if bot_token:
-        return TelegramAdapter(bot_token, os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""))
-    return None
-
-
-async def _handle_telegram_message_local(adapter: TelegramAdapter, update: dict[str, Any]) -> None:
-    from agent.models.message import OutboundMessage
-
-    message = adapter.parse_inbound(update)
-    text = message.text
-    if not text:
-        return
-
-    tenant = await tenants.get_tenant(DEFAULT_TENANT)
-    tenant_id = tenant.tenant_id
-    conversation_id = f"tg-{message.conversation_id}"
-    logger.info(f"Telegram [{tenant_id}]: {text[:100]}")
-
-    await adapter.send_typing_indicator(message.conversation_id)
-
-    clean_text, is_raw = strip_raw_flag(text)
-    active_provider, active_model, model_short_name = _resolve_model(tenant)
-    provider_ai = ai.for_provider(active_provider)
-    system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
-Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
-You are communicating via Telegram. Keep responses concise and well-formatted.
-Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
-    history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
-
-    tg_engine = _get_engine(tenant_id)
-    if not is_raw and is_conversational(clean_text):
-        stats["conversational"] += 1
-        messages = history + [{"role": "user", "content": clean_text}]
-        response = await provider_ai.chat(active_model, system, messages, [])
-        assistant_text = response.text or "Hey! How can I help?"
-        total_tokens = response.input_tokens + response.output_tokens
-    else:
-        match = tg_engine.match(clean_text, tenant.settings.enabled_skills) if tg_engine else None
-        if match:
-            request_id = f"tg-rule-{conversation_id}"
-            await bus.publish_skill_invocation(
-                tenant_id,
-                match.skill_name,
-                match.params,
-                conversation_id,
-                request_id,
-                "telegram",
-                message.channel_user_id,
-            )
-            skill_result = bus.get_result(request_id) or {"error": "No result"}
-            stats["rule_routed"] += 1
-            if is_raw and tg_engine and tg_engine.supports_raw(match.skill_name):
-                stats["raw"] += 1
-                assistant_text = _format_raw_json(skill_result)
-                total_tokens = 0
-            else:
-                prompt = (
-                    f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
-                    f"Format this clearly and concisely for Telegram."
-                )
-                messages = history + [{"role": "user", "content": prompt}]
-                response = await provider_ai.chat(active_model, system, messages, [])
-                assistant_text = response.text or "Got data but couldn't format."
-                total_tokens = response.input_tokens + response.output_tokens
-        elif tg_engine and (disabled_skill := tg_engine.check_disabled_skill(clean_text)):
-            skill_display = disabled_skill.replace("_", " ")
-            assistant_text = (
-                f"The {skill_display} feature isn't enabled for your workspace. "
-                f"Contact your admin to enable it."
-            )
-            total_tokens = 0
-            _fire_and_forget(
-                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
-            )
-        else:
-            stats["ai_routed"] += 1
-            tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
-            messages = history + [{"role": "user", "content": clean_text}]
-            response = await provider_ai.chat(active_model, system, messages, tools)
-            if response.has_tool_use:
-                tc = response.tool_calls[0]
-                request_id = f"tg-ai-{conversation_id}"
-                await bus.publish_skill_invocation(
-                    tenant_id,
-                    tc.tool_name,
-                    tc.tool_params,
-                    conversation_id,
-                    request_id,
-                    "telegram",
-                    message.channel_user_id,
-                )
-                skill_result = bus.get_result(request_id) or {"error": "No result"}
-                _fire_and_forget(
-                    _log_training(
-                        tenant_id,
-                        clean_text,
-                        tc.tool_name,
-                        tc.tool_params.get("action"),
-                    )
-                )
-                messages_with_tool = messages + [
-                    {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "id": tc.tool_use_id,
-                                "name": tc.tool_name,
-                                "input": tc.tool_params,
-                            }
-                        ],
-                    }
-                ]
-                final = await provider_ai.chat_with_tool_result(
-                    active_model, system, messages_with_tool, tools, tc.tool_use_id, skill_result
-                )
-                assistant_text = final.text or "Got data but couldn't format."
-                total_tokens = (
-                    response.input_tokens
-                    + response.output_tokens
-                    + final.input_tokens
-                    + final.output_tokens
-                )
-            else:
-                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
-                assistant_text = response.text or "Not sure how to help."
-                total_tokens = response.input_tokens + response.output_tokens
-
-    stats["total_tokens"] += total_tokens
-    await memory.save_turn(
-        tenant_id,
-        conversation_id,
-        clean_text,
-        assistant_text,
-        metadata={"route": "telegram", "model": model_short_name, "tokens": total_tokens},
-    )
-    outbound = OutboundMessage(
-        channel=ChannelType.TELEGRAM,
-        conversation_id=message.conversation_id,
-        recipient_id=message.channel_user_id,
-        text=assistant_text,
-    )
-    await adapter.send_response(outbound)
-
-
-# ---------------------------------------------------------------------------
-# Callback endpoint for async external services
-# ---------------------------------------------------------------------------
-
-
-async def handle_callback(request: Request) -> Response:
-    """POST /api/callback/{request_id} — external service delivers async result."""
-    request_id = request.path_params["request_id"]
-
-    # Validate UUID4 format
-    try:
-        uuid.UUID(request_id, version=4)
-    except ValueError:
-        return JSONResponse({"error": "Invalid request_id format"}, status_code=400)
-
-    # Look up the pending request
-    pending = pending_store.get(request_id)
-    if not pending:
-        return JSONResponse({"error": "Request not found or expired"}, status_code=404)
-
-    if pending["status"] == "completed":
-        return JSONResponse({"error": "Already completed"}, status_code=409)
-
-    # Parse the callback payload
-    body = await request.json()
-
-    # Mark completed
-    pending_store.mark_completed(request_id)
-
-    # Build SSE event payload
-    event_data: dict[str, Any] = {
-        "request_id": request_id,
-        "text": body.get("text", ""),
-        "raw": False,
-        "skill": pending.get("skill_name", ""),
-        "route": "callback",
-    }
-
-    # Include audio payload if present
-    if body.get("audio_b64"):
-        event_data["audio"] = {
-            "audio_b64": body["audio_b64"],
-            "format": body.get("format", "wav"),
-        }
-
-    # Deliver result via SSE
-    user_key = pending.get("user_key", "")
-    if user_key:
-        sse_manager.send_event(user_key, "message", event_data)
-
-    logger.info(f"Callback delivered for request {request_id[:8]}")
-    return JSONResponse({"ok": True})
-
-
-# ---------------------------------------------------------------------------
-# Practice & Blob API handlers
-# ---------------------------------------------------------------------------
-
-
-async def handle_skill_invoke(request: Request) -> Response:
-    """POST /api/skill/{name} — invoke a skill synchronously from practice pages."""
-    skill_name = request.path_params["name"]
-    try:
-        body = await request.json()
-        worker_fn = skills.get_worker(skill_name)
-
-        # Get secrets if the skill requires an integration
-        skill = skills.get_skill(skill_name)
-        skill_secrets: dict[str, Any] = {}
-        if skill and skill.requires_integration:
-            try:
-                skill_secrets = await secrets.get(DEFAULT_TENANT, skill.requires_integration)
-            except Exception:
-                pass
-
-        # Build context with tenant and blob store
-        ctx: dict[str, Any] = {"blob_store": blobs, "tenant_id": DEFAULT_TENANT}
-        sig = inspect.signature(worker_fn)
-        if len(sig.parameters) >= 3:
-            result = worker_fn(body, skill_secrets, ctx)
-        else:
-            result = worker_fn(body, skill_secrets)
-
-        # Support async workers
-        if asyncio.iscoroutine(result):
-            result = await result
-
-        return JSONResponse(result)
-    except Exception as e:
-        logger.error(f"Skill invoke failed ({skill_name}): {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_practices_list(request: Request) -> Response:
-    """GET /api/practices — list all installed practices."""
-    result = []
-    for p in practices.list_all():
-        result.append(
-            {
-                "name": p.name,
-                "display_name": p.display_name,
-                "description": p.description,
-                "version": p.version,
-                "icon": p.icon,
-                "built_in": p.built_in,
-                "skills": p.skills,
-                "pages": [
-                    {"slug": pg.slug, "title": pg.title, "nav_label": pg.nav_label}
-                    for pg in p.pages
-                ],
-            }
-        )
-    return JSONResponse(result)
-
-
-async def handle_practices_pages(request: Request) -> Response:
-    """GET /api/practices/pages — pages available to current tenant."""
-    try:
-        tenant = await tenants.get_tenant(DEFAULT_TENANT)
-        pages = practices.get_pages_for_tenant(tenant)
-        return JSONResponse(pages)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_practices_upload(request: Request) -> Response:
-    """POST /api/practices/upload — upload and install a practice ZIP."""
-    try:
-        body = await request.body()
-        data_dir = Path("data")
-        practice = await practices.install_zip(
-            body, data_dir, blob_store=blobs, tenant_id=DEFAULT_TENANT
-        )
-        # Register the new practice's skills
-        practices.register_skills(skills)
-        return JSONResponse(
-            {
-                "ok": True,
-                "name": practice.name,
-                "version": practice.version,
-                "skills": practice.skills,
-            }
-        )
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 async def handle_blob_upload(request: Request) -> Response:
-    """POST /api/blobs/{key:path} — upload a binary blob to BlobStore."""
+    """POST /api/blobs/{key:path} -- upload a binary blob to BlobStore."""
     key = request.path_params["key"]
     try:
         body = await request.body()
@@ -2135,7 +969,7 @@ async def handle_blob_upload(request: Request) -> Response:
 
 
 async def handle_blob_read(request: Request) -> Response:
-    """GET /api/blobs/{key:path} — read a binary blob from BlobStore."""
+    """GET /api/blobs/{key:path} -- read a binary blob from BlobStore."""
     key = request.path_params["key"]
     try:
         data = await blobs.get(DEFAULT_TENANT, key)
@@ -2152,6 +986,113 @@ async def handle_blob_read(request: Request) -> Response:
         return Response(data, media_type=ct)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=404)
+
+
+# ---------------------------------------------------------------------------
+# Local adapter resolvers (Teams / Telegram)
+# ---------------------------------------------------------------------------
+
+
+async def _get_teams_adapter_local(recipient_id: str) -> TeamsAdapter | None:
+    """Resolve a Teams adapter for local dev -- tries secrets then env vars."""
+    try:
+        creds = await secrets.get(DEFAULT_TENANT, "teams")
+        app_id = creds.get("app_id", "")
+        app_secret = creds.get("app_secret", "")
+        if app_id and app_secret:
+            return TeamsAdapter(app_id, app_secret)
+    except Exception:
+        pass
+    app_id = os.environ.get("TEAMS_APP_ID", "")
+    app_secret = os.environ.get("TEAMS_APP_SECRET", "")
+    if app_id and app_secret:
+        return TeamsAdapter(app_id, app_secret)
+    # Fallback: mock adapter for Bot Framework Emulator
+    return TeamsAdapter("local-test-app", "local-test-secret")
+
+
+async def _get_telegram_adapter_local(token_hash: str) -> TelegramAdapter | None:
+    """Resolve a Telegram adapter for local dev -- tries secrets then env vars."""
+    try:
+        creds = await secrets.get(DEFAULT_TENANT, "telegram")
+        bot_token = creds.get("bot_token", "")
+        if bot_token:
+            # Verify the hash matches
+            computed = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
+            if computed == token_hash or not token_hash:
+                return TelegramAdapter(bot_token, creds.get("webhook_secret", ""))
+    except Exception:
+        pass
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if bot_token:
+        return TelegramAdapter(bot_token, os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""))
+    return None
+
+
+async def _resolve_tenant_by_channel(channel: str, channel_key: str) -> Any:
+    """Local dev: always return DEFAULT_TENANT since we only have one."""
+    return await tenants.get_tenant(DEFAULT_TENANT)
+
+
+# ---------------------------------------------------------------------------
+# Sync skill invoker for DirectBus
+# ---------------------------------------------------------------------------
+
+
+async def _handle_sync_skill(
+    tenant_id: str,
+    skill_name: str,
+    params: dict[str, Any],
+    conversation_id: str,
+    request_id: str,
+    reply_channel: str,
+    reply_target: str,
+) -> dict[str, Any] | None:
+    """Invoke a skill synchronously via DirectBus and return the result."""
+    await bus.publish_skill_invocation(
+        tenant_id,
+        skill_name,
+        params,
+        conversation_id,
+        request_id,
+        reply_channel,
+        reply_target,
+    )
+    return bus.get_result(request_id)
+
+
+# ---------------------------------------------------------------------------
+# Auth resolvers for ChatHandlers
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_auth_single_tenant(request: Request) -> tuple[str, str]:
+    """Single-tenant auth resolver: always DEFAULT_TENANT + extract email from JWT."""
+    user_email = ""
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            payload_b64 = auth_header[7:].split(".")[1]
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+            claims = json.loads(base64.urlsafe_b64decode(payload_b64))
+            user_email = claims.get("email", "")
+        except Exception:
+            pass
+    return (DEFAULT_TENANT, user_email)
+
+
+# ---------------------------------------------------------------------------
+# Callback delivery via SSE
+# ---------------------------------------------------------------------------
+
+
+async def _deliver_callback_via_sse(event_data: dict[str, Any], pending: Any) -> None:
+    """Deliver a callback result via SSE to the connected user."""
+    user_key = pending.get("user_key", "") if isinstance(pending, dict) else ""
+    if user_key:
+        sse_manager.send_event(user_key, "message", event_data)
 
 
 # ---------------------------------------------------------------------------
@@ -2250,14 +1191,22 @@ async def init() -> None:
         practices, \
         blobs, \
         pending_store, \
-        started_at
+        started_at, \
+        settings_handlers, \
+        integration_handlers, \
+        chat_handlers, \
+        history_handlers, \
+        training_handlers, \
+        health_handlers, \
+        practice_handlers, \
+        webhook_handlers
 
     started_at = time.time()
 
     # Load .env
     secrets = EnvSecretsProvider(".env")
 
-    # Initialize AI providers — both can run simultaneously
+    # Initialize AI providers -- both can run simultaneously
     _providers: dict[str, AnthropicProvider | OllamaProvider] = {}
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if api_key:
@@ -2278,7 +1227,7 @@ async def init() -> None:
     blobs = FileStore("data/blobs")
     pending_store = LocalPendingStore()
 
-    # Load skills — base skills (ping) from agent/skills/
+    # Load skills -- base skills (ping) from agent/skills/
     skills = SkillRegistry()
     skills_dir = Path(__file__).parent.parent.parent / "agent" / "skills"
     skills.load_from_directory(skills_dir)
@@ -2297,12 +1246,107 @@ async def init() -> None:
     training_store = SQLiteTrainingStore("data/t3nets.db")
     error_handler = ErrorHandler()
 
-    # Direct bus — with context for practice skills (BlobStore access)
+    # Direct bus -- with context for practice skills (BlobStore access)
     bus = DirectBus(skills, secrets, context={"blob_store": blobs})
 
     # Register channels
     channels = ChannelRegistry()
     channels.register(DashboardAdapter())
+
+    # --- Instantiate shared handler classes ---
+
+    settings_handlers = SettingsHandlers(
+        tenant_store=tenants,
+        secrets_provider=secrets,
+        skill_registry=skills,
+        practice_registry=practices,
+        active_providers=lambda: ai.active_providers,
+        platform=os.getenv("T3NETS_PLATFORM", "local"),
+        stage=os.getenv("T3NETS_STAGE", "dev"),
+        build_number=BUILD_NUMBER,
+        rebuild_callback=lambda tid: _fire_and_forget(chat_handlers.rebuild_rules(tid)),
+    )
+
+    integration_handlers = IntegrationHandlers(secrets=secrets)
+
+    history_handlers = HistoryHandlers(conversation_store=memory)
+
+    training_handlers = TrainingHandlers(
+        training_store=training_store,
+        rule_store=rule_store,
+        compiled_engines=_compiled_engines,
+        rebuild_rules_fn=None,  # rebuild is triggered via handle_rules_admin
+    )
+
+    health_handlers = HealthHandlers(
+        tenants=tenants,
+        secrets=secrets,
+        skill_registry=skills,
+        started_at=started_at,
+        connection_count=lambda: sse_manager.connection_count,
+        get_stats=lambda: {
+            "rule_routed": stats["rule_routed"],
+            "ai_routed": stats["ai_routed"],
+            "conversational": stats["conversational"],
+            "raw": stats["raw"],
+            "errors": stats["errors"],
+        },
+        get_ai_info=lambda: {
+            "providers": ai.active_providers,
+            "model": _resolve_model(
+                # lazy tenant lookup -- health handler calls this rarely
+                type("T", (), {"settings": type("S", (), {"ai_model": DEFAULT_MODEL_ID})()})()
+            )[1],
+            "api_key_preview": _api_key_preview(),
+            "total_tokens": stats["total_tokens"],
+        },
+        platform=os.getenv("T3NETS_PLATFORM", "local"),
+        stage=os.getenv("T3NETS_STAGE", "dev"),
+        default_tenant=DEFAULT_TENANT,
+        connection_label="sse_connections",
+    )
+
+    practice_handlers = PracticeHandlers(
+        practices=practices,
+        skills=skills,
+        blobs=blobs,
+        tenants=tenants,
+        secrets=secrets,
+        pending_store=pending_store,
+        callback_delivery=_deliver_callback_via_sse,
+    )
+
+    chat_handlers = ChatHandlers(
+        memory=memory,
+        tenants=tenants,
+        ai=ai,
+        skills=skills,
+        compiled_engines=_compiled_engines,
+        rule_store=rule_store,
+        training_store=training_store,
+        stats=stats,
+        error_handler=error_handler,
+        resolve_auth=_resolve_auth_single_tenant,
+        resolve_model=_resolve_model,
+        fire_and_forget=_fire_and_forget,
+        skill_invoker=_handle_sync_skill,
+    )
+
+    webhook_handlers = WebhookHandlers(
+        ai=ai,
+        memory=memory,
+        bus=bus,
+        skills=skills,
+        stats=stats,
+        compiled_engines=_compiled_engines,
+        fallback_router=None,
+        resolve_model=_resolve_model,
+        resolve_teams_adapter=_get_teams_adapter_local,
+        resolve_telegram_adapter=_get_telegram_adapter_local,
+        resolve_tenant_by_channel=_resolve_tenant_by_channel,
+        log_training=chat_handlers.log_training,
+        enrich_match_params=_enrich_match_params,
+    )
 
     # Seed default tenant
     tenant = tenants.seed_default_tenant(
@@ -2345,8 +1389,16 @@ async def init() -> None:
                 f"(v{cached.version}, generated {cached.generated_at[:10]})"
             )
         else:
-            logger.info(f"No rules cached for '{t.tenant_id}' — generating via AI...")
-            await _rebuild_rules(t.tenant_id)
+            logger.info(f"No rules cached for '{t.tenant_id}' -- generating via AI...")
+            await chat_handlers.rebuild_rules(t.tenant_id)
+
+
+def _api_key_preview() -> str:
+    """Return a safe preview of the Anthropic API key for health endpoint."""
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if len(api_key) > 12:
+        return api_key[:8] + "..." + api_key[-4:]
+    return "not set" if not api_key else "***"
 
 
 def main() -> None:
@@ -2354,16 +1406,16 @@ def main() -> None:
 
     port = int(os.getenv("PORT", "8080"))
     logger.info("")
-    logger.info("  ╔══════════════════════════════════════╗")
-    logger.info("  ║  T3nets Dev Server                   ║")
-    logger.info("  ║                                      ║")
-    logger.info(f"  ║  Chat:   http://localhost:{port}       ║")
-    logger.info(f"  ║  Health: http://localhost:{port}/health ║")
-    logger.info("  ║                                      ║")
-    logger.info("  ║  Routing: Rules → Claude (hybrid)    ║")
-    logger.info("  ║  Debug:   append --raw to messages   ║")
-    logger.info("  ║  SSE:     /api/events (async push)   ║")
-    logger.info("  ╚══════════════════════════════════════╝")
+    logger.info("  +======================================+")
+    logger.info("  |  T3nets Dev Server                   |")
+    logger.info("  |                                      |")
+    logger.info(f"  |  Chat:   http://localhost:{port}       |")
+    logger.info(f"  |  Health: http://localhost:{port}/health |")
+    logger.info("  |                                      |")
+    logger.info("  |  Routing: Rules -> Claude (hybrid)    |")
+    logger.info("  |  Debug:   append --raw to messages   |")
+    logger.info("  |  SSE:     /api/events (async push)   |")
+    logger.info("  +======================================+")
     logger.info("")
 
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning", timeout_graceful_shutdown=3)

@@ -38,8 +38,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-import inspect
-
 from adapters.aws.admin_api import AdminAPI
 from adapters.aws.auth_middleware import AuthError, extract_auth
 from adapters.aws.bedrock_provider import BedrockProvider
@@ -56,13 +54,16 @@ from adapters.aws.sqs_poller import SQSResultPoller
 from adapters.aws.ws_connections import WebSocketConnectionManager
 from adapters.local.direct_bus import DirectBus
 from adapters.ollama.provider import OllamaProvider
+from adapters.shared.handlers.chat import ChatHandlers
+from adapters.shared.handlers.health import HealthHandlers
+from adapters.shared.handlers.history import HistoryHandlers
+from adapters.shared.handlers.integrations import IntegrationHandlers
+from adapters.shared.handlers.practices import PracticeHandlers
+from adapters.shared.handlers.settings import SettingsHandlers
+from adapters.shared.handlers.training import TrainingHandlers
+from adapters.shared.handlers.webhooks import WebhookHandlers
 from adapters.shared.multi_provider import MultiAIProvider
-from adapters.shared.server_utils import (
-    INTEGRATION_SCHEMAS,
-    _format_raw_json,
-    _strip_metadata,
-    _uptime_human,
-)
+from adapters.shared.server_utils import _format_raw_json, _strip_metadata
 from agent.channels.base import ChannelRegistry
 from agent.channels.dashboard import DashboardAdapter
 from agent.channels.teams import TeamsAdapter
@@ -72,14 +73,11 @@ from agent.models.ai_models import (
     DEFAULT_MODEL_ID,
     get_model,
     get_model_for_provider,
-    get_models_for_providers,
 )
 from agent.models.message import ChannelType
-from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
-from agent.router.models import TrainingExample
-from agent.router.rule_engine_builder import RuleEngineBuilder
-from agent.router.rule_router import RuleBasedRouter
 from agent.practices.registry import PracticeRegistry
+from agent.router.compiled_engine import CompiledRuleEngine, strip_raw_flag
+from agent.router.rule_router import RuleBasedRouter
 from agent.skills.registry import SkillRegistry
 from agent.sse import SSEConnectionManager
 
@@ -105,6 +103,16 @@ blobs: Any  # S3BlobStore or None
 rule_store: DynamoDBRuleStore
 training_store: DynamoDBTrainingStore
 admin_api: AdminAPI
+
+# Shared handler instances (initialised in init())
+settings_handlers: SettingsHandlers
+integration_handlers: IntegrationHandlers
+chat_handlers: ChatHandlers
+history_handlers: HistoryHandlers
+training_handlers: TrainingHandlers
+health_handlers: HealthHandlers
+practice_handlers: PracticeHandlers
+webhook_handlers: WebhookHandlers
 
 # Per-tenant compiled rule engines (keyed by tenant_id)
 _compiled_engines: dict[str, CompiledRuleEngine] = {}
@@ -150,6 +158,8 @@ def _get_lambda_deploy_config() -> dict[str, Any]:
         "subnet_ids": subnet_str.split(",") if subnet_str else [],
         "security_group_id": os.environ.get("LAMBDA_SECURITY_GROUP_ID", ""),
     }
+
+
 BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "")
 OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "")
 PLATFORM = os.environ.get("T3NETS_PLATFORM", "aws")
@@ -299,6 +309,27 @@ def _extract_user_key(request: Request, body_token: str = "") -> str:
         except Exception:
             pass
     return user_key
+
+
+# ---------------------------------------------------------------------------
+# Rule engine helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_engine(tenant_id: str) -> CompiledRuleEngine | None:
+    """Return the compiled rule engine for a tenant, or None if not yet built."""
+    return _compiled_engines.get(tenant_id)
+
+
+def _enrich_match_params(match: Any, clean_text: str) -> None:
+    """Inject original user text into match params for skills that expect a 'text' field."""
+    if not match:
+        return
+    skill_def = skills.get_skill(match.skill_name)
+    if skill_def:
+        schema_props = skill_def.parameters.get("properties", {})
+        if "text" in schema_props and "text" not in match.params:
+            match.params["text"] = clean_text
 
 
 # ---------------------------------------------------------------------------
@@ -455,63 +486,110 @@ async def sse_endpoint(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Health
+# Thin wrappers — delegate to shared handler instances
 # ---------------------------------------------------------------------------
 
 
 async def handle_health_api(request: Request) -> Response:
-    try:
-        uptime_secs = time.time() - started_at
-        tenant = await tenants.get_tenant(DEFAULT_TENANT)
-        connected = await secrets.list_integrations(DEFAULT_TENANT)
-        health = {
-            "status": "ok",
-            "platform": PLATFORM,
-            "stage": STAGE,
-            "started_at": datetime.fromtimestamp(started_at, tz=timezone.utc).isoformat(),
-            "uptime_seconds": round(uptime_secs, 1),
-            "uptime_human": _uptime_human(uptime_secs),
-            "python_version": (
-                f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-            ),
-            "tenant": {
-                "tenant_id": tenant.tenant_id,
-                "name": tenant.name,
-                "status": tenant.status,
-                "enabled_skills": tenant.settings.enabled_skills,
-                "ai_model": tenant.settings.ai_model,
-            },
-            "ai": {
-                "providers": ai.active_providers,
-                "model": _resolve_model(tenant)[1],
-                "api_key_preview": "IAM role (no key)",
-                "total_tokens": stats["total_tokens"],
-            },
-            "routing": stats,
-            "integrations": {
-                name: {"connected": name in connected}
-                for name in ["jira", "github", "teams", "telegram", "twilio"]
-            },
-            "skills": [
-                {
-                    "name": s.name,
-                    "description": s.description.strip()[:120],
-                    "requires_integration": s.requires_integration,
-                    "supports_raw": s.supports_raw,
-                    "triggers": s.triggers[:8],
-                }
-                for s in skills.list_skills()
-            ],
-            "push_connections": push_client.connection_count,
-        }
-        return JSONResponse(health)
-    except Exception as e:
-        logger.exception("Health check error")
-        return JSONResponse({"status": "error", "error": str(e)}, status_code=500)
+    return await health_handlers.handle_health_api(request)
+
+
+async def handle_settings_get(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await settings_handlers.get_settings(request, tenant_id)
+
+
+async def handle_settings_post(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await settings_handlers.post_settings(request, tenant_id)
+
+
+async def handle_history(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await history_handlers.get_history(request, tenant_id, "dashboard-default")
+
+
+async def handle_integrations_list(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await integration_handlers.list_integrations(request, tenant_id)
+
+
+async def handle_integration_get(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await integration_handlers.get_integration(request, tenant_id)
+
+
+async def handle_integrations_post(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await integration_handlers.post_integration(request, tenant_id)
+
+
+async def handle_integrations_test(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await integration_handlers.test_integration(request, tenant_id)
+
+
+async def handle_chat(request: Request) -> Response:
+    return await chat_handlers.handle_chat(request)
+
+
+async def handle_clear(request: Request) -> Response:
+    return await chat_handlers.handle_clear(request)
+
+
+async def handle_teams_webhook(request: Request) -> Response:
+    return await webhook_handlers.handle_teams_webhook(request)
+
+
+async def handle_telegram_webhook(request: Request) -> Response:
+    return await webhook_handlers.handle_telegram_webhook(request)
+
+
+async def handle_skill_invoke(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await practice_handlers.invoke_skill(request, tenant_id)
+
+
+async def handle_practices_list(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await practice_handlers.list_practices(request, tenant_id)
+
+
+async def handle_practices_upload(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await practice_handlers.upload_practice(request, tenant_id)
+
+
+async def handle_practices_pages(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await practice_handlers.list_practice_pages(request, tenant_id)
+
+
+async def handle_callback(request: Request) -> Response:
+    tenant_id, _ = await _get_auth_info(request)
+    return await practice_handlers.handle_callback(request, tenant_id)
+
+
+async def handle_rules_admin(request: Request) -> Response:
+    """POST /api/admin/rules/rebuild and GET /api/admin/rules/status."""
+    method = request.method
+    path = str(request.url.path)
+    tenant_id, _ = await _get_auth_info(request)
+
+    if method == "POST" and path.endswith("/rebuild"):
+        _fire_and_forget(chat_handlers.rebuild_rules(tenant_id))
+        data, status = await training_handlers.rebuild_rules(tenant_id)
+        return JSONResponse(data, status_code=status)
+
+    if method == "GET" and path.endswith("/status"):
+        data, status = await training_handlers.rules_status(tenant_id)
+        return JSONResponse(data, status_code=status)
+
+    return JSONResponse({"error": "Not found"}, status_code=404)
 
 
 # ---------------------------------------------------------------------------
-# Auth endpoints
+# Auth endpoints (AWS-specific — Cognito)
 # ---------------------------------------------------------------------------
 
 
@@ -806,816 +884,7 @@ async def handle_auth_confirm_reset(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Settings
-# ---------------------------------------------------------------------------
-
-
-async def handle_settings_get(request: Request) -> Response:
-    try:
-        tenant_id, _ = await _get_auth_info(request)
-        tenant = await tenants.get_tenant(tenant_id)
-        s = tenant.settings
-        available_skills = [
-            {
-                "name": sk.name,
-                "description": sk.description.strip(),
-                "requires_integration": sk.requires_integration,
-            }
-            for sk in skills.list_skills()
-        ]
-        connected_integrations = await secrets.list_integrations(tenant_id)
-        return JSONResponse(
-            {
-                "ai_model": s.ai_model or DEFAULT_MODEL_ID,
-                "providers": ai.active_providers,
-                "models": get_models_for_providers(ai.active_providers),
-                "platform": PLATFORM,
-                "stage": STAGE,
-                "build": BUILD_NUMBER,
-                "enabled_skills": s.enabled_skills,
-                "available_skills": available_skills,
-                "connected_integrations": connected_integrations,
-                "enabled_channels": s.enabled_channels,
-                "system_prompt_override": s.system_prompt_override,
-                "max_tokens_per_message": s.max_tokens_per_message,
-                "messages_per_day": s.messages_per_day,
-                "max_conversation_history": s.max_conversation_history,
-                "primary_practice": s.primary_practice,
-            }
-        )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_settings_post(request: Request) -> Response:
-    try:
-        tenant_id, _ = await _get_auth_info(request)
-        body = await request.json()
-        tenant = await tenants.get_tenant(tenant_id)
-        changed = False
-        rebuild_skills = False
-
-        if "ai_model" in body:
-            model_id = body["ai_model"]
-            model = get_model(model_id)
-            if not model:
-                return JSONResponse({"error": f"Unknown model: {model_id}"}, status_code=400)
-            active = ai.active_providers
-            if not any(p in model.providers for p in active):
-                return JSONResponse(
-                    {"error": f"Model '{model_id}' not available for {active}"}, status_code=400
-                )
-            tenant.settings.ai_model = model_id
-            changed = True
-            logger.info(f"Model changed to: {model.display_name} ({model_id})")
-
-        if "enabled_skills" in body:
-            skill_list = body["enabled_skills"]
-            if not isinstance(skill_list, list):
-                return JSONResponse({"error": "enabled_skills must be a list"}, status_code=400)
-            known = set(skills.list_skill_names())
-            unknown = [s for s in skill_list if s not in known]
-            if unknown:
-                return JSONResponse(
-                    {"error": f"Unknown skills: {', '.join(unknown)}"}, status_code=400
-                )
-            tenant.settings.enabled_skills = skill_list
-            changed = True
-            rebuild_skills = True
-            logger.info(f"Enabled skills updated: {skill_list}")
-
-        if "system_prompt_override" in body:
-            tenant.settings.system_prompt_override = body["system_prompt_override"]
-            changed = True
-
-        if "max_tokens_per_message" in body:
-            val = body["max_tokens_per_message"]
-            if not isinstance(val, int) or val < 256 or val > 16384:
-                return JSONResponse(
-                    {"error": "max_tokens_per_message must be 256-16384"}, status_code=400
-                )
-            tenant.settings.max_tokens_per_message = val
-            changed = True
-
-        if "messages_per_day" in body:
-            val = body["messages_per_day"]
-            if not isinstance(val, int) or val < 1:
-                return JSONResponse(
-                    {"error": "messages_per_day must be a positive integer"}, status_code=400
-                )
-            tenant.settings.messages_per_day = val
-            changed = True
-
-        if "max_conversation_history" in body:
-            val = body["max_conversation_history"]
-            if not isinstance(val, int) or val < 1 or val > 100:
-                return JSONResponse(
-                    {"error": "max_conversation_history must be 1-100"}, status_code=400
-                )
-            tenant.settings.max_conversation_history = val
-            changed = True
-
-        if "primary_practice" in body:
-            practice_name = body["primary_practice"]
-            tenant.settings.primary_practice = practice_name
-            # Auto-add the practice's skills to enabled_skills
-            for p in practices.list_all():
-                if p.name == practice_name:
-                    for skill_name in p.skills:
-                        if skill_name not in tenant.settings.enabled_skills:
-                            tenant.settings.enabled_skills.append(skill_name)
-                    break
-            changed = True
-            rebuild_skills = True
-            logger.info(f"Primary practice set to: {practice_name}")
-
-        if changed:
-            await tenants.update_tenant(tenant)
-        if rebuild_skills:
-            _fire_and_forget(_rebuild_rules(tenant_id))
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_history(request: Request) -> Response:
-    try:
-        tenant_id, _ = await _get_auth_info(request)
-        history = await memory.get_conversation(tenant_id, "dashboard-default")
-        return JSONResponse({"messages": history, "platform": PLATFORM, "stage": STAGE})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# Integrations
-# ---------------------------------------------------------------------------
-
-
-async def handle_integrations_list(request: Request) -> Response:
-    try:
-        tenant_id, _ = await _get_auth_info(request)
-        connected = await secrets.list_integrations(tenant_id)
-        result = [
-            {
-                "name": name,
-                "label": schema["label"],
-                "connected": name in connected,
-                "fields": schema["fields"],
-            }
-            for name, schema in INTEGRATION_SCHEMAS.items()
-        ]
-        return JSONResponse(result)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_integration_get(request: Request) -> Response:
-    try:
-        tenant_id, _ = await _get_auth_info(request)
-        integration_name = request.path_params["name"]
-        if integration_name not in INTEGRATION_SCHEMAS:
-            return JSONResponse(
-                {"error": f"Unknown integration: {integration_name}"}, status_code=404
-            )
-        schema = INTEGRATION_SCHEMAS[integration_name]
-        connected = False
-        config = {}
-        try:
-            stored = await secrets.get(tenant_id, integration_name)
-            connected = True
-            password_keys = {f["key"] for f in schema["fields"] if f["type"] == "password"}
-            for key, value in stored.items():
-                if key in password_keys and value:
-                    config[key] = "\u2022" * 8
-                else:
-                    config[key] = value
-        except Exception:
-            pass
-        return JSONResponse(
-            {
-                "name": integration_name,
-                "label": schema["label"],
-                "connected": connected,
-                "config": config,
-                "fields": schema["fields"],
-            }
-        )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_integrations_post(request: Request) -> Response:
-    try:
-        integration_name = request.path_params["name"]
-        body = await request.json()
-        tenant_id, _ = await _get_auth_info(request)
-        if tenant_id == DEFAULT_TENANT and body.get("tenant_id"):
-            tenant_id = body["tenant_id"]
-
-        # Partial save: merge with existing secrets.
-        # - null/missing fields → preserve existing value
-        # - blank (whitespace-only) → intentionally clear the value
-        # - non-empty value → update
-        try:
-            existing = await secrets.get(tenant_id, integration_name)
-        except Exception:
-            existing = {}
-
-        merged = dict(existing)
-        for key, value in body.items():
-            if key == "tenant_id":
-                continue  # Skip metadata field
-            if value is None:
-                pass  # Null → preserve existing
-            elif isinstance(value, str) and value.strip() == "":
-                merged[key] = ""  # Blank/space → intentionally clear
-            else:
-                merged[key] = value  # Non-empty → update
-
-        await secrets.put(tenant_id, integration_name, merged)
-        logger.info(f"Stored {integration_name} credentials for tenant {tenant_id}")
-
-        if integration_name == "telegram":
-            _register_telegram_webhook(request, body)
-            bot_token = body.get("bot_token", "")
-            if bot_token:
-                t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
-                await tenants.set_channel_mapping(tenant_id, "telegram", t_hash)
-
-        elif integration_name == "whatsapp":
-            _register_whatsapp_webhook(request, body)
-            api_token = body.get("api_token", "")
-            if api_token:
-                wa_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
-                await tenants.set_channel_mapping(tenant_id, "whatsapp", wa_hash)
-
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        logger.exception("Integration endpoint error")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_integrations_test(request: Request) -> Response:
-    try:
-        integration_name = request.path_params["name"]
-        body = await request.json()
-        result = _test_integration(integration_name, body)
-        return JSONResponse(result, status_code=200 if result.get("ok") else 400)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-def _test_integration(name: str, creds: dict[str, Any]) -> dict[str, Any]:
-    if name == "jira":
-        return _test_jira(creds)
-    elif name == "telegram":
-        return _test_telegram(creds)
-    elif name == "whatsapp":
-        return _test_whatsapp(creds)
-    return {"ok": False, "error": f"Testing not supported for '{name}'"}
-
-
-def _register_telegram_webhook(request: Request, creds: dict[str, Any]) -> None:
-    bot_token = creds.get("bot_token", "")
-    if not bot_token:
-        return
-    try:
-        token_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
-        host = request.headers.get("host", "")
-        scheme = "https"
-        if host:
-            base_url = f"{scheme}://{host}"
-        else:
-            base_url = os.environ.get("API_BASE_URL", "")
-        if not base_url:
-            logger.warning("Cannot register Telegram webhook: no Host header or API_BASE_URL")
-            return
-        webhook_url = f"{base_url}/api/channels/telegram/webhook/{token_hash}"
-        webhook_secret = creds.get("webhook_secret", "")
-        adapter = TelegramAdapter(bot_token, webhook_secret)
-        result = adapter.register_webhook(webhook_url)
-        logger.info(f"Telegram webhook registration: {result}")
-    except Exception as e:
-        logger.error(f"Failed to register Telegram webhook: {e}")
-
-
-def _test_telegram(creds: dict[str, Any]) -> dict[str, Any]:
-    bot_token = creds.get("bot_token", "")
-    if not bot_token:
-        return {"ok": False, "error": "Bot token is required"}
-    adapter = TelegramAdapter(bot_token)
-    info = adapter.get_bot_info()
-    if "error" in info:
-        return {"ok": False, "error": info["error"]}
-    return {
-        "ok": True,
-        "bot_name": f"@{info.get('username', '')}",
-        "display_name": info.get("first_name", ""),
-    }
-
-
-def _register_whatsapp_webhook(request: Request, creds: dict[str, Any]) -> None:
-    from agent.channels.whatsapp import WhatsAppAdapter
-
-    api_token = creds.get("api_token", "")
-    if not api_token:
-        return
-    try:
-        token_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
-        host = request.headers.get("host", "")
-        scheme = "https"
-        if host:
-            base_url = f"{scheme}://{host}"
-        else:
-            base_url = os.environ.get("API_BASE_URL", "")
-        if not base_url:
-            logger.warning("Cannot register WhatsApp webhook: no Host header or API_BASE_URL")
-            return
-        webhook_url = f"{base_url}/api/channels/whatsapp/webhook/{token_hash}"
-        webhook_secret = creds.get("webhook_secret", "")
-        if not webhook_secret:
-            # Auto-generate a secret
-            import secrets as _secrets
-
-            webhook_secret = _secrets.token_urlsafe(24)
-            creds["webhook_secret"] = webhook_secret
-        adapter = WhatsAppAdapter(api_token, webhook_secret)
-        result = adapter.register_webhook(webhook_url)
-        logger.info(f"WhatsApp webhook registration: {result}")
-    except Exception as e:
-        logger.error(f"Failed to register WhatsApp webhook: {e}")
-
-
-def _test_whatsapp(creds: dict[str, Any]) -> dict[str, Any]:
-    from agent.channels.whatsapp import WhatsAppAdapter
-
-    api_token = creds.get("api_token", "")
-    if not api_token:
-        return {"ok": False, "error": "API token is required"}
-    adapter = WhatsAppAdapter(api_token)
-    health = adapter.get_health()
-    if "error" in health:
-        return {"ok": False, "error": health["error"]}
-    return {
-        "ok": True,
-        "status": health.get("status", {}).get("text", "connected"),
-        "phone": health.get("contacts", {}).get("phone", ""),
-    }
-
-
-def _test_jira(creds: dict[str, Any]) -> dict[str, Any]:
-    import urllib.error
-    import urllib.request
-
-    url = creds.get("url", "").rstrip("/")
-    email = creds.get("email", "")
-    api_token = creds.get("api_token", "")
-    if not all([url, email, api_token]):
-        return {"ok": False, "error": "url, email, and api_token are required"}
-    try:
-        auth = base64.b64encode(f"{email}:{api_token}".encode()).decode()
-        req = urllib.request.Request(
-            f"{url}/rest/api/3/myself",
-            headers={"Authorization": f"Basic {auth}", "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-            return {
-                "ok": True,
-                "user": data.get("emailAddress", email),
-                "display_name": data.get("displayName", ""),
-            }
-    except urllib.error.HTTPError as e:
-        return {"ok": False, "error": f"Jira returned {e.code}: {e.reason}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# Rule engine helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_engine(tenant_id: str) -> CompiledRuleEngine | None:
-    """Return the compiled rule engine for a tenant, or None if not yet built."""
-    return _compiled_engines.get(tenant_id)
-
-
-def _enrich_match_params(match: Any, clean_text: str) -> None:
-    """Inject original user text into match params for skills that expect a 'text' field.
-
-    Called after Tier 1/2 routing, before dispatch. The router identifies the skill,
-    the skill processes the content. This ensures all channels (dashboard, Telegram,
-    Teams) behave identically.
-    """
-    if not match:
-        return
-    skill_def = skills.get_skill(match.skill_name)
-    if skill_def:
-        schema_props = skill_def.parameters.get("properties", {})
-        if "text" in schema_props and "text" not in match.params:
-            match.params["text"] = clean_text
-
-
-async def _rebuild_rules(tenant_id: str) -> None:
-    """(Re)build AI-generated routing rules for a tenant and cache the engine."""
-    try:
-        tenant = await tenants.get_tenant(tenant_id)
-        all_skills = skills.list_skills()
-        enabled = [s for s in all_skills if s.name in tenant.settings.enabled_skills]
-        disabled = [s for s in all_skills if s.name not in tenant.settings.enabled_skills]
-
-        existing = await rule_store.load_rule_set(tenant_id)
-        old_version = existing.version if existing else 0
-
-        training_data = await training_store.list_examples(tenant_id, limit=50)
-
-        active_provider, api_model, _ = _resolve_model(tenant)
-        builder = RuleEngineBuilder()
-        rule_set = await builder.build_rules(
-            tenant_id=tenant_id,
-            enabled_skills=enabled,
-            disabled_skills=disabled,
-            ai=ai.for_provider(active_provider),
-            model=api_model,
-            training_data=training_data or None,
-        )
-        rule_set.version = old_version + 1
-
-        await rule_store.save_rule_set(rule_set)
-        _compiled_engines[tenant_id] = CompiledRuleEngine(rule_set, skills)
-        logger.info(f"Rules rebuilt for tenant '{tenant_id}' (v{rule_set.version})")
-    except Exception:
-        logger.exception(f"Failed to rebuild rules for tenant '{tenant_id}'")
-
-
-async def _log_training(
-    tenant_id: str,
-    message_text: str,
-    matched_skill: str | None,
-    matched_action: str | None,
-    was_disabled_skill: bool = False,
-) -> None:
-    """Fire-and-forget: log a Tier 2 routing decision as training data."""
-    import uuid as _uuid
-    from datetime import datetime as _dt
-    from datetime import timezone as _tz
-
-    try:
-        example = TrainingExample(
-            tenant_id=tenant_id,
-            example_id=_uuid.uuid4().hex,
-            message_text=message_text,
-            timestamp=_dt.now(_tz.utc).isoformat(),
-            matched_skill=matched_skill,
-            matched_action=matched_action,
-            was_disabled_skill=was_disabled_skill,
-        )
-        logger.info(
-            f"Training: logging example for tenant={tenant_id} skill={matched_skill} "
-            f"msg={message_text[:40]!r}"
-        )
-        await training_store.log_example(example)
-        logger.info(f"Training: logged example {example.example_id}")
-    except Exception:
-        logger.exception("Failed to log training example")
-
-
-# ---------------------------------------------------------------------------
-# Chat & clear
-# ---------------------------------------------------------------------------
-
-
-async def handle_chat(request: Request) -> Response:
-    try:
-        tenant_id, user_email = await _get_auth_info(request)
-        body = await request.json()
-        text = body.get("text", "").strip()
-        if not text:
-            return JSONResponse({"error": "Empty message"}, status_code=400)
-
-        conversation_id = body.get("conversation_id", "default")
-        clean_text, is_raw = strip_raw_flag(text)
-        is_raw_response = False
-        request_start = time.time()
-
-        logger.info(f"Chat [{tenant_id}]: {text[:100]}" + (" [RAW]" if is_raw else ""))
-
-        history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
-        tenant = await tenants.get_tenant(tenant_id)
-        active_provider, active_model, model_short_name = _resolve_model(tenant)
-        provider_ai = ai.for_provider(active_provider)
-
-        system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
-Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
-When you have data to present, format it clearly with structure."""
-
-        engine = _get_engine(tenant_id)
-        if not is_raw and is_conversational(clean_text):
-            stats["conversational"] += 1
-            messages = history + [{"role": "user", "content": clean_text}]
-            response = await provider_ai.chat(active_model, system, messages, [])
-            assistant_text = response.text or "Hey! How can I help?"
-            total_tokens = response.input_tokens + response.output_tokens
-            route_type = "conversational"
-        else:
-            router = engine or _fallback_router
-            match = router.match(clean_text, tenant.settings.enabled_skills) if router else None
-
-            if match:
-                _enrich_match_params(match, clean_text)
-
-                if USE_ASYNC_SKILLS and event_bus and pending_store:
-                    return await _handle_async_skill(
-                        tenant_id,
-                        user_email,
-                        match.skill_name,
-                        match.params,
-                        conversation_id,
-                        clean_text,
-                        is_raw,
-                        "rule",
-                        active_model,
-                        model_short_name,
-                    )
-
-                request_id = f"rule-{conversation_id}"
-                await bus.publish_skill_invocation(
-                    tenant_id,
-                    match.skill_name,
-                    match.params,
-                    conversation_id,
-                    request_id,
-                    "dashboard",
-                    "user",
-                )
-                skill_result = bus.get_result(request_id) or {"error": "No result"}
-
-                # Audio results: return directly with audio data, skip AI formatting
-                if skill_result.get("type") == "audio":
-                    roundtrip_sec = round(time.time() - request_start, 1)
-                    await memory.save_turn(
-                        tenant_id, conversation_id, clean_text,
-                        skill_result.get("text", ""),
-                        metadata={"route": "rule", "skill": match.skill_name},
-                    )
-                    return JSONResponse({
-                        "text": skill_result.get("text", ""),
-                        "audio": {
-                            "audio_b64": skill_result.get("audio_b64", ""),
-                            "audio_url": skill_result.get("audio_url", ""),
-                            "format": skill_result.get("format", "wav"),
-                        },
-                        "conversation_id": conversation_id,
-                        "tokens": 0,
-                        "route": "rule",
-                        "skill": match.skill_name,
-                        "raw": False,
-                        "model": "",
-                        "roundtrip_sec": roundtrip_sec,
-                    })
-
-                if is_raw and engine and engine.supports_raw(match.skill_name):
-                    stats["raw"] += 1
-                    stats["rule_routed"] += 1
-                    assistant_text = _format_raw_json(skill_result)
-                    total_tokens = 0
-                    route_type = "rule"
-                    is_raw_response = True
-                else:
-                    stats["rule_routed"] += 1
-                    prompt = (
-                        f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                        f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly."
-                    )
-                    messages = history + [{"role": "user", "content": prompt}]
-                    response = await provider_ai.chat(active_model, system, messages, [])
-                    assistant_text = response.text or "Got data but couldn't format."
-                    total_tokens = response.input_tokens + response.output_tokens
-                    route_type = "rule"
-            elif engine and (disabled_skill := engine.check_disabled_skill(clean_text)):
-                skill_display = disabled_skill.replace("_", " ")
-                logger.info(f"Route: DISABLED SKILL → {disabled_skill}")
-                assistant_text = (
-                    f"The {skill_display} feature isn't enabled for your workspace. "
-                    f"Contact your admin to enable it."
-                )
-                total_tokens = 0
-                route_type = "disabled_skill"
-                _fire_and_forget(
-                    _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
-                )
-            else:
-                stats["ai_routed"] += 1
-                tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
-                messages = history + [{"role": "user", "content": clean_text}]
-                response = await provider_ai.chat(active_model, system, messages, tools)
-
-                if response.has_tool_use:
-                    tc = response.tool_calls[0]
-
-                    if USE_ASYNC_SKILLS and event_bus and pending_store:
-                        return await _handle_async_skill(
-                            tenant_id,
-                            user_email,
-                            tc.tool_name,
-                            tc.tool_params,
-                            conversation_id,
-                            clean_text,
-                            is_raw,
-                            "ai",
-                            active_model,
-                            model_short_name,
-                        )
-
-                    request_id = f"ai-{conversation_id}"
-                    await bus.publish_skill_invocation(
-                        tenant_id,
-                        tc.tool_name,
-                        tc.tool_params,
-                        conversation_id,
-                        request_id,
-                        "dashboard",
-                        "user",
-                    )
-                    skill_result = bus.get_result(request_id) or {"error": "No result"}
-                    _fire_and_forget(
-                        _log_training(
-                            tenant_id,
-                            clean_text,
-                            tc.tool_name,
-                            tc.tool_params.get("action"),
-                        )
-                    )
-
-                    # Audio results: return directly, skip AI formatting
-                    if skill_result.get("type") == "audio":
-                        roundtrip_sec = round(time.time() - request_start, 1)
-                        await memory.save_turn(
-                            tenant_id, conversation_id, clean_text,
-                            skill_result.get("text", ""),
-                            metadata={"route": "ai", "skill": tc.tool_name},
-                        )
-                        return JSONResponse({
-                            "text": skill_result.get("text", ""),
-                            "audio": {
-                                "audio_b64": skill_result.get("audio_b64", ""),
-                                "audio_url": skill_result.get("audio_url", ""),
-                                "format": skill_result.get("format", "wav"),
-                            },
-                            "conversation_id": conversation_id,
-                            "tokens": 0,
-                            "route": "ai",
-                            "skill": tc.tool_name,
-                            "raw": False,
-                            "model": "",
-                            "roundtrip_sec": roundtrip_sec,
-                        })
-
-                    if is_raw and engine and engine.supports_raw(tc.tool_name):
-                        stats["raw"] += 1
-                        assistant_text = _format_raw_json(skill_result)
-                        total_tokens = response.input_tokens + response.output_tokens
-                        route_type = "ai"
-                        is_raw_response = True
-                    else:
-                        messages_with_tool = messages + [
-                            {
-                                "role": "assistant",
-                                "content": [
-                                    {
-                                        "type": "tool_use",
-                                        "id": tc.tool_use_id,
-                                        "name": tc.tool_name,
-                                        "input": tc.tool_params,
-                                    }
-                                ],
-                            }
-                        ]
-                        final = await provider_ai.chat_with_tool_result(
-                            active_model,
-                            system,
-                            messages_with_tool,
-                            tools,
-                            tc.tool_use_id,
-                            skill_result,
-                        )
-                        assistant_text = final.text or "Got data but couldn't format."
-                        total_tokens = (
-                            response.input_tokens
-                            + response.output_tokens
-                            + final.input_tokens
-                            + final.output_tokens
-                        )
-                        route_type = "ai"
-                else:
-                    assistant_text = response.text or "Not sure how to help."
-                    total_tokens = response.input_tokens + response.output_tokens
-                    route_type = "ai"
-                    _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
-
-        stats["total_tokens"] += total_tokens
-        roundtrip_sec = round(time.time() - request_start, 1)
-        chat_metadata: dict[str, Any] = {
-            "route": route_type,
-            "model": model_short_name,
-            "tokens": total_tokens,
-            "timestamp": int(request_start * 1000),
-            "roundtrip_sec": roundtrip_sec,
-        }
-        if user_email:
-            chat_metadata["user_email"] = user_email
-        if not is_raw_response:
-            await memory.save_turn(
-                tenant_id, conversation_id, clean_text, assistant_text, metadata=chat_metadata
-            )
-
-        return JSONResponse(
-            {
-                "text": assistant_text,
-                "conversation_id": conversation_id,
-                "tokens": total_tokens,
-                "route": route_type,
-                "raw": is_raw_response,
-                "model": model_short_name,
-                "user_email": user_email,
-            }
-        )
-
-    except Exception as e:
-        logger.exception("Chat error")
-        stats["errors"] += 1
-        friendly = error_handler.handle(e, context="chat")
-        return JSONResponse({"error": friendly.message, **friendly.to_dict()}, status_code=500)
-
-
-async def _handle_async_skill(
-    tenant_id: str,
-    user_email: str,
-    skill_name: str,
-    params: dict[str, Any],
-    conversation_id: str,
-    user_message: str,
-    is_raw: bool,
-    route_type: str,
-    model_id: str = "",
-    model_short_name: str = "",
-) -> Response:
-    import uuid
-
-    request_id = f"async-{uuid.uuid4().hex[:12]}"
-    user_key = user_email or "anonymous"
-    pending_req = PendingRequest(
-        request_id=request_id,
-        tenant_id=tenant_id,
-        skill_name=skill_name,
-        channel="dashboard",
-        conversation_id=conversation_id,
-        reply_target=user_key,
-        user_key=user_key,
-        is_raw=is_raw,
-        user_message=user_message,
-        model_id=model_id,
-        model_short_name=model_short_name,
-        route_type=route_type,
-    )
-    pending_store.create(pending_req)  # type: ignore[union-attr]
-    await event_bus.publish_skill_invocation(  # type: ignore[union-attr]
-        tenant_id, skill_name, params, conversation_id, request_id, "dashboard", user_key
-    )
-    stats[f"{route_type}_routed"] += 1
-    logger.info(
-        f"Chat: async skill '{skill_name}' dispatched, request={request_id[:8]}, user={user_key}"
-    )
-    if route_type == "ai":
-        _fire_and_forget(_log_training(tenant_id, user_message, skill_name, params.get("action")))
-    return JSONResponse(
-        {
-            "status": "processing",
-            "request_id": request_id,
-            "conversation_id": conversation_id,
-            "skill": skill_name,
-            "route": route_type,
-            "model": "",
-            "user_email": user_email,
-        }
-    )
-
-
-async def handle_clear(request: Request) -> Response:
-    try:
-        tenant_id, _ = await _get_auth_info(request)
-        body = await request.json()
-        cid = body.get("conversation_id", "default")
-        await memory.clear_conversation(tenant_id, cid)
-        return JSONResponse({"cleared": True})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# Invitations
+# Invitations (AWS-specific — DynamoDB tenant store)
 # ---------------------------------------------------------------------------
 
 
@@ -1699,34 +968,8 @@ async def handle_invitation_accept(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Admin and Platform API delegation (run in thread pool — they use asyncio.run internally)
+# Admin and Platform API delegation (run in thread pool)
 # ---------------------------------------------------------------------------
-
-
-async def handle_rules_admin(request: Request) -> Response:
-    """POST /api/admin/rules/rebuild and GET /api/admin/rules/status."""
-    method = request.method
-    path = str(request.url.path)
-    tenant_id, _ = await _get_auth_info(request)
-
-    if method == "POST" and path.endswith("/rebuild"):
-        _fire_and_forget(_rebuild_rules(tenant_id))
-        return JSONResponse({"rebuilding": True, "tenant_id": tenant_id})
-
-    if method == "GET" and path.endswith("/status"):
-        rule_set = await rule_store.load_rule_set(tenant_id)
-        engine = _compiled_engines.get(tenant_id)
-        return JSONResponse(
-            {
-                "tenant_id": tenant_id,
-                "version": rule_set.version if rule_set else 0,
-                "generated_at": rule_set.generated_at if rule_set else None,
-                "skill_count": len(rule_set.rules) if rule_set else 0,
-                "engine_loaded": engine is not None,
-            }
-        )
-
-    return JSONResponse({"error": "Not found"}, status_code=404)
 
 
 async def handle_admin(request: Request) -> Response:
@@ -1760,305 +1003,63 @@ async def handle_platform(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Teams webhook
+# AWS-specific: async skill dispatch
 # ---------------------------------------------------------------------------
 
 
-async def handle_teams_webhook(request: Request) -> Response:
-    try:
-        body_bytes = await request.body()
-        activity = json.loads(body_bytes) if body_bytes else {}
-        activity_type = activity.get("type", "")
-        logger.info(f"Teams webhook: type={activity_type}")
+async def _handle_async_skill(
+    tenant_id: str,
+    user_email: str,
+    skill_name: str,
+    params: dict[str, Any],
+    conversation_id: str,
+    user_message: str,
+    is_raw: bool,
+    route_type: str,
+    model_id: str = "",
+    model_short_name: str = "",
+) -> Response:
+    import uuid
 
-        recipient_id = activity.get("recipient", {}).get("id", "")
-        teams_adapter = await _get_teams_adapter(recipient_id)
-
-        if not teams_adapter:
-            logger.warning(f"No Teams adapter for recipient {recipient_id}")
-            return JSONResponse({"error": "Bot not configured"}, status_code=401)
-
-        auth_header = request.headers.get("authorization", "")
-        if auth_header and not teams_adapter.validate_webhook(dict(request.headers), body_bytes):
-            logger.warning("Teams webhook JWT validation failed")
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-        if activity_type == "message" and TeamsAdapter.is_message_activity(activity):
-            await _handle_teams_message(teams_adapter, activity)
-        elif TeamsAdapter.is_bot_added(activity):
-            await _handle_teams_bot_added(teams_adapter, activity)
-        else:
-            logger.debug(f"Ignoring Teams activity type: {activity_type}")
-
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        logger.exception("Teams webhook error")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def _get_teams_adapter(bot_app_id: str) -> TeamsAdapter | None:
-    try:
-        tenant = await tenants.get_by_channel_id("teams", bot_app_id)
-    except Exception:
-        try:
-            all_tenants = await tenants.list_tenants()
-            tenant = None
-            for t in all_tenants:
-                try:
-                    creds = await secrets.get(t.tenant_id, "teams")
-                    if creds.get("app_id") == bot_app_id:
-                        tenant = t
-                        await tenants.set_channel_mapping(t.tenant_id, "teams", bot_app_id)
-                        break
-                except Exception:
-                    continue
-            if tenant is None:
-                return None
-        except Exception:
-            return None
-
-    if tenant is None:
-        return None
-
-    try:
-        creds = await secrets.get(tenant.tenant_id, "teams")
-        app_id = creds.get("app_id", "")
-        app_secret = creds.get("app_secret", "")
-        if not app_id or not app_secret:
-            logger.error(f"Incomplete Teams credentials for tenant {tenant.tenant_id}")
-            return None
-        return TeamsAdapter(app_id, app_secret)
-    except Exception as e:
-        logger.error(f"Failed to load Teams credentials: {e}")
-        return None
-
-
-async def _handle_teams_message(teams_adapter: TeamsAdapter, activity: dict[str, Any]) -> None:
-    from agent.models.message import OutboundMessage
-
-    message = teams_adapter.parse_inbound(activity)
-    text = message.text
-    if not text:
-        return
-
-    recipient_id = activity.get("recipient", {}).get("id", "")
-    try:
-        tenant = await tenants.get_by_channel_id("teams", recipient_id)
-    except Exception:
-        logger.warning(f"No tenant mapped for Teams bot {recipient_id}")
-        return
-
-    tenant_id = tenant.tenant_id
-    conversation_id = f"teams-{message.conversation_id}"
-    logger.info(f"Teams [{tenant_id}]: {text[:100]}")
-
-    await teams_adapter.send_typing_indicator(message.conversation_id)
-
-    clean_text, is_raw = strip_raw_flag(text)
-    active_provider, active_model, model_short_name = _resolve_model(tenant)
-    provider_ai = ai.for_provider(active_provider)
-    system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
-Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
-You are communicating via Microsoft Teams. Keep responses clear and well-formatted.
-When you have data to present, format it clearly with structure."""
-    history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
-
-    teams_engine = _get_engine(tenant_id)
-    if not is_raw and is_conversational(clean_text):
-        stats["conversational"] += 1
-        messages = history + [{"role": "user", "content": clean_text}]
-        response = await provider_ai.chat(active_model, system, messages, [])
-        assistant_text = response.text or "Hey! How can I help?"
-        total_tokens = response.input_tokens + response.output_tokens
-    else:
-        teams_router = teams_engine or _fallback_router
-        match = (
-            teams_router.match(clean_text, tenant.settings.enabled_skills) if teams_router else None
-        )
-        if match:
-            _enrich_match_params(match, clean_text)
-
-            if USE_ASYNC_SKILLS and event_bus and pending_store:
-                service_url = teams_adapter._service_urls.get(message.conversation_id, "")
-                _handle_async_channel_skill(
-                    tenant_id=tenant_id,
-                    channel="teams",
-                    skill_name=match.skill_name,
-                    params=match.params,
-                    conversation_id=conversation_id,
-                    reply_target=message.conversation_id,
-                    user_key=message.channel_user_id,
-                    user_message=clean_text,
-                    is_raw=is_raw,
-                    route_type="rule",
-                    model_id=active_model,
-                    model_short_name=model_short_name,
-                    service_url=service_url,
-                )
-                return
-
-            request_id = f"teams-rule-{conversation_id}"
-            await bus.publish_skill_invocation(
-                tenant_id,
-                match.skill_name,
-                match.params,
-                conversation_id,
-                request_id,
-                "teams",
-                message.channel_user_id,
-            )
-            skill_result = bus.get_result(request_id) or {"error": "No result"}
-            if is_raw and teams_engine and teams_engine.supports_raw(match.skill_name):
-                stats["raw"] += 1
-                stats["rule_routed"] += 1
-                assistant_text = _format_raw_json(skill_result)
-                total_tokens = 0
-            else:
-                stats["rule_routed"] += 1
-                prompt = (
-                    f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\nFormat this clearly."
-                )
-                messages = history + [{"role": "user", "content": prompt}]
-                response = await provider_ai.chat(active_model, system, messages, [])
-                assistant_text = response.text or "Got data but couldn't format."
-                total_tokens = response.input_tokens + response.output_tokens
-        elif teams_engine and (disabled_skill := teams_engine.check_disabled_skill(clean_text)):
-            skill_display = disabled_skill.replace("_", " ")
-            assistant_text = (
-                f"The {skill_display} feature isn't enabled for your workspace. "
-                f"Contact your admin to enable it."
-            )
-            total_tokens = 0
-            _fire_and_forget(
-                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
-            )
-        else:
-            stats["ai_routed"] += 1
-            tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
-            messages = history + [{"role": "user", "content": clean_text}]
-            response = await provider_ai.chat(active_model, system, messages, tools)
-            if response.has_tool_use:
-                tc = response.tool_calls[0]
-                if USE_ASYNC_SKILLS and event_bus and pending_store:
-                    service_url = teams_adapter._service_urls.get(message.conversation_id, "")
-                    _handle_async_channel_skill(
-                        tenant_id=tenant_id,
-                        channel="teams",
-                        skill_name=tc.tool_name,
-                        params=tc.tool_params,
-                        conversation_id=conversation_id,
-                        reply_target=message.conversation_id,
-                        user_key=message.channel_user_id,
-                        user_message=clean_text,
-                        is_raw=is_raw,
-                        route_type="ai",
-                        model_id=active_model,
-                        model_short_name=model_short_name,
-                        service_url=service_url,
-                    )
-                    return
-
-                request_id = f"teams-ai-{conversation_id}"
-                await bus.publish_skill_invocation(
-                    tenant_id,
-                    tc.tool_name,
-                    tc.tool_params,
-                    conversation_id,
-                    request_id,
-                    "teams",
-                    message.channel_user_id,
-                )
-                skill_result = bus.get_result(request_id) or {"error": "No result"}
-                _fire_and_forget(
-                    _log_training(
-                        tenant_id,
-                        clean_text,
-                        tc.tool_name,
-                        tc.tool_params.get("action"),
-                    )
-                )
-                if is_raw and teams_engine and teams_engine.supports_raw(tc.tool_name):
-                    stats["raw"] += 1
-                    assistant_text = _format_raw_json(skill_result)
-                    total_tokens = response.input_tokens + response.output_tokens
-                else:
-                    messages_with_tool = messages + [
-                        {
-                            "role": "assistant",
-                            "content": [
-                                {
-                                    "type": "tool_use",
-                                    "id": tc.tool_use_id,
-                                    "name": tc.tool_name,
-                                    "input": tc.tool_params,
-                                }
-                            ],
-                        }
-                    ]
-                    final = await provider_ai.chat_with_tool_result(
-                        active_model,
-                        system,
-                        messages_with_tool,
-                        tools,
-                        tc.tool_use_id,
-                        skill_result,
-                    )
-                    assistant_text = final.text or "Got data but couldn't format."
-                    total_tokens = (
-                        response.input_tokens
-                        + response.output_tokens
-                        + final.input_tokens
-                        + final.output_tokens
-                    )
-            else:
-                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
-                assistant_text = response.text or "Not sure how to help."
-                total_tokens = response.input_tokens + response.output_tokens
-
-    stats["total_tokens"] += total_tokens
-    await memory.save_turn(
-        tenant_id,
-        conversation_id,
-        clean_text,
-        assistant_text,
-        metadata={
-            "route": "teams",
-            "model": model_short_name,
-            "tokens": total_tokens,
-            "channel": "teams",
-        },
-    )
-    outbound = OutboundMessage(
-        channel=ChannelType.TEAMS,
-        conversation_id=message.conversation_id,
-        recipient_id=message.channel_user_id,
-        text=assistant_text,
-    )
-    await teams_adapter.send_response(outbound)
-
-
-async def _handle_teams_bot_added(teams_adapter: TeamsAdapter, activity: dict[str, Any]) -> None:
-    from agent.models.message import OutboundMessage
-
-    conversation_id = activity.get("conversation", {}).get("id", "")
-    if not conversation_id:
-        return
-    service_url = activity.get("serviceUrl", "")
-    if service_url:
-        teams_adapter._service_urls[conversation_id] = service_url.rstrip("/")
-
-    welcome = OutboundMessage(
-        channel=ChannelType.TEAMS,
+    request_id = f"async-{uuid.uuid4().hex[:12]}"
+    user_key = user_email or "anonymous"
+    pending_req = PendingRequest(
+        request_id=request_id,
+        tenant_id=tenant_id,
+        skill_name=skill_name,
+        channel="dashboard",
         conversation_id=conversation_id,
-        recipient_id="",
-        text=(
-            "Hi! I'm your T3nets assistant. "
-            "Ask me about sprint status, release notes, and more. "
-            "Type **help** to see what I can do."
-        ),
+        reply_target=user_key,
+        user_key=user_key,
+        is_raw=is_raw,
+        user_message=user_message,
+        model_id=model_id,
+        model_short_name=model_short_name,
+        route_type=route_type,
     )
-    await teams_adapter.send_response(welcome)
+    pending_store.create(pending_req)  # type: ignore[union-attr]
+    await event_bus.publish_skill_invocation(  # type: ignore[union-attr]
+        tenant_id, skill_name, params, conversation_id, request_id, "dashboard", user_key
+    )
+    stats[f"{route_type}_routed"] += 1
+    logger.info(
+        f"Chat: async skill '{skill_name}' dispatched, request={request_id[:8]}, user={user_key}"
+    )
+    if route_type == "ai":
+        _fire_and_forget(
+            chat_handlers.log_training(tenant_id, user_message, skill_name, params.get("action"))
+        )
+    return JSONResponse(
+        {
+            "status": "processing",
+            "request_id": request_id,
+            "conversation_id": conversation_id,
+            "skill": skill_name,
+            "route": route_type,
+            "model": "",
+            "user_email": user_email,
+        }
+    )
 
 
 def _handle_async_channel_skill(
@@ -2107,35 +1108,45 @@ def _handle_async_channel_skill(
 
 
 # ---------------------------------------------------------------------------
-# Telegram webhook
+# AWS-specific: channel adapter resolvers
 # ---------------------------------------------------------------------------
 
 
-async def handle_telegram_webhook(request: Request) -> Response:
-    # ALWAYS return 200 to Telegram — otherwise it retries indefinitely.
-    # Auth failures are the only exception (401 stops Telegram from retrying
-    # an invalid webhook URL, which is the correct behavior).
+async def _get_teams_adapter(bot_app_id: str) -> TeamsAdapter | None:
     try:
-        body_bytes = await request.body()
-        update = json.loads(body_bytes) if body_bytes else {}
+        tenant = await tenants.get_by_channel_id("teams", bot_app_id)
+    except Exception:
+        try:
+            all_tenants = await tenants.list_tenants()
+            tenant = None
+            for t in all_tenants:
+                try:
+                    creds = await secrets.get(t.tenant_id, "teams")
+                    if creds.get("app_id") == bot_app_id:
+                        tenant = t
+                        await tenants.set_channel_mapping(t.tenant_id, "teams", bot_app_id)
+                        break
+                except Exception:
+                    continue
+            if tenant is None:
+                return None
+        except Exception:
+            return None
 
-        token_hash = request.path_params.get("token_hash", "")
-        telegram_adapter = await _get_telegram_adapter(token_hash)
-        if not telegram_adapter:
-            logger.warning(f"No Telegram adapter for token hash {token_hash[:8]}...")
-            return JSONResponse({"error": "Bot not configured"}, status_code=401)
+    if tenant is None:
+        return None
 
-        if not telegram_adapter.validate_webhook(dict(request.headers), body_bytes):
-            logger.warning("Telegram webhook secret validation failed")
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-        if TelegramAdapter.is_message_update(update):
-            _fire_and_forget(_handle_telegram_message(telegram_adapter, update))
-
+    try:
+        creds = await secrets.get(tenant.tenant_id, "teams")
+        app_id = creds.get("app_id", "")
+        app_secret = creds.get("app_secret", "")
+        if not app_id or not app_secret:
+            logger.error(f"Incomplete Teams credentials for tenant {tenant.tenant_id}")
+            return None
+        return TeamsAdapter(app_id, app_secret)
     except Exception as e:
-        logger.exception("Telegram webhook error")
-
-    return JSONResponse({"ok": True})
+        logger.error(f"Failed to load Teams credentials: {e}")
+        return None
 
 
 async def _get_telegram_adapter(token_hash: str) -> TelegramAdapter | None:
@@ -2153,250 +1164,25 @@ async def _get_telegram_adapter(token_hash: str) -> TelegramAdapter | None:
     return None
 
 
-async def _handle_telegram_message(adapter: TelegramAdapter, update: dict[str, Any]) -> None:
-    from agent.models.message import OutboundMessage
+async def _get_whatsapp_adapter(token_hash: str) -> Any:
+    from agent.channels.whatsapp import WhatsAppAdapter
 
-    message = adapter.parse_inbound(update)
-    text = message.text
-    if not text:
-        return
-
-    token_hash = hashlib.sha256(adapter.bot_token.encode()).hexdigest()[:16]
+    if not token_hash or token_hash == "webhook":
+        logger.warning("No token hash in WhatsApp webhook URL")
+        return None
     try:
-        tenant = await tenants.get_by_channel_id("telegram", token_hash)
-    except Exception:
-        logger.warning(f"No tenant mapped for Telegram bot {token_hash[:8]}")
-        return
-
-    tenant_id = tenant.tenant_id
-    conversation_id = f"tg-{message.conversation_id}"
-    logger.info(f"Telegram [{tenant_id}]: {text[:100]}")
-
-    await adapter.send_typing_indicator(message.conversation_id)
-
-    clean_text, is_raw = strip_raw_flag(text)
-    active_provider, active_model, model_short_name = _resolve_model(tenant)
-    provider_ai = ai.for_provider(active_provider)
-    system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
-Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
-You are communicating via Telegram. Keep responses concise and well-formatted.
-Use Markdown sparingly — Telegram supports *bold*, _italic_, and `code`."""
-    history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
-
-    tg_engine = _get_engine(tenant_id)
-    if not is_raw and is_conversational(clean_text):
-        stats["conversational"] += 1
-        messages = history + [{"role": "user", "content": clean_text}]
-        response = await provider_ai.chat(active_model, system, messages, [])
-        assistant_text = response.text or "Hey! How can I help?"
-        total_tokens = response.input_tokens + response.output_tokens
-    else:
-        tg_router = tg_engine or _fallback_router
-        match = tg_router.match(clean_text, tenant.settings.enabled_skills) if tg_router else None
-        if match:
-            _enrich_match_params(match, clean_text)
-
-            if USE_ASYNC_SKILLS and event_bus and pending_store:
-                _handle_async_channel_skill(
-                    tenant_id=tenant_id,
-                    channel="telegram",
-                    skill_name=match.skill_name,
-                    params=match.params,
-                    conversation_id=conversation_id,
-                    reply_target=message.conversation_id,
-                    user_key=message.channel_user_id,
-                    user_message=clean_text,
-                    is_raw=is_raw,
-                    route_type="rule",
-                    model_id=active_model,
-                    model_short_name=model_short_name,
-                )
-                return
-
-            request_id = f"tg-rule-{conversation_id}"
-            await bus.publish_skill_invocation(
-                tenant_id,
-                match.skill_name,
-                match.params,
-                conversation_id,
-                request_id,
-                "telegram",
-                message.channel_user_id,
-            )
-            skill_result = bus.get_result(request_id) or {"error": "No result"}
-            stats["rule_routed"] += 1
-
-            # Audio results: send directly with attachment, skip AI formatting
-            if skill_result.get("type") == "audio":
-                assistant_text = skill_result.get("text", "")
-                total_tokens = 0
-                audio_att: dict[str, Any] = {
-                    "type": "audio",
-                    "format": skill_result.get("format", "wav"),
-                }
-                if skill_result.get("audio_url"):
-                    audio_att["audio_url"] = skill_result["audio_url"]
-                if skill_result.get("audio_b64"):
-                    audio_att["audio_b64"] = skill_result["audio_b64"]
-                outbound = OutboundMessage(
-                    channel=ChannelType.TELEGRAM,
-                    conversation_id=message.conversation_id,
-                    recipient_id=message.channel_user_id,
-                    text=assistant_text,
-                    attachments=[audio_att],
-                )
-                await adapter.send_response(outbound)
-                await memory.save_turn(
-                    tenant_id, conversation_id, clean_text, assistant_text,
-                    metadata={"route": "rule", "skill": match.skill_name, "channel": "telegram"},
-                )
-                return
-
-            if is_raw and tg_engine and tg_engine.supports_raw(match.skill_name):
-                stats["raw"] += 1
-                assistant_text = _format_raw_json(skill_result)
-                total_tokens = 0
-            else:
-                prompt = (
-                    f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
-                    f"Format this clearly and concisely for Telegram."
-                )
-                messages = history + [{"role": "user", "content": prompt}]
-                response = await provider_ai.chat(active_model, system, messages, [])
-                assistant_text = response.text or "Got data but couldn't format."
-                total_tokens = response.input_tokens + response.output_tokens
-        elif tg_engine and (disabled_skill := tg_engine.check_disabled_skill(clean_text)):
-            skill_display = disabled_skill.replace("_", " ")
-            assistant_text = (
-                f"The {skill_display} feature isn't enabled for your workspace. "
-                f"Contact your admin to enable it."
-            )
-            total_tokens = 0
-            _fire_and_forget(
-                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
-            )
-        else:
-            stats["ai_routed"] += 1
-            tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
-            messages = history + [{"role": "user", "content": clean_text}]
-            response = await provider_ai.chat(active_model, system, messages, tools)
-            if response.has_tool_use:
-                tc = response.tool_calls[0]
-                if USE_ASYNC_SKILLS and event_bus and pending_store:
-                    _handle_async_channel_skill(
-                        tenant_id=tenant_id,
-                        channel="telegram",
-                        skill_name=tc.tool_name,
-                        params=tc.tool_params,
-                        conversation_id=conversation_id,
-                        reply_target=message.conversation_id,
-                        user_key=message.channel_user_id,
-                        user_message=clean_text,
-                        is_raw=is_raw,
-                        route_type="ai",
-                        model_id=active_model,
-                        model_short_name=model_short_name,
-                    )
-                    return
-
-                request_id = f"tg-ai-{conversation_id}"
-                await bus.publish_skill_invocation(
-                    tenant_id,
-                    tc.tool_name,
-                    tc.tool_params,
-                    conversation_id,
-                    request_id,
-                    "telegram",
-                    message.channel_user_id,
-                )
-                skill_result = bus.get_result(request_id) or {"error": "No result"}
-                _fire_and_forget(
-                    _log_training(
-                        tenant_id,
-                        clean_text,
-                        tc.tool_name,
-                        tc.tool_params.get("action"),
-                    )
-                )
-
-                # Audio results: send directly with attachment, skip AI formatting
-                if skill_result.get("type") == "audio":
-                    ai_text = skill_result.get("text", "")
-                    ai_audio: dict[str, Any] = {
-                        "type": "audio",
-                        "format": skill_result.get("format", "wav"),
-                    }
-                    if skill_result.get("audio_url"):
-                        ai_audio["audio_url"] = skill_result["audio_url"]
-                    if skill_result.get("audio_b64"):
-                        ai_audio["audio_b64"] = skill_result["audio_b64"]
-                    outbound = OutboundMessage(
-                        channel=ChannelType.TELEGRAM,
-                        conversation_id=message.conversation_id,
-                        recipient_id=message.channel_user_id,
-                        text=ai_text,
-                        attachments=[ai_audio],
-                    )
-                    await adapter.send_response(outbound)
-                    await memory.save_turn(
-                        tenant_id, conversation_id, clean_text, ai_text,
-                        metadata={"route": "ai", "skill": tc.tool_name, "channel": "telegram"},
-                    )
-                    return
-
-                messages_with_tool = messages + [
-                    {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "id": tc.tool_use_id,
-                                "name": tc.tool_name,
-                                "input": tc.tool_params,
-                            }
-                        ],
-                    }
-                ]
-                final = await provider_ai.chat_with_tool_result(
-                    active_model,
-                    system,
-                    messages_with_tool,
-                    tools,
-                    tc.tool_use_id,
-                    skill_result,
-                )
-                assistant_text = final.text or "Got data but couldn't format."
-                total_tokens = (
-                    response.input_tokens
-                    + response.output_tokens
-                    + final.input_tokens
-                    + final.output_tokens
-                )
-            else:
-                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
-                assistant_text = response.text or "Not sure how to help."
-                total_tokens = response.input_tokens + response.output_tokens
-
-    stats["total_tokens"] += total_tokens
-    await memory.save_turn(
-        tenant_id,
-        conversation_id,
-        clean_text,
-        assistant_text,
-        metadata={"route": "telegram", "model": model_short_name, "tokens": total_tokens},
-    )
-    outbound = OutboundMessage(
-        channel=ChannelType.TELEGRAM,
-        conversation_id=message.conversation_id,
-        recipient_id=message.channel_user_id,
-        text=assistant_text,
-    )
-    await adapter.send_response(outbound)
+        tenant = await tenants.get_by_channel_id("whatsapp", token_hash)
+        creds = await secrets.get(tenant.tenant_id, "whatsapp")
+        api_token = creds.get("api_token", "")
+        if api_token:
+            return WhatsAppAdapter(api_token, creds.get("webhook_secret", ""))
+    except Exception as e:
+        logger.warning(f"WhatsApp channel mapping lookup failed: {e}")
+    return None
 
 
 # ---------------------------------------------------------------------------
-# WhatsApp webhook (via Whapi.cloud)
+# WhatsApp webhook (NOT extracted — AWS-specific)
 # ---------------------------------------------------------------------------
 
 
@@ -2421,31 +1207,13 @@ async def handle_whatsapp_webhook(request: Request) -> Response:
         if WhatsAppAdapter.is_message_event(event):
             _fire_and_forget(_handle_whatsapp_message(whatsapp_adapter, event))
 
-    except Exception as e:
+    except Exception:
         logger.exception("WhatsApp webhook error")
 
     return JSONResponse({"ok": True})
 
 
-async def _get_whatsapp_adapter(token_hash: str):
-    from agent.channels.whatsapp import WhatsAppAdapter
-
-    if not token_hash or token_hash == "webhook":
-        logger.warning("No token hash in WhatsApp webhook URL")
-        return None
-    try:
-        tenant = await tenants.get_by_channel_id("whatsapp", token_hash)
-        creds = await secrets.get(tenant.tenant_id, "whatsapp")
-        api_token = creds.get("api_token", "")
-        if api_token:
-            return WhatsAppAdapter(api_token, creds.get("webhook_secret", ""))
-    except Exception as e:
-        logger.warning(f"WhatsApp channel mapping lookup failed: {e}")
-    return None
-
-
-async def _handle_whatsapp_message(adapter, event: dict[str, Any]) -> None:
-    from agent.channels.whatsapp import WhatsAppAdapter
+async def _handle_whatsapp_message(adapter: Any, event: dict[str, Any]) -> None:
     from agent.models.message import OutboundMessage
 
     message = adapter.parse_inbound(event)
@@ -2467,10 +1235,14 @@ async def _handle_whatsapp_message(adapter, event: dict[str, Any]) -> None:
     clean_text, is_raw = strip_raw_flag(text)
     active_provider, active_model, model_short_name = _resolve_model(tenant)
     provider_ai = ai.for_provider(active_provider)
-    system = f"""You are an AI assistant for {tenant.name} on the T3nets platform.
-Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.
-You are communicating via WhatsApp. Keep responses concise and conversational."""
+    system = (
+        f"You are an AI assistant for {tenant.name} on the T3nets platform.\n"
+        "Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.\n"
+        "You are communicating via WhatsApp. Keep responses concise and conversational."
+    )
     history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
+
+    from agent.router.compiled_engine import is_conversational
 
     wa_engine = _get_engine(tenant_id)
     if not is_raw and is_conversational(clean_text):
@@ -2536,8 +1308,15 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
                 )
                 await adapter.send_response(outbound)
                 await memory.save_turn(
-                    tenant_id, conversation_id, clean_text, assistant_text,
-                    metadata={"route": "rule", "skill": match.skill_name, "channel": "whatsapp"},
+                    tenant_id,
+                    conversation_id,
+                    clean_text,
+                    assistant_text,
+                    metadata={
+                        "route": "rule",
+                        "skill": match.skill_name,
+                        "channel": "whatsapp",
+                    },
                 )
                 return
 
@@ -2563,7 +1342,9 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
             )
             total_tokens = 0
             _fire_and_forget(
-                _log_training(tenant_id, clean_text, None, None, was_disabled_skill=True)
+                chat_handlers.log_training(
+                    tenant_id, clean_text, None, None, was_disabled_skill=True
+                )
             )
         else:
             stats["ai_routed"] += 1
@@ -2601,7 +1382,7 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
                 )
                 skill_result = bus.get_result(request_id) or {"error": "No result"}
                 _fire_and_forget(
-                    _log_training(
+                    chat_handlers.log_training(
                         tenant_id,
                         clean_text,
                         tc.tool_name,
@@ -2629,8 +1410,15 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
                     )
                     await adapter.send_response(outbound)
                     await memory.save_turn(
-                        tenant_id, conversation_id, clean_text, ai_text_wa,
-                        metadata={"route": "ai", "skill": tc.tool_name, "channel": "whatsapp"},
+                        tenant_id,
+                        conversation_id,
+                        clean_text,
+                        ai_text_wa,
+                        metadata={
+                            "route": "ai",
+                            "skill": tc.tool_name,
+                            "channel": "whatsapp",
+                        },
                     )
                     return
 
@@ -2663,7 +1451,7 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
                     + final.output_tokens
                 )
             else:
-                _fire_and_forget(_log_training(tenant_id, clean_text, None, None))
+                _fire_and_forget(chat_handlers.log_training(tenant_id, clean_text, None, None))
                 assistant_text = response.text or "Not sure how to help."
                 total_tokens = response.input_tokens + response.output_tokens
 
@@ -2685,122 +1473,8 @@ You are communicating via WhatsApp. Keep responses concise and conversational.""
 
 
 # ---------------------------------------------------------------------------
-# Practice endpoints
+# Practice page (static file serving)
 # ---------------------------------------------------------------------------
-
-
-async def handle_skill_invoke(request: Request) -> Response:
-    """POST /api/skill/{name} — invoke a skill synchronously from practice pages."""
-    skill_name = request.path_params["name"]
-    try:
-        body = await request.json()
-        worker_fn = skills.get_worker(skill_name)
-
-        skill = skills.get_skill(skill_name)
-        skill_secrets: dict[str, Any] = {}
-        if skill and skill.requires_integration:
-            tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
-            try:
-                skill_secrets = await secrets.get(tenant_id, skill.requires_integration)
-            except Exception:
-                pass
-
-        tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
-        ctx: dict[str, Any] = {"blob_store": blobs, "tenant_id": tenant_id}
-        sig = inspect.signature(worker_fn)
-        if len(sig.parameters) >= 3:
-            result = worker_fn(body, skill_secrets, ctx)
-        else:
-            result = worker_fn(body, skill_secrets)
-
-        if asyncio.iscoroutine(result):
-            result = await result
-
-        return JSONResponse(result)
-    except Exception as e:
-        logger.error(f"Skill invoke failed ({skill_name}): {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_practices_list(request: Request) -> Response:
-    """GET /api/practices — list all installed practices."""
-    result = []
-    for p in practices.list_all():
-        result.append(
-            {
-                "name": p.name,
-                "display_name": p.display_name,
-                "description": p.description,
-                "version": p.version,
-                "icon": p.icon,
-                "built_in": p.built_in,
-                "skills": p.skills,
-                "pages": [
-                    {"slug": pg.slug, "title": pg.title, "nav_label": pg.nav_label}
-                    for pg in p.pages
-                ],
-            }
-        )
-    return JSONResponse(result)
-
-
-async def handle_practices_upload(request: Request) -> Response:
-    """POST /api/practices/upload — upload and install a practice ZIP."""
-    try:
-        body = await request.body()
-        data_dir = Path("data")
-        tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
-
-        # Get installed versions from tenant settings for version check
-        tenant = await tenants.get_tenant(tenant_id)
-        installed_versions = tenant.settings.installed_practices
-
-        practice = await practices.install_zip(
-            body, data_dir, blob_store=blobs, tenant_id=tenant_id,
-            installed_versions=installed_versions,
-        )
-        practices.register_skills(skills)
-
-        # Persist version to DynamoDB
-        tenant.settings.installed_practices[practice.name] = practice.version
-        await tenants.update_tenant(tenant)
-
-        # Deploy Lambdas + rebuild rules in background (takes 15-30s)
-        async def _deploy_and_rebuild() -> None:
-            lambda_config = _get_lambda_deploy_config()
-            if lambda_config["lambda_role_arn"]:
-                deployed = await practices.deploy_skill_lambdas(practice, lambda_config)
-                logger.info(f"Background: deployed Lambdas for {deployed}")
-            await _rebuild_rules(tenant_id)
-            logger.info(f"Background: rules rebuilt for tenant {tenant_id}")
-
-        _fire_and_forget(_deploy_and_rebuild())
-
-        return JSONResponse(
-            {
-                "ok": True,
-                "name": practice.name,
-                "version": practice.version,
-                "skills": practice.skills,
-                "status": "Lambdas deploying in background...",
-            }
-        )
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    except Exception as e:
-        logger.error(f"Practice upload failed: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def handle_practices_pages(request: Request) -> Response:
-    """GET /api/practices/pages — pages available to current tenant."""
-    try:
-        tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT)
-        tenant = await tenants.get_tenant(tenant_id)
-        pages = practices.get_pages_for_tenant(tenant)
-        return JSONResponse(pages)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 async def practice_page(request: Request) -> Response:
@@ -2813,22 +1487,65 @@ async def practice_page(request: Request) -> Response:
     return Response(status_code=404, content="Practice page not found")
 
 
-async def handle_callback(request: Request) -> Response:
-    """POST /api/callback/{request_id} — external service delivers async result."""
-    request_id = request.path_params["request_id"]
-    if not pending_store:
-        return JSONResponse({"error": "Async skills not enabled"}, status_code=501)
+# ---------------------------------------------------------------------------
+# Integration webhook registration helpers (used by _on_credentials_saved)
+# ---------------------------------------------------------------------------
 
-    pending = await pending_store.get(request_id)
-    if not pending:
-        return JSONResponse({"error": "Request not found or expired"}, status_code=404)
 
+def _register_telegram_webhook(request_headers: dict[str, str], creds: dict[str, Any]) -> None:
+    bot_token = creds.get("bot_token", "")
+    if not bot_token:
+        return
     try:
-        body = await request.json()
-        return JSONResponse({"ok": True})
+        token_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
+        host = request_headers.get("host", "")
+        scheme = "https"
+        if host:
+            base_url = f"{scheme}://{host}"
+        else:
+            base_url = os.environ.get("API_BASE_URL", "")
+        if not base_url:
+            logger.warning("Cannot register Telegram webhook: no Host header or API_BASE_URL")
+            return
+        webhook_url = f"{base_url}/api/channels/telegram/webhook/{token_hash}"
+        webhook_secret = creds.get("webhook_secret", "")
+        adapter = TelegramAdapter(bot_token, webhook_secret)
+        result = adapter.register_webhook(webhook_url)
+        logger.info(f"Telegram webhook registration: {result}")
     except Exception as e:
-        logger.error(f"Callback failed: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        logger.error(f"Failed to register Telegram webhook: {e}")
+
+
+def _register_whatsapp_webhook(request_headers: dict[str, str], creds: dict[str, Any]) -> None:
+    from agent.channels.whatsapp import WhatsAppAdapter
+
+    api_token = creds.get("api_token", "")
+    if not api_token:
+        return
+    try:
+        token_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
+        host = request_headers.get("host", "")
+        scheme = "https"
+        if host:
+            base_url = f"{scheme}://{host}"
+        else:
+            base_url = os.environ.get("API_BASE_URL", "")
+        if not base_url:
+            logger.warning("Cannot register WhatsApp webhook: no Host header or API_BASE_URL")
+            return
+        webhook_url = f"{base_url}/api/channels/whatsapp/webhook/{token_hash}"
+        webhook_secret = creds.get("webhook_secret", "")
+        if not webhook_secret:
+            # Auto-generate a secret
+            import secrets as _secrets
+
+            webhook_secret = _secrets.token_urlsafe(24)
+            creds["webhook_secret"] = webhook_secret
+        adapter = WhatsAppAdapter(api_token, webhook_secret)
+        result = adapter.register_webhook(webhook_url)
+        logger.info(f"WhatsApp webhook registration: {result}")
+    except Exception as e:
+        logger.error(f"Failed to register WhatsApp webhook: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -2920,6 +1637,8 @@ async def init() -> None:
     global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
     global sqs_poller, result_router, rule_store, training_store, admin_api, platform_api
     global error_handler, started_at, _fallback_router, practices, blobs
+    global settings_handlers, integration_handlers, chat_handlers, history_handlers
+    global training_handlers, health_handlers, practice_handlers, webhook_handlers
 
     started_at = time.time()
 
@@ -2982,7 +1701,9 @@ async def init() -> None:
             default_tenant = await tenants.get_tenant(DEFAULT_TENANT)
             installed_versions = default_tenant.settings.installed_practices
             restored = await practices_obj.restore_from_blob_store(
-                blobs, DEFAULT_TENANT, data_dir,
+                blobs,
+                DEFAULT_TENANT,
+                data_dir,
                 installed_versions=installed_versions,
             )
             if restored:
@@ -3092,6 +1813,169 @@ async def init() -> None:
                 )
     except Exception:
         logger.exception("Failed to load rule engines at startup — AI routing will be used")
+
+    # ------------------------------------------------------------------
+    # Instantiate shared handler classes
+    # ------------------------------------------------------------------
+
+    # skill_invoker for ChatHandlers: handles both async and sync dispatch
+    async def _chat_skill_invoker(
+        tenant_id: str,
+        skill_name: str,
+        params: dict[str, Any],
+        conversation_id: str,
+        request_id: str,
+        reply_channel: str,
+        reply_target: str,
+    ) -> dict[str, Any] | Response | None:
+        # Async dispatch for dashboard chat
+        if USE_ASYNC_SKILLS and event_bus and pending_store:
+            user_email = reply_target  # reply_target is the user_email for dashboard
+            is_raw = False  # raw flag already stripped by ChatHandlers
+            route_type = "rule" if request_id.startswith("rule-") else "ai"
+            return await _handle_async_skill(
+                tenant_id,
+                user_email,
+                skill_name,
+                params,
+                conversation_id,
+                "",  # user_message — not needed for async dispatch
+                is_raw,
+                route_type,
+                "",
+                "",
+            )
+        # Sync dispatch via DirectBus
+        await bus.publish_skill_invocation(
+            tenant_id, skill_name, params, conversation_id, request_id, reply_channel, reply_target
+        )
+        return bus.get_result(request_id)
+
+    # on_credentials_saved callback for IntegrationHandlers
+    async def _on_credentials_saved(
+        tenant_id: str,
+        integration_name: str,
+        merged: dict[str, Any],
+    ) -> None:
+        """Webhook registration and channel mapping after credentials save."""
+        if integration_name == "telegram":
+            bot_token = merged.get("bot_token", "")
+            if bot_token:
+                # Use API_BASE_URL env var for webhook registration
+                _register_telegram_webhook({}, merged)
+                t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
+                await tenants.set_channel_mapping(tenant_id, "telegram", t_hash)
+
+        elif integration_name == "whatsapp":
+            api_token = merged.get("api_token", "")
+            if api_token:
+                _register_whatsapp_webhook({}, merged)
+                wa_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
+                await tenants.set_channel_mapping(tenant_id, "whatsapp", wa_hash)
+
+    # Post-install hook for PracticeHandlers (Lambda deploy + rule rebuild)
+    async def _post_install_hook(practice_obj: Any, tenant_id: str) -> None:
+        lc = _get_lambda_deploy_config()
+        if lc["lambda_role_arn"]:
+            deployed = await practices.deploy_skill_lambdas(practice_obj, lc)
+            logger.info(f"Background: deployed Lambdas for {deployed}")
+        await chat_handlers.rebuild_rules(tenant_id)
+        logger.info(f"Background: rules rebuilt for tenant {tenant_id}")
+
+    settings_handlers = SettingsHandlers(
+        tenant_store=tenants,
+        secrets_provider=secrets,
+        skill_registry=skills,
+        practice_registry=practices,
+        active_providers=lambda: ai.active_providers,
+        platform=PLATFORM,
+        stage=STAGE,
+        build_number=BUILD_NUMBER,
+        rebuild_callback=lambda tid: _fire_and_forget(chat_handlers.rebuild_rules(tid)),
+    )
+
+    integration_handlers = IntegrationHandlers(
+        secrets=secrets,
+        on_credentials_saved=_on_credentials_saved,
+    )
+
+    chat_handlers = ChatHandlers(
+        memory=memory,
+        tenants=tenants,
+        ai=ai,
+        skills=skills,
+        compiled_engines=_compiled_engines,
+        rule_store=rule_store,
+        training_store=training_store,
+        stats=stats,
+        error_handler=error_handler,
+        resolve_auth=_get_auth_info,
+        resolve_model=_resolve_model,
+        fire_and_forget=_fire_and_forget,
+        skill_invoker=_chat_skill_invoker,
+        enrich_match=_enrich_match_params,
+        fallback_router=_fallback_router,
+    )
+
+    history_handlers = HistoryHandlers(conversation_store=memory)
+
+    training_handlers = TrainingHandlers(
+        training_store=training_store,
+        rule_store=rule_store,
+        compiled_engines=_compiled_engines,
+        rebuild_rules_fn=chat_handlers.rebuild_rules,
+    )
+
+    health_handlers = HealthHandlers(
+        tenants=tenants,
+        secrets=secrets,
+        skill_registry=skills,
+        started_at=started_at,
+        connection_count=lambda: push_client.connection_count,
+        get_stats=lambda: stats,
+        get_ai_info=lambda: {
+            "providers": ai.active_providers,
+            "model": _resolve_model(
+                type("T", (), {"settings": type("S", (), {"ai_model": DEFAULT_MODEL_ID})()})()
+            )[1],
+            "api_key_preview": "IAM role (no key)",
+            "total_tokens": stats["total_tokens"],
+        },
+        platform=PLATFORM,
+        stage=STAGE,
+        default_tenant=DEFAULT_TENANT,
+        connection_label="push_connections",
+    )
+
+    practice_handlers = PracticeHandlers(
+        practices=practices,
+        skills=skills,
+        blobs=blobs,
+        tenants=tenants,
+        secrets=secrets,
+        pending_store=pending_store,
+        post_install_hook=_post_install_hook,
+    )
+
+    webhook_handlers = WebhookHandlers(
+        ai=ai,
+        memory=memory,
+        bus=bus,
+        skills=skills,
+        stats=stats,
+        compiled_engines=_compiled_engines,
+        fallback_router=_fallback_router,
+        resolve_model=_resolve_model,
+        resolve_teams_adapter=_get_teams_adapter,
+        resolve_telegram_adapter=_get_telegram_adapter,
+        resolve_tenant_by_channel=lambda ch, key: tenants.get_by_channel_id(ch, key),
+        log_training=chat_handlers.log_training,
+        enrich_match_params=_enrich_match_params,
+        async_skill_handler=_handle_async_channel_skill,
+        use_async_skills=USE_ASYNC_SKILLS,
+        event_bus=event_bus,
+        pending_store=pending_store,
+    )
 
 
 def main() -> None:
