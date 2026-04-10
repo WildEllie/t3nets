@@ -44,7 +44,15 @@
       "WebFetch(domain:github.com)",
       "WebSearch",
       "Bash(grep -l \"class.*Provider\\\\|class.*Store\" /Users/ellieportugali/projects/t3nets/adapters/aws/*.py)",
-      "WebFetch(domain:paperclip.ing)"
+      "WebFetch(domain:paperclip.ing)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets worktree remove --force /Users/ellieportugali/projects/t3nets/.claude/worktrees/agent-ae145953)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets worktree remove --force /Users/ellieportugali/projects/t3nets/.claude/worktrees/agent-a6130181)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets worktree remove --force /Users/ellieportugali/projects/t3nets/.claude/worktrees/agent-ab8f1e1d)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets worktree remove --force /Users/ellieportugali/projects/t3nets/.claude/worktrees/agent-abc200dd)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets worktree remove --force /Users/ellieportugali/projects/t3nets/.claude/worktrees/agent-ab9f606a)",
+      "Bash(ls:*)",
+      "Bash(python -c \"import t3nets_sdk\")",
+      "Bash(wc -l adapters/shared/handlers/*.py)"
     ]
   },
   "mcpServers": {

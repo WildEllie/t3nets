@@ -15,6 +15,9 @@ venv/
 .idea/
 *.swp
 
+# Backup files
+*.bak
+
 # OS
 .DS_Store
 Thumbs.db
