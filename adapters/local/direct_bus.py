@@ -6,10 +6,10 @@ When a skill is invoked, it's called directly and the result
 is fed back to Claude immediately (synchronous flow).
 """
 
-import asyncio
-import inspect
 import logging
 from typing import Any
+
+from t3nets_sdk.contracts import SkillContext
 
 from agent.interfaces.event_bus import EventBus
 from agent.interfaces.secrets_provider import SecretsProvider
@@ -57,7 +57,6 @@ class DirectBus(EventBus):
         logger.info(f"DirectBus: executing skill '{skill_name}' for tenant '{tenant_id}'")
 
         try:
-            # Get the worker function
             worker_fn = self.skills.get_worker(skill_name)
 
             # Get tenant's secrets for this skill's integration
@@ -73,21 +72,16 @@ class DirectBus(EventBus):
                     }
                     return
 
-            # Build runtime context (includes tenant_id for this request)
-            runtime_ctx = {**self.context, "tenant_id": tenant_id}
+            skill_ctx = SkillContext(
+                tenant_id=tenant_id,
+                secrets=secrets,
+                logger=logging.getLogger(f"t3nets.skill.{skill_name}"),
+                blob_store=self.context.get("blob_store"),
+                extras={k: v for k, v in self.context.items() if k != "blob_store"},
+            )
 
-            # Execute the skill worker — pass context if it accepts 3+ args
-            sig = inspect.signature(worker_fn)
-            if len(sig.parameters) >= 3:
-                result = worker_fn(params, secrets, runtime_ctx)
-            else:
-                result = worker_fn(params, secrets)
-
-            # Support async workers (coroutines)
-            if asyncio.iscoroutine(result):
-                result = await result
-
-            self._pending_results[request_id] = result
+            result = await worker_fn(skill_ctx, params)
+            self._pending_results[request_id] = result.to_dict()
 
             logger.info(f"DirectBus: skill '{skill_name}' completed for request {request_id[:8]}")
 

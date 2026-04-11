@@ -149,9 +149,15 @@ class TestPracticeRegistryAsync:
 
         skill_reg = SkillRegistry()
         registry.register_skills(skill_reg)
+        # After step 5 get_worker returns a normalized async wrapper that
+        # presents the new (SkillContext, params) -> SkillResult contract.
+        # Legacy workers like this one are wrapped transparently.
+        from t3nets_sdk.contracts import SkillContext
+
         worker = skill_reg.get_worker("greet")
-        result = worker({}, {})
-        assert result == {"msg": "hi"}
+        result = await worker(SkillContext(tenant_id="t1"), {})
+        assert result.success is True
+        assert result.data == {"msg": "hi"}
 
     @pytest.mark.asyncio
     async def test_install_zip_missing_manifest(self, tmp_dir):

@@ -6,6 +6,11 @@ against. Practice repos should depend on this package and nothing else
 from t3nets.
 """
 
+from t3nets_sdk.contracts import (
+    SkillContext,
+    SkillResult,
+    Worker,
+)
 from t3nets_sdk.interfaces import (
     BlobNotFound,
     BlobStore,
@@ -43,6 +48,10 @@ __all__ = [
     "ChannelCapability",
     "InboundMessage",
     "OutboundMessage",
+    # Contracts
+    "SkillContext",
+    "SkillResult",
+    "Worker",
     # Interfaces
     "BlobStore",
     "BlobNotFound",

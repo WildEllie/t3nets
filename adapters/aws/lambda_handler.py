@@ -35,7 +35,8 @@ import boto3  # type: ignore[import-untyped]
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import asyncio
-import inspect
+
+from t3nets_sdk.contracts import SkillContext
 
 from agent.skills.registry import SkillRegistry, SkillNotFound
 from agent.practices.registry import PracticeRegistry
@@ -170,8 +171,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     params = detail.get("params", {})
 
     logger.info(
-        f"Lambda: invoked for skill={skill_name}, "
-        f"request={request_id[:8]}, tenant={tenant_id}"
+        f"Lambda: invoked for skill={skill_name}, request={request_id[:8]}, tenant={tenant_id}"
     )
 
     # --- Step 1: Idempotency check ---
@@ -206,33 +206,26 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 secrets_provider.get(tenant_id, skill_def.requires_integration)
             )
         except Exception as e:
-            logger.error(
-                f"Lambda: failed to get secrets for "
-                f"{skill_def.requires_integration}: {e}"
+            logger.error(f"Lambda: failed to get secrets for {skill_def.requires_integration}: {e}")
+            _send_result(
+                request_id,
+                detail,
+                {"error": f"Integration not configured: {skill_def.requires_integration}"},
             )
-            _send_result(request_id, detail, {
-                "error": f"Integration not configured: {skill_def.requires_integration}"
-            })
             return {"statusCode": 400, "body": "Integration not configured"}
 
     # --- Step 3: Execute the skill ---
     try:
-        # Build context with blob store and tenant for practice workers
-        ctx: dict[str, Any] = {"blob_store": _init_blobs(), "tenant_id": tenant_id}
-        sig = inspect.signature(worker_fn)
-        if len(sig.parameters) >= 3:
-            result = worker_fn(params, skill_secrets, ctx)
-        else:
-            result = worker_fn(params, skill_secrets)
-
-        # Support async workers
-        if asyncio.iscoroutine(result):
-            result = asyncio.get_event_loop().run_until_complete(result)
-
-        logger.info(
-            f"Lambda: skill {skill_name} completed in "
-            f"{time.time() - start_time:.2f}s"
+        skill_ctx = SkillContext(
+            tenant_id=tenant_id,
+            secrets=skill_secrets,
+            logger=logging.getLogger(f"t3nets.skill.{skill_name}"),
+            blob_store=_init_blobs(),
         )
+        skill_result = asyncio.get_event_loop().run_until_complete(worker_fn(skill_ctx, params))
+        result = skill_result.to_dict()
+
+        logger.info(f"Lambda: skill {skill_name} completed in {time.time() - start_time:.2f}s")
     except Exception as e:
         logger.exception(f"Lambda: skill {skill_name} failed")
         result = {"error": f"Skill execution failed: {e}"}
@@ -240,9 +233,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # --- Step 4: Mark completed (idempotent conditional update) ---
     was_pending = pending.mark_completed(request_id)
     if not was_pending:
-        logger.info(
-            f"Lambda: request {request_id[:8]} was already completed by another invocation"
-        )
+        logger.info(f"Lambda: request {request_id[:8]} was already completed by another invocation")
         # Another Lambda already processed this — don't send duplicate result
         return {"statusCode": 200, "body": "Already completed by another invocation"}
 
@@ -272,7 +263,9 @@ def _offload_audio_to_s3(result: dict[str, Any], tenant_id: str) -> dict[str, An
     key = f"{tenant_id}/audio/{uuid.uuid4().hex}.wav"
     s3.put_object(Bucket=S3_BUCKET, Key=key, Body=audio_bytes, ContentType="audio/wav")
     url = s3.generate_presigned_url(
-        "get_object", Params={"Bucket": S3_BUCKET, "Key": key}, ExpiresIn=3600,
+        "get_object",
+        Params={"Bucket": S3_BUCKET, "Key": key},
+        ExpiresIn=3600,
     )
     logger.info(f"Lambda: audio offloaded to S3 ({len(audio_bytes)} bytes)")
 

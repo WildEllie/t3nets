@@ -7,7 +7,6 @@ Uses only agent/ interfaces — no cloud-specific imports.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import uuid
 from pathlib import Path
@@ -15,6 +14,7 @@ from typing import Any, Callable, Coroutine, Protocol
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from t3nets_sdk.contracts import SkillContext
 
 from agent.interfaces.blob_store import BlobStore
 from agent.interfaces.secrets_provider import SecretsProvider
@@ -223,22 +223,14 @@ class PracticeHandlers:
                 except Exception:
                     pass
 
-            # Build context with blob store and tenant
-            ctx: dict[str, Any] = {
-                "blob_store": self._blobs,
-                "tenant_id": tenant_id,
-            }
-            sig = inspect.signature(worker_fn)
-            if len(sig.parameters) >= 3:
-                result = worker_fn(body, skill_secrets, ctx)
-            else:
-                result = worker_fn(body, skill_secrets)
-
-            # Support async workers
-            if asyncio.iscoroutine(result):
-                result = await result
-
-            return JSONResponse(result)
+            skill_ctx = SkillContext(
+                tenant_id=tenant_id,
+                secrets=skill_secrets,
+                logger=logging.getLogger(f"t3nets.skill.{skill_name}"),
+                blob_store=self._blobs,
+            )
+            skill_result = await worker_fn(skill_ctx, body)
+            return JSONResponse(skill_result.to_dict())
         except Exception as e:
             logger.error(f"Skill invoke failed ({skill_name}): {e}")
             return JSONResponse({"error": str(e)}, status_code=500)

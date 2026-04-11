@@ -2,16 +2,22 @@
 Skill Registry — manages available skills and converts them to Claude tool definitions.
 """
 
+import asyncio
 import importlib
 import importlib.util
+import inspect
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import yaml  # type: ignore[import-untyped]
+from t3nets_sdk.contracts import SkillContext, SkillResult
 
 from agent.interfaces.ai_provider import ToolDefinition
 from agent.models.context import RequestContext
+
+NormalizedWorker = Callable[[SkillContext, dict[str, Any]], Awaitable[SkillResult]]
 
 
 @dataclass
@@ -100,14 +106,21 @@ class SkillRegistry:
         """Get a skill by name."""
         return self._skills.get(skill_name)
 
-    def get_worker(self, skill_name: str) -> Callable[..., Any]:
+    def get_worker(self, skill_name: str) -> NormalizedWorker:
         """
-        Dynamically import and return the skill's worker execute() function.
-        Used by the local adapter (DirectBus) to call skills without Lambda.
+        Dynamically import and return a normalized worker callable for a skill.
 
-        Supports two loading modes:
-        - worker_path: loads from filesystem (for uploaded practices)
-        - worker_module: loads from Python module path (for built-in skills)
+        The returned callable always presents the new contract:
+            async def (ctx: SkillContext, params: dict) -> SkillResult
+
+        Legacy workers written as `execute(params, secrets)` or
+        `execute(params, secrets, ctx_dict)` — synchronous or async — are
+        wrapped transparently so call sites don't need to branch on
+        signature anymore.
+
+        Supports two module-loading modes:
+        - worker_path: load from filesystem (uploaded practices)
+        - worker_module: load from Python module path (built-in skills)
         """
         skill = self._skills.get(skill_name)
         if not skill:
@@ -128,8 +141,7 @@ class SkillRegistry:
 
         if not hasattr(module, "execute"):
             raise SkillNotFound(f"Skill '{skill_name}' worker module has no execute() function")
-        execute: Callable[..., Any] = module.execute
-        return execute
+        return _normalize_worker(module.execute, skill_name)
 
     def list_skills(self) -> list[SkillDefinition]:
         """List all registered skills."""
@@ -141,3 +153,96 @@ class SkillRegistry:
 
 class SkillNotFound(Exception):
     pass
+
+
+def _is_new_contract(fn: Callable[..., Any]) -> bool:
+    """True if `fn` takes the new `(ctx, params)` contract.
+
+    Uses parameter annotations when available (most reliable), falling back
+    to the parameter name `ctx` (convention in the SDK docs and scaffold).
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    params = list(sig.parameters.values())
+    if not params:
+        return False
+    first = params[0]
+    if first.annotation is SkillContext:
+        return True
+    if getattr(first.annotation, "__name__", None) == "SkillContext":
+        return True
+    return first.name == "ctx"
+
+
+def _coerce_result(value: Any) -> SkillResult:
+    """Normalize whatever a worker returned into a `SkillResult`.
+
+    New-contract workers return a `SkillResult` directly. Legacy workers
+    return a plain dict — we treat `{"error": ...}` dicts as failures and
+    everything else as a success payload, matching the historical
+    convention the router already relies on.
+    """
+    if isinstance(value, SkillResult):
+        return value
+    if isinstance(value, dict):
+        if "error" in value and len(value) == 1:
+            return SkillResult.fail(str(value["error"]))
+        if "error" in value:
+            rest = {k: v for k, v in value.items() if k != "error"}
+            return SkillResult.fail(str(value["error"]), **rest)
+        return SkillResult.ok(value)
+    return SkillResult.ok({"value": value})
+
+
+def _normalize_worker(fn: Callable[..., Any], skill_name: str) -> NormalizedWorker:
+    """Wrap any supported worker shape in the normalized new-contract callable.
+
+    Supported shapes:
+    - async / sync `execute(ctx: SkillContext, params) -> SkillResult | dict`
+    - async / sync `execute(params, secrets) -> dict`
+    - async / sync `execute(params, secrets, ctx_dict) -> dict`
+      where `ctx_dict` is the legacy `{blob_store, tenant_id, ...}` bag.
+    """
+    if _is_new_contract(fn):
+
+        async def _call_new(ctx: SkillContext, params: dict[str, Any]) -> SkillResult:
+            result = fn(ctx, params)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return _coerce_result(result)
+
+        return _call_new
+
+    try:
+        sig = inspect.signature(fn)
+        arity = len(sig.parameters)
+    except (TypeError, ValueError):
+        arity = 2
+
+    log = logging.getLogger(__name__)
+
+    async def _call_legacy(ctx: SkillContext, params: dict[str, Any]) -> SkillResult:
+        # Legacy workers expect the raw secret bundle as a flat dict, plus
+        # optionally a ctx bag with blob_store / tenant_id. We reconstruct
+        # that bag from the SkillContext so old practices keep working
+        # while the new-contract path is rolled out.
+        legacy_ctx_dict: dict[str, Any] = {
+            "blob_store": ctx.blob_store,
+            "tenant_id": ctx.tenant_id,
+            **ctx.extras,
+        }
+        try:
+            if arity >= 3:
+                result = fn(params, ctx.secrets, legacy_ctx_dict)
+            else:
+                result = fn(params, ctx.secrets)
+            if asyncio.iscoroutine(result):
+                result = await result
+        except Exception as e:  # noqa: BLE001 — mirror prior behavior
+            log.error(f"Skill '{skill_name}' raised: {e}")
+            return SkillResult.fail(str(e))
+        return _coerce_result(result)
+
+    return _call_legacy
