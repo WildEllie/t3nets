@@ -5,27 +5,60 @@
     <img alt="T3nets" src="docs/logo-light.png" width="400" />
   </picture>
 </p>
+# The open-source enterprise app platform with AI in the foundation, not bolted on.
 
-<p align="center">
-  <strong>Open-source, multi-tenant AI agent platform for teams.</strong><br/>
-  Connect your tools. Talk through your channels. Cut AI costs by 60%.
-</p>
+**Multi-tenant. Cloud-native. Safe to run at org scale from day one.**
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3776AB.svg?logo=python&logoColor=white" alt="Python 3.12+" /></a>
-  <a href="docs/aws-infrastructure.md"><img src="https://img.shields.io/badge/cloud-AWS%20%7C%20GCP%20%7C%20Azure-FF9900.svg?logo=amazonaws&logoColor=white" alt="Multi-cloud" /></a>
-</p>
+[MIT License] [Python 3.12+] [AWS · GCP · Azure]
 
 ---
 
-T3nets is an open-source, AI-native platform that gives every team a tailored AI workspace. Each tenant gets its own experience — skills, dashboards, and workflows — assembled through Practices, with multi-tenant isolation, hybrid routing that cuts AI costs by 60%, and cloud-agnostic deployment baked in. Clone it, deploy it, extend it. Self-host or run as a service.
+T3nets is the open-source foundation for organizations that want AI on their own terms — deployed in **your** cloud, shaped around **your** workflows, and safe to run at org scale without a six-month platform build first.
 
-```
-You (Dashboard / Teams / Telegram) → T3nets → AI Model → Your Tools → Answer
-```
+Every team today faces the same question: *how do we actually get AI into the work?* The answers on offer are all bad.
 
-### See it in action
+| The choice today | What you get | What it costs you |
+| --- | --- | --- |
+| **Rent closed SaaS** | Safe-ish, fast to start | Your data lives in their tenant. Priced per seat. Can't shape it to your org. Lock-in by design. |
+| **Build it yourself** | Full control | Six months of senior platform work — multi-tenancy, auth, async execution, isolation, cost controls, secrets, audit — before the first useful agent response. Most teams don't have that runway. |
+| **Let it happen organically** | Momentum | Agents running in permissive modes on dev laptops. Browser tools with full session access. MCP servers wired straight to prod. Shadow tooling nobody approved. The CFO finds out when the bill arrives; security finds out when something leaks. |
+
+**T3nets is the fourth option.** The responsible path, made cheap enough that nobody has to pick the unsafe one out of desperation.
+
+## What you don't have to build
+
+The undifferentiated platform work is already done. Clone it, deploy it, move on.
+
+| | |
+| --- | --- |
+| 🏢 **Multi-tenancy, first-class** | Shared compute, isolated data. Cognito auth, JWT, tenant onboarding wizard. Not bolted on — baked in from commit zero. |
+| 🔐 **Safe by construction** | Scoped secrets per tenant. Async execution boundaries between the router and skills. Audit trails. No dev laptops holding prod credentials. No YOLO-mode agents. |
+| 💸 **Cost-aware routing** | Hybrid routing handles known requests at $0 via a tenant-specific regex engine the AI regenerates itself. Only escalates to the model when it has to. 50–60% off your AI bill, measured. |
+| ☁️ **Cloud-agnostic core** | Business logic has zero cloud imports. AWS is the reference; GCP and Azure adapters are in flight. You own the infra. No lock-in, ever. |
+| ⚡ **Async from day one** | EventBridge → Lambda → SQS → WebSocket. The router never blocks on a skill. Retries, DLQs, idempotency — handled. |
+| 🧩 **Practices, not code** | The unit of customization (see below). Shape the platform without touching the platform. |
+
+## Practices: the part that's yours
+
+Everything above is the foundation. **Practices are what make a t3nets deployment *yours*.**
+
+A Practice is a bundle — skills, dashboards, workflows, behaviors — that teaches a tenant how to work. Your sales org's Practice looks nothing like your SRE team's, and neither looks like the one a hospital network deploys. All three run on the same platform. All three stay isolated. All three get the same cost guarantees, the same safety boundaries, the same portability.
+
+You don't fork t3nets to customize it. You write a Practice, drop it in, and the platform picks it up. That's the seam. That's where your domain knowledge lives. Everything else is ours to maintain.
+
+*Practices ship in Phase 7. The skill and channel extension points they build on are live today — see [Extend](#extend) below.*
+
+## Where this is going
+
+T3nets started as an AI agent platform because that's the part of an enterprise stack that's hardest to build responsibly today. But the foundation underneath — multi-tenancy, async execution, scoped secrets, audit, cloud portability — is the same foundation an enterprise *application* platform needs. So that's where it's heading.
+
+The next phase brings the pieces that close the gap: **tenant-owned data** (entities and schemas a Practice can declare and skills can read and write), **non-AI invocation paths** (scheduled triggers, webhooks, dashboard buttons — the same skill machinery, called from anywhere), and the groundwork for **Practice-defined pages** so the platform that runs your AI agents also runs the apps those agents work on.
+
+The wedge is simple: every incumbent in this category is bolting AI onto a platform designed before LLMs existed. T3nets gets to design the data model, the workflow engine, and the page system *knowing* an AI agent is a first-class caller of all three. That's the difference you can feel.
+
+---
+
+## See it in action
 
 > **You:** What's the sprint status?
 >
@@ -33,20 +66,7 @@ You (Dashboard / Teams / Telegram) → T3nets → AI Model → Your Tools → An
 > 41% done, 5 days left. 2 blocked items. Risk: **HIGH**.
 > Suggestion: Descope the test tickets and focus on getting blocked items through.
 
----
-
-## Why T3nets
-
-| | |
-|---|---|
-| **Cut AI costs 50-60%** | Hybrid routing handles known requests at $0 via regex, only escalating to the AI model when needed |
-| **Multi-tenant from day one** | Shared compute, isolated data. Cognito auth, JWT, tenant onboarding wizard |
-| **Cloud-agnostic core** | Business logic has zero cloud imports. Pluggable adapters for AWS, Azure, GCP |
-| **Skills, not code** | Add capabilities with a `skill.yaml` + `worker.py` — no router changes needed |
-| **Practices** *(coming soon)* | Team experience bundles: skills + custom pages + functionality, uploadable as ZIPs |
-| **Any channel** | Dashboard, Teams, Telegram today. Slack, WhatsApp, SMS on the roadmap |
-
----
+One message. Tenant-scoped. Routed at $0 because the regex engine already knew what "sprint status" meant for this workspace. No API call to the model. No credentials on a laptop. No shadow tooling. This is the baseline, not the ceiling.
 
 ## Architecture
 
@@ -374,3 +394,9 @@ The "3" signals structured architecture and intentional depth:
 - 3 operational domains — People / Tools / AI
 
 Not just a name — a system philosophy.
+
+## Who's behind this
+
+T3nets is built by [Ellie Portugali](https://github.com/WildEllie) — 18+ years designing hybrid and cloud-native architectures for regulated and high-stakes environments, including medical devices, genomic analysis pipelines, IoT and resource management consoles, and hosting platforms. Much of that work involved getting compliance right the first time under GDPR, HIPAA, ISO 27001, and ECB frameworks — because the second time is usually a rewrite. The patterns t3nets encodes as defaults (tenant isolation, scoped secrets, audit trails, async execution boundaries, cost ceilings) are the ones that kept showing up across those projects. I couldn't find an open-source project that had distilled them into a deployable platform layer, so t3nets is that project.
+
+In recent years, working as a fractional VP R&D / CTO across several organizations, including access control technology at [Outlocks](https://outlocks.com).
