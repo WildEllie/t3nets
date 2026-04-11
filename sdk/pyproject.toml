@@ -18,6 +18,9 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.scripts]
+t3nets = "t3nets_sdk.cli.main:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
