@@ -10,8 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from agent.interfaces.secrets_provider import SecretsProvider, SecretNotFound
-
+from agent.interfaces.secrets_provider import SecretNotFoundError, SecretsProvider
 
 # Maps integration names to their env var prefixes and expected keys
 INTEGRATION_KEYS = {
@@ -67,9 +66,8 @@ class EnvSecretsProvider(SecretsProvider):
         """
         key_map = INTEGRATION_KEYS.get(integration_name)
         if not key_map:
-            raise SecretNotFound(
-                f"Unknown integration: {integration_name}. "
-                f"Known: {list(INTEGRATION_KEYS.keys())}"
+            raise SecretNotFoundError(
+                f"Unknown integration: {integration_name}. Known: {list(INTEGRATION_KEYS.keys())}"
             )
 
         secrets = {}
@@ -79,7 +77,7 @@ class EnvSecretsProvider(SecretsProvider):
                 secrets[secret_key] = value
 
         if not secrets:
-            raise SecretNotFound(
+            raise SecretNotFoundError(
                 f"No secrets found for '{integration_name}'. "
                 f"Set these in .env: {list(key_map.values())}"
             )

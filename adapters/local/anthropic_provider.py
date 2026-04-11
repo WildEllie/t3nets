@@ -8,7 +8,7 @@ import json
 import urllib.request
 from typing import Any
 
-from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolDefinition, ToolCall
+from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolCall, ToolDefinition
 
 
 class AnthropicProvider(AIProvider):

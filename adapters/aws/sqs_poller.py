@@ -22,10 +22,10 @@ import json
 import logging
 import threading
 import time
+from typing import Any, Callable
 
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
-from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +127,7 @@ class SQSResultPoller:
         request_id = body.get("request_id", "?")
         skill_name = body.get("skill_name", "?")
         logger.info(
-            f"SQSResultPoller: received result for "
-            f"skill={skill_name}, request={request_id[:8]}"
+            f"SQSResultPoller: received result for skill={skill_name}, request={request_id[:8]}"
         )
 
         try:

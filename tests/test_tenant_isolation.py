@@ -20,13 +20,14 @@ from tempfile import TemporaryDirectory
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agent.models.tenant import Tenant, TenantSettings, TenantUser
-from adapters.local.sqlite_store import SQLiteConversationStore
-from adapters.local.sqlite_tenant_store import SQLiteTenantStore
-
 # Import auth_middleware directly by file path to avoid adapters.aws.__init__
 # (which eagerly imports boto3 — not available in all test environments)
 import importlib.util
+
+from adapters.local.sqlite_store import SQLiteConversationStore
+from adapters.local.sqlite_tenant_store import SQLiteTenantStore
+from agent.models.tenant import Tenant, TenantSettings, TenantUser
+
 _spec = importlib.util.spec_from_file_location(
     "auth_middleware",
     str(Path(__file__).parent.parent / "adapters" / "aws" / "auth_middleware.py"),
@@ -70,12 +71,12 @@ def _make_user(
 
 def _make_jwt(sub: str, email: str = "test@example.com") -> str:
     """Create a mock JWT with sub + email (no tenant_id — IdP-agnostic)."""
-    header = base64.urlsafe_b64encode(
-        json.dumps({"alg": "RS256", "typ": "JWT"}).encode()
-    ).rstrip(b"=")
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"sub": sub, "email": email}).encode()
-    ).rstrip(b"=")
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256", "typ": "JWT"}).encode()).rstrip(
+        b"="
+    )
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": sub, "email": email}).encode()).rstrip(
+        b"="
+    )
     sig = base64.urlsafe_b64encode(b"fakesig").rstrip(b"=")
     return f"{header.decode()}.{payload.decode()}.{sig.decode()}"
 
@@ -134,12 +135,8 @@ class TestConversationIsolation(unittest.TestCase):
 
     def test_same_conversation_id_different_tenants(self):
         """Same conversation_id in different tenants should hold independent data."""
-        asyncio.run(
-            self.memory.save_turn("alpha", "shared-conv", "alpha says hi", "alpha reply")
-        )
-        asyncio.run(
-            self.memory.save_turn("beta", "shared-conv", "beta says hi", "beta reply")
-        )
+        asyncio.run(self.memory.save_turn("alpha", "shared-conv", "alpha says hi", "alpha reply"))
+        asyncio.run(self.memory.save_turn("beta", "shared-conv", "beta says hi", "beta reply"))
         asyncio.run(
             self.memory.save_turn("alpha", "shared-conv", "alpha second", "alpha second reply")
         )
@@ -148,7 +145,7 @@ class TestConversationIsolation(unittest.TestCase):
         beta_msgs = asyncio.run(self.memory.get_conversation("beta", "shared-conv"))
 
         self.assertEqual(len(alpha_msgs), 4)  # 2 turns = 4 messages
-        self.assertEqual(len(beta_msgs), 2)   # 1 turn = 2 messages
+        self.assertEqual(len(beta_msgs), 2)  # 1 turn = 2 messages
 
     def test_nonexistent_tenant_returns_empty(self):
         """Querying conversations for a non-existent tenant should return empty."""
@@ -198,10 +195,10 @@ class TestTenantStoreIsolation(unittest.TestCase):
         self.assertIn("two", ids)
 
     def test_tenant_not_found(self):
-        """Getting a non-existent tenant should raise TenantNotFound."""
-        from agent.interfaces.tenant_store import TenantNotFound
+        """Getting a non-existent tenant should raise TenantNotFoundError."""
+        from agent.interfaces.tenant_store import TenantNotFoundError
 
-        with self.assertRaises(TenantNotFound):
+        with self.assertRaises(TenantNotFoundError):
             asyncio.run(self.store.get_tenant("does-not-exist"))
 
     def test_enabled_skills_isolated(self):
@@ -211,11 +208,7 @@ class TestTenantStoreIsolation(unittest.TestCase):
                 _make_tenant("eng", "Engineering", skills=["sprint_status", "release_notes"])
             )
         )
-        asyncio.run(
-            self.store.create_tenant(
-                _make_tenant("sales", "Sales Team", skills=["ping"])
-            )
-        )
+        asyncio.run(self.store.create_tenant(_make_tenant("sales", "Sales Team", skills=["ping"])))
 
         eng = asyncio.run(self.store.get_tenant("eng"))
         sales = asyncio.run(self.store.get_tenant("sales"))
@@ -273,13 +266,13 @@ class TestUserIsolation(unittest.TestCase):
         self.assertEqual(admin_b.email, "admin@beta.com")
 
     def test_get_user_wrong_tenant_raises(self):
-        """Looking up a user in the wrong tenant should raise UserNotFound."""
-        from agent.interfaces.tenant_store import UserNotFound
+        """Looking up a user in the wrong tenant should raise UserNotFoundError."""
+        from agent.interfaces.tenant_store import UserNotFoundError
 
         asyncio.run(self.store.create_tenant(_make_tenant("alpha", "Alpha")))
         asyncio.run(self.store.create_user(_make_user("alice", "alpha", "alice@alpha.com")))
 
-        with self.assertRaises(UserNotFound):
+        with self.assertRaises(UserNotFoundError):
             asyncio.run(self.store.get_user("beta", "alice"))
 
     def test_delete_user_doesnt_affect_other_tenant(self):
@@ -293,9 +286,9 @@ class TestUserIsolation(unittest.TestCase):
         asyncio.run(self.store.delete_user("alpha", "admin"))
 
         # Alpha's admin is gone
-        from agent.interfaces.tenant_store import UserNotFound
+        from agent.interfaces.tenant_store import UserNotFoundError
 
-        with self.assertRaises(UserNotFound):
+        with self.assertRaises(UserNotFoundError):
             asyncio.run(self.store.get_user("alpha", "admin"))
 
         # Beta's admin is untouched
@@ -324,12 +317,8 @@ class TestUserIsolation(unittest.TestCase):
         asyncio.run(self.store.create_tenant(_make_tenant("alpha", "Alpha")))
         asyncio.run(self.store.create_tenant(_make_tenant("beta", "Beta")))
 
-        asyncio.run(
-            self.store.create_user(_make_user("alice", "alpha", "shared@example.com"))
-        )
-        asyncio.run(
-            self.store.create_user(_make_user("bob", "beta", "shared@example.com"))
-        )
+        asyncio.run(self.store.create_user(_make_user("alice", "alpha", "shared@example.com")))
+        asyncio.run(self.store.create_user(_make_user("bob", "beta", "shared@example.com")))
 
         found_alpha = asyncio.run(self.store.get_user_by_email("alpha", "shared@example.com"))
         found_beta = asyncio.run(self.store.get_user_by_email("beta", "shared@example.com"))
@@ -366,12 +355,10 @@ class TestAuthMiddleware(unittest.TestCase):
 
     def test_missing_sub_raises(self):
         """extract_auth should raise AuthError when sub claim is missing."""
-        header = base64.urlsafe_b64encode(
-            json.dumps({"alg": "RS256"}).encode()
-        ).rstrip(b"=")
-        payload = base64.urlsafe_b64encode(
-            json.dumps({"email": "nosub@test.com"}).encode()
-        ).rstrip(b"=")
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=")
+        payload = base64.urlsafe_b64encode(json.dumps({"email": "nosub@test.com"}).encode()).rstrip(
+            b"="
+        )
         sig = base64.urlsafe_b64encode(b"sig").rstrip(b"=")
         token = f"{header.decode()}.{payload.decode()}.{sig.decode()}"
 
@@ -427,7 +414,9 @@ class TestSecondTenantSeed(unittest.TestCase):
             tenant_id="local", name="Local Dev", admin_email="admin@local.dev"
         )
         self.store.seed_default_tenant(
-            tenant_id="acme", name="Acme Corp", admin_email="admin@acme.dev",
+            tenant_id="acme",
+            name="Acme Corp",
+            admin_email="admin@acme.dev",
             admin_name="Acme Admin",
         )
 
@@ -443,11 +432,13 @@ class TestSecondTenantSeed(unittest.TestCase):
     def test_seed_skills_independent(self):
         """Seeded tenants should have independent enabled_skills lists."""
         self.store.seed_default_tenant(
-            tenant_id="local", name="Local",
+            tenant_id="local",
+            name="Local",
             enabled_skills=["sprint_status", "release_notes", "ping"],
         )
         self.store.seed_default_tenant(
-            tenant_id="acme", name="Acme",
+            tenant_id="acme",
+            name="Acme",
             enabled_skills=["sprint_status", "ping"],
         )
 
@@ -473,9 +464,7 @@ class TestSecondTenantSeed(unittest.TestCase):
 
     def test_seed_updates_skills_on_restart(self):
         """Re-seeding with new skills list should update existing tenant."""
-        self.store.seed_default_tenant(
-            tenant_id="local", name="Local", enabled_skills=["ping"]
-        )
+        self.store.seed_default_tenant(tenant_id="local", name="Local", enabled_skills=["ping"])
         self.store.seed_default_tenant(
             tenant_id="local", name="Local", enabled_skills=["ping", "sprint_status"]
         )
@@ -513,10 +502,10 @@ class TestChannelMappingIsolation(unittest.TestCase):
         self.assertEqual(resolved_b.tenant_id, "beta")
 
     def test_unmapped_channel_raises(self):
-        """Looking up an unmapped channel should raise TenantNotFound."""
-        from agent.interfaces.tenant_store import TenantNotFound
+        """Looking up an unmapped channel should raise TenantNotFoundError."""
+        from agent.interfaces.tenant_store import TenantNotFoundError
 
-        with self.assertRaises(TenantNotFound):
+        with self.assertRaises(TenantNotFoundError):
             asyncio.run(self.store.get_by_channel_id("teams", "nonexistent-channel"))
 
 

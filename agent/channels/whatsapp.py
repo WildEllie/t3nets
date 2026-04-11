@@ -113,9 +113,7 @@ class WhatsAppAdapter(ChannelAdapter):
         If the message contains an audio attachment, sends via /messages/voice.
         Otherwise sends text via /messages/text.
         """
-        audio_attachment = next(
-            (a for a in message.attachments if a.get("type") == "audio"), None
-        )
+        audio_attachment = next((a for a in message.attachments if a.get("type") == "audio"), None)
         if audio_attachment:
             return await self._send_audio(message, audio_attachment)
 
@@ -229,9 +227,7 @@ class WhatsAppAdapter(ChannelAdapter):
         if not self.webhook_secret:
             return True
 
-        header_secret = headers.get("X-Whapi-Secret", "") or headers.get(
-            "x-whapi-secret", ""
-        )
+        header_secret = headers.get("X-Whapi-Secret", "") or headers.get("x-whapi-secret", "")
         return hmac.compare_digest(header_secret, self.webhook_secret)
 
     # --- Setup helpers ---

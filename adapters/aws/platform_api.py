@@ -5,14 +5,13 @@ These endpoints are restricted to admins of the 'default' tenant only.
 Regular tenant admins cannot access these routes.
 """
 
-import json
 import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from adapters.aws.auth_middleware import AuthError, extract_auth
 from agent.models.tenant import Invitation, Tenant, TenantSettings
-from adapters.aws.auth_middleware import extract_auth, AuthError
 
 logger = logging.getLogger("t3nets.platform")
 
@@ -82,16 +81,20 @@ class PlatformAPI:
                 user_count = len(users)
             except Exception:
                 user_count = 0
-            result.append({
-                "tenant_id": t.tenant_id,
-                "name": t.name,
-                "status": t.status,
-                "created_at": t.created_at,
-                "user_count": user_count,
-            })
+            result.append(
+                {
+                    "tenant_id": t.tenant_id,
+                    "name": t.name,
+                    "status": t.status,
+                    "created_at": t.created_at,
+                    "user_count": user_count,
+                }
+            )
         return {"tenants": result, "count": len(result)}, 200
 
-    def _create_tenant(self, body: dict[str, Any], headers: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    def _create_tenant(
+        self, body: dict[str, Any], headers: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
         """Create a new tenant and send an admin invitation."""
         import asyncio
 
@@ -141,7 +144,7 @@ class PlatformAPI:
             email=admin_email,
             role="admin",
             status="pending",
-            invited_by=f"platform-admin",
+            invited_by="platform-admin",
             created_at=now,
             expires_at=Invitation.default_expiry(),
         )
@@ -149,8 +152,10 @@ class PlatformAPI:
         logger.info(f"Platform: created admin invitation for {admin_email} → {tenant_id}")
 
         # Build invite URL from Host header
-        host = headers.get("Host", "localhost") if isinstance(headers, dict) else (
-            headers.get("Host") or "localhost"
+        host = (
+            headers.get("Host", "localhost")
+            if isinstance(headers, dict)
+            else (headers.get("Host") or "localhost")
         )
         scheme = "http" if "localhost" in host else "https"
         invite_url = f"{scheme}://{host}/login?invite={invitation.invite_code}"

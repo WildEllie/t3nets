@@ -6,11 +6,11 @@ Cloud-specific implementations live in adapters/.
 """
 
 from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolCall, ToolDefinition
-from agent.interfaces.blob_store import BlobNotFound, BlobStore
+from agent.interfaces.blob_store import BlobNotFoundError, BlobStore
 from agent.interfaces.conversation_store import ConversationStore
 from agent.interfaces.event_bus import EventBus
-from agent.interfaces.secrets_provider import SecretNotFound, SecretsProvider
-from agent.interfaces.tenant_store import TenantNotFound, TenantStore, UserNotFound
+from agent.interfaces.secrets_provider import SecretNotFoundError, SecretsProvider
+from agent.interfaces.tenant_store import TenantNotFoundError, TenantStore, UserNotFoundError
 
 __all__ = [
     "AIProvider",
@@ -18,12 +18,12 @@ __all__ = [
     "ToolDefinition",
     "ToolCall",
     "BlobStore",
-    "BlobNotFound",
+    "BlobNotFoundError",
     "ConversationStore",
     "EventBus",
     "SecretsProvider",
-    "SecretNotFound",
+    "SecretNotFoundError",
     "TenantStore",
-    "TenantNotFound",
-    "UserNotFound",
+    "TenantNotFoundError",
+    "UserNotFoundError",
 ]

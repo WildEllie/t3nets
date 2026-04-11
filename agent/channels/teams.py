@@ -116,9 +116,8 @@ class TeamsAdapter(ChannelAdapter):
 
         # Extract Azure AD tenant ID for multi-tenant resolution
         channel_data = activity.get("channelData", {})
-        azure_tenant_id = (
-            channel_data.get("tenant", {}).get("id", "")
-            or conversation.get("tenantId", "")
+        azure_tenant_id = channel_data.get("tenant", {}).get("id", "") or conversation.get(
+            "tenantId", ""
         )
 
         return InboundMessage(
@@ -146,9 +145,7 @@ class TeamsAdapter(ChannelAdapter):
         """
         service_url = self._service_urls.get(message.conversation_id, "")
         if not service_url:
-            logger.error(
-                f"No serviceUrl cached for conversation {message.conversation_id}"
-            )
+            logger.error(f"No serviceUrl cached for conversation {message.conversation_id}")
             return False
 
         # Get bot token for outbound auth
@@ -158,9 +155,7 @@ class TeamsAdapter(ChannelAdapter):
             return False
 
         # Check for audio attachment
-        audio_attachment = next(
-            (a for a in message.attachments if a.get("type") == "audio"), None
-        )
+        audio_attachment = next((a for a in message.attachments if a.get("type") == "audio"), None)
 
         # Build the Activity response
         response_activity: dict[str, Any] = {
@@ -175,8 +170,7 @@ class TeamsAdapter(ChannelAdapter):
                 {
                     "contentType": f"audio/{fmt}",
                     "contentUrl": (
-                        f"data:audio/{fmt};base64,"
-                        f"{audio_attachment.get('audio_b64', '')}"
+                        f"data:audio/{fmt};base64,{audio_attachment.get('audio_b64', '')}"
                     ),
                     "name": f"response.{fmt}",
                 }
@@ -190,10 +184,7 @@ class TeamsAdapter(ChannelAdapter):
                 }
             ]
 
-        url = (
-            f"{service_url}/v3/conversations/"
-            f"{message.conversation_id}/activities"
-        )
+        url = f"{service_url}/v3/conversations/{message.conversation_id}/activities"
 
         try:
             data = json.dumps(response_activity).encode()
@@ -211,15 +202,12 @@ class TeamsAdapter(ChannelAdapter):
                 status = resp.status
                 if status in (200, 201):
                     logger.info(
-                        f"Sent response to Teams conversation "
-                        f"{message.conversation_id[:20]}..."
+                        f"Sent response to Teams conversation {message.conversation_id[:20]}..."
                     )
                     return True
                 else:
                     body = resp.read().decode()
-                    logger.error(
-                        f"Teams API returned {status}: {body[:200]}"
-                    )
+                    logger.error(f"Teams API returned {status}: {body[:200]}")
                     return False
 
         except Exception as e:
@@ -264,7 +252,7 @@ class TeamsAdapter(ChannelAdapter):
                 },
                 method="POST",
             )
-            with urlopen(req, timeout=5) as resp:
+            with urlopen(req, timeout=5):
                 pass  # Fire and forget
         except Exception as e:
             logger.debug(f"Typing indicator failed (non-critical): {e}")
@@ -292,9 +280,7 @@ class TeamsAdapter(ChannelAdapter):
     @staticmethod
     def is_message_activity(activity: dict[str, Any]) -> bool:
         """Check if an activity is a user message (not system event)."""
-        return activity.get("type") == "message" and bool(
-            activity.get("text", "").strip()
-        )
+        return activity.get("type") == "message" and bool(activity.get("text", "").strip())
 
     @staticmethod
     def is_conversation_update(activity: dict[str, Any]) -> bool:

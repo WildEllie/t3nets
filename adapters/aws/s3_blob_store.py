@@ -11,7 +11,7 @@ from typing import Any
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
-from agent.interfaces.blob_store import BlobNotFound, BlobStore
+from agent.interfaces.blob_store import BlobNotFoundError, BlobStore
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class S3BlobStore(BlobStore):
             return resp["Body"].read()
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey":
-                raise BlobNotFound(f"{tenant_id}/{key}") from e
+                raise BlobNotFoundError(f"{tenant_id}/{key}") from e
             raise
 
     async def get_json(self, tenant_id: str, key: str) -> dict[str, Any]:
@@ -57,6 +57,6 @@ class S3BlobStore(BlobStore):
         for page in paginator.paginate(Bucket=self.bucket, Prefix=full_prefix):
             for obj in page.get("Contents", []):
                 # Strip tenant_id/ prefix to return relative keys
-                rel_key = obj["Key"][len(tenant_id) + 1:]
+                rel_key = obj["Key"][len(tenant_id) + 1 :]
                 results.append(rel_key)
         return sorted(results)

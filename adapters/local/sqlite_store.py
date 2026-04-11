@@ -51,7 +51,7 @@ class SQLiteConversationStore(ConversationStore):
 
         messages = cast(list[dict[str, Any]], json.loads(row[0]))
         # Return last N turns (each turn = 2 messages: user + assistant)
-        return messages[-(max_turns * 2):]
+        return messages[-(max_turns * 2) :]
 
     async def save_turn(
         self,
@@ -88,8 +88,7 @@ class SQLiteConversationStore(ConversationStore):
                    VALUES (?, ?, ?, ?)
                    ON CONFLICT(tenant_id, conversation_id)
                    DO UPDATE SET messages = ?, updated_at = ?""",
-                (tenant_id, conversation_id, json.dumps(messages), now,
-                 json.dumps(messages), now),
+                (tenant_id, conversation_id, json.dumps(messages), now, json.dumps(messages), now),
             )
 
     async def clear_conversation(

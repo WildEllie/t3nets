@@ -270,7 +270,10 @@ class AsyncResultRouter:
             if is_audio:
                 formatted_text = result.get("text", "")
                 fmt_tokens, fmt_model = 0, ""
-                teams_audio: dict[str, Any] = {"type": "audio", "format": result.get("format", "wav")}
+                teams_audio: dict[str, Any] = {
+                    "type": "audio",
+                    "format": result.get("format", "wav"),
+                }
                 if result.get("audio_url"):
                     teams_audio["audio_url"] = result["audio_url"]
                 if result.get("audio_b64"):

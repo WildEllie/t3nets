@@ -19,10 +19,10 @@ Part of the AWS adapter layer — uses boto3 for DynamoDB and Management API.
 import json
 import logging
 import time
+from typing import Any
 
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

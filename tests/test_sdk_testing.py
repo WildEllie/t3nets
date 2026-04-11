@@ -3,14 +3,14 @@ Tests for t3nets_sdk.testing — the in-memory Mock* doubles and make_test_conte
 
 These verify the test doubles satisfy the interface contracts they implement
 and behave correctly around tenant isolation, JSON convenience helpers,
-prefix listing, BlobNotFound / SecretNotFound semantics, and event capture.
+prefix listing, BlobNotFoundError / SecretNotFoundError semantics, and event capture.
 """
 
 import pytest
-from t3nets_sdk.interfaces.blob_store import BlobNotFound, BlobStore
+from t3nets_sdk.interfaces.blob_store import BlobNotFoundError, BlobStore
 from t3nets_sdk.interfaces.conversation_store import ConversationStore
 from t3nets_sdk.interfaces.event_bus import EventBus
-from t3nets_sdk.interfaces.secrets_provider import SecretNotFound, SecretsProvider
+from t3nets_sdk.interfaces.secrets_provider import SecretNotFoundError, SecretsProvider
 from t3nets_sdk.models.context import RequestContext
 from t3nets_sdk.models.message import ChannelType
 from t3nets_sdk.models.tenant import Tenant, TenantSettings
@@ -37,7 +37,7 @@ class TestMockBlobStore:
 
     async def test_get_missing_raises_blob_not_found(self) -> None:
         store = MockBlobStore()
-        with pytest.raises(BlobNotFound):
+        with pytest.raises(BlobNotFoundError):
             await store.get("acme", "missing")
 
     async def test_json_helpers_roundtrip(self) -> None:
@@ -70,7 +70,7 @@ class TestMockBlobStore:
         await store.put("acme", "k", b"v")
         await store.delete("acme", "k")
         await store.delete("acme", "k")  # second delete should not raise
-        with pytest.raises(BlobNotFound):
+        with pytest.raises(BlobNotFoundError):
             await store.get("acme", "k")
 
     async def test_clear_helper_drops_everything(self) -> None:
@@ -96,12 +96,12 @@ class TestMockSecretsProvider:
         secrets = MockSecretsProvider({"jira": {"token": "y"}}, tenant_id="acme")
         result = await secrets.get("acme", "jira")
         assert result == {"token": "y"}
-        with pytest.raises(SecretNotFound):
+        with pytest.raises(SecretNotFoundError):
             await secrets.get("default", "jira")
 
     async def test_get_missing_raises(self) -> None:
         secrets = MockSecretsProvider()
-        with pytest.raises(SecretNotFound):
+        with pytest.raises(SecretNotFoundError):
             await secrets.get("acme", "github")
 
     async def test_put_then_get(self) -> None:
@@ -134,7 +134,7 @@ class TestMockSecretsProvider:
     async def test_delete(self) -> None:
         secrets = MockSecretsProvider({"jira": {"token": "y"}})
         await secrets.delete("default", "jira")
-        with pytest.raises(SecretNotFound):
+        with pytest.raises(SecretNotFoundError):
             await secrets.get("default", "jira")
 
 

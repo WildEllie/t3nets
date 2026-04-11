@@ -16,8 +16,8 @@ Usage:
 import logging
 from dataclasses import replace
 
-from agent.errors.models import FriendlyError, ErrorSeverity
 from agent.errors.catalog import ERROR_PATTERNS, GENERIC_ERROR
+from agent.errors.models import ErrorSeverity, FriendlyError
 
 logger = logging.getLogger("t3nets.errors")
 
@@ -64,22 +64,14 @@ class ErrorHandler:
         self._log_error(friendly, context, matched=False)
         return friendly
 
-    def _log_error(
-        self, friendly: FriendlyError, context: str, matched: bool = True
-    ) -> None:
+    def _log_error(self, friendly: FriendlyError, context: str, matched: bool = True) -> None:
         """Log the error with full details (never shown to user)."""
         prefix = f"[{context}] " if context else ""
         match_tag = friendly.error_code if matched else "UNMATCHED"
 
         if friendly.severity == ErrorSeverity.CRITICAL:
-            logger.error(
-                f"{prefix}{match_tag}: {friendly.original_error}"
-            )
+            logger.error(f"{prefix}{match_tag}: {friendly.original_error}")
         elif friendly.severity == ErrorSeverity.CONFIG:
-            logger.warning(
-                f"{prefix}{match_tag}: {friendly.original_error}"
-            )
+            logger.warning(f"{prefix}{match_tag}: {friendly.original_error}")
         else:
-            logger.info(
-                f"{prefix}{match_tag}: {friendly.original_error}"
-            )
+            logger.info(f"{prefix}{match_tag}: {friendly.original_error}")

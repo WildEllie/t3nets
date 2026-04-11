@@ -1,9 +1,7 @@
 """Tests for the SSE Connection Manager."""
 
 import io
-import json
 import threading
-import time
 
 from agent.sse import SSEConnectionManager
 

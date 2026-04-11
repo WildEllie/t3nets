@@ -26,8 +26,8 @@ logger = logging.getLogger("t3nets.auth")
 class AuthContext:
     """Extracted authentication context from JWT."""
 
-    user_id: str       # IdP subject (sub claim)
-    email: str = ""    # email claim
+    user_id: str  # IdP subject (sub claim)
+    email: str = ""  # email claim
 
 
 class AuthError(Exception):

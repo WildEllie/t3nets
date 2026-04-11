@@ -8,13 +8,12 @@ The onboarding flow uses a relaxed auth mode: users without a tenant_id
 can still call POST /api/admin/tenants to create their first tenant.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from adapters.aws.auth_middleware import AuthError, extract_auth
 from agent.models.tenant import Invitation, Tenant, TenantSettings, TenantUser
-from adapters.aws.auth_middleware import extract_auth, AuthError
 
 logger = logging.getLogger("t3nets.admin")
 
@@ -42,10 +41,11 @@ class AdminAPI:
             if method == "POST" and path == "/api/admin/tenants":
                 return self._create_tenant(body or {}, headers)
 
-            # All other admin routes require full auth (with tenant_id)
-            auth = extract_auth(headers)
-            # For now, any authenticated user with a tenant can access admin.
+            # All other admin routes require full auth (with tenant_id).
+            # extract_auth() raises on invalid tokens; we don't currently use
+            # its return value, but it's a required side-effect gate.
             # TODO: add role-based access (admin claim in JWT)
+            extract_auth(headers)
 
             # Training endpoints — tenant_id injected by server via X-Tenant-Id header
             _tenant_id = headers.get("x-tenant-id") or headers.get("X-Tenant-Id", "")

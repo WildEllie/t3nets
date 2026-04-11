@@ -4,7 +4,7 @@ BlobStore tests.
 Verifies:
 - FileStore CRUD operations (get, put, delete, list_keys)
 - Path traversal prevention
-- BlobNotFound on missing keys
+- BlobNotFoundError on missing keys
 - JSON round-trip (put_json / get_json)
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from adapters.local.file_blob_store import FileStore
-from agent.interfaces.blob_store import BlobNotFound
+from agent.interfaces.blob_store import BlobNotFoundError
 
 
 def run(coro):
@@ -41,7 +41,7 @@ class TestFileStore(unittest.TestCase):
         self.assertEqual(data, b"hello world")
 
     def test_get_not_found(self):
-        with self.assertRaises(BlobNotFound):
+        with self.assertRaises(BlobNotFoundError):
             run(self.store.get("tenant1", "nonexistent.txt"))
 
     def test_put_json_get_json(self):
@@ -53,7 +53,7 @@ class TestFileStore(unittest.TestCase):
     def test_delete(self):
         run(self.store.put("tenant1", "temp.bin", b"\x00\x01\x02"))
         run(self.store.delete("tenant1", "temp.bin"))
-        with self.assertRaises(BlobNotFound):
+        with self.assertRaises(BlobNotFoundError):
             run(self.store.get("tenant1", "temp.bin"))
 
     def test_delete_nonexistent(self):

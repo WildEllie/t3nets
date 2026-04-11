@@ -13,6 +13,7 @@ from typing import Any, Optional
 @dataclass
 class ToolDefinition:
     """A skill exposed to the AI as a callable tool."""
+
     name: str
     description: str
     input_schema: dict[str, Any]
@@ -21,6 +22,7 @@ class ToolDefinition:
 @dataclass
 class ToolCall:
     """AI's request to invoke a specific tool."""
+
     tool_name: str
     tool_params: dict[str, Any]
     tool_use_id: str  # For correlating tool results back to AI
@@ -29,9 +31,10 @@ class ToolCall:
 @dataclass
 class AIResponse:
     """Normalized AI response."""
-    text: Optional[str] = None          # Direct text response (if no tool use)
+
+    text: Optional[str] = None  # Direct text response (if no tool use)
     tool_calls: list[ToolCall] = field(default_factory=list)  # Tool invocations
-    stop_reason: str = ""               # "end_turn", "tool_use", etc.
+    stop_reason: str = ""  # "end_turn", "tool_use", etc.
     input_tokens: int = 0
     output_tokens: int = 0
 

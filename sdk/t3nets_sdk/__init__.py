@@ -12,11 +12,11 @@ from t3nets_sdk.contracts import (
     Worker,
 )
 from t3nets_sdk.interfaces import (
-    BlobNotFound,
+    BlobNotFoundError,
     BlobStore,
     ConversationStore,
     EventBus,
-    SecretNotFound,
+    SecretNotFoundError,
     SecretsProvider,
 )
 from t3nets_sdk.manifest import (
@@ -54,11 +54,11 @@ __all__ = [
     "Worker",
     # Interfaces
     "BlobStore",
-    "BlobNotFound",
+    "BlobNotFoundError",
     "ConversationStore",
     "EventBus",
     "SecretsProvider",
-    "SecretNotFound",
+    "SecretNotFoundError",
     # Manifest
     "PracticeManifest",
     "PracticePageManifest",

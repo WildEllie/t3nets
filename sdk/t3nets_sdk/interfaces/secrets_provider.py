@@ -33,7 +33,7 @@ class SecretsProvider(ABC):
             e.g., {"url": "...", "email": "...", "api_token": "..."}
 
         Raises:
-            SecretNotFound: If no secrets exist for this tenant/integration
+            SecretNotFoundError: If no secrets exist for this tenant/integration
         """
         ...
 
@@ -65,7 +65,7 @@ class SecretsProvider(ABC):
         ...
 
 
-class SecretNotFound(Exception):
+class SecretNotFoundError(Exception):
     """Raised when requested secrets don't exist."""
 
     pass

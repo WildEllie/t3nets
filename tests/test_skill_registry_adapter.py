@@ -21,7 +21,7 @@ from t3nets_sdk.contracts import SkillContext, SkillResult
 
 from agent.skills.registry import (
     SkillDefinition,
-    SkillNotFound,
+    SkillNotFoundError,
     SkillRegistry,
     _coerce_result,
     _is_new_contract,
@@ -178,7 +178,7 @@ class TestNormalizeWorker:
 class TestRegistryGetWorker:
     def test_unknown_skill(self) -> None:
         reg = SkillRegistry()
-        with pytest.raises(SkillNotFound):
+        with pytest.raises(SkillNotFoundError):
             reg.get_worker("nope")
 
     async def test_worker_path_legacy_worker_via_filesystem_load(self, tmp_path: Path) -> None:

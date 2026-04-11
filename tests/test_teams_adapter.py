@@ -9,7 +9,6 @@ Verifies:
 - BotFrameworkAuth JWT header decoding and token caching
 """
 
-import asyncio
 import json
 import sys
 import time
@@ -20,8 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.channels.teams import TeamsAdapter
-from agent.channels.teams_auth import BotFrameworkAuth, TokenCache, SigningKeyCache
-from agent.models.message import ChannelType, ChannelCapability
+from agent.channels.teams_auth import BotFrameworkAuth, SigningKeyCache, TokenCache
+from agent.models.message import ChannelCapability, ChannelType
 
 
 class TestTeamsAdapter(unittest.TestCase):
@@ -153,23 +152,13 @@ class TestTeamsAdapter(unittest.TestCase):
         )
 
     def test_is_message_activity(self):
-        self.assertTrue(
-            TeamsAdapter.is_message_activity({"type": "message", "text": "hello"})
-        )
-        self.assertFalse(
-            TeamsAdapter.is_message_activity({"type": "message", "text": ""})
-        )
-        self.assertFalse(
-            TeamsAdapter.is_message_activity({"type": "conversationUpdate"})
-        )
+        self.assertTrue(TeamsAdapter.is_message_activity({"type": "message", "text": "hello"}))
+        self.assertFalse(TeamsAdapter.is_message_activity({"type": "message", "text": ""}))
+        self.assertFalse(TeamsAdapter.is_message_activity({"type": "conversationUpdate"}))
 
     def test_is_conversation_update(self):
-        self.assertTrue(
-            TeamsAdapter.is_conversation_update({"type": "conversationUpdate"})
-        )
-        self.assertFalse(
-            TeamsAdapter.is_conversation_update({"type": "message"})
-        )
+        self.assertTrue(TeamsAdapter.is_conversation_update({"type": "conversationUpdate"}))
+        self.assertFalse(TeamsAdapter.is_conversation_update({"type": "message"}))
 
     def test_is_bot_added(self):
         activity = {
@@ -228,11 +217,7 @@ class TestBotFrameworkAuth(unittest.TestCase):
         import base64
 
         header = {"alg": "RS256", "kid": "test-key-id", "typ": "JWT"}
-        header_b64 = (
-            base64.urlsafe_b64encode(json.dumps(header).encode())
-            .decode()
-            .rstrip("=")
-        )
+        header_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
         # Create a minimal JWT-like string (header.payload.signature)
         token = f"{header_b64}.eyJ0ZXN0IjoidmFsdWUifQ.fake-signature"
 
@@ -249,11 +234,7 @@ class TestBotFrameworkAuth(unittest.TestCase):
             "aud": "test-app-id",
             "exp": int(time.time()) + 3600,
         }
-        payload_b64 = (
-            base64.urlsafe_b64encode(json.dumps(payload).encode())
-            .decode()
-            .rstrip("=")
-        )
+        payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
         token = f"eyJhbGciOiJSUzI1NiJ9.{payload_b64}.fake"
 
         decoded = self.auth._unsafe_decode_jwt_payload(token)

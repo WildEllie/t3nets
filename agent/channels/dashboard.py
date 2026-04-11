@@ -9,8 +9,8 @@ from typing import Any
 
 from agent.channels.base import ChannelAdapter
 from agent.models.message import (
-    ChannelType,
     ChannelCapability,
+    ChannelType,
     InboundMessage,
     OutboundMessage,
 )

@@ -18,7 +18,7 @@ Status flow: pending → completed
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
@@ -32,21 +32,22 @@ PENDING_TTL_SECONDS = 300
 @dataclass
 class PendingRequest:
     """In-flight async skill invocation."""
+
     request_id: str
     tenant_id: str
     skill_name: str
-    channel: str                    # "dashboard" | "teams" | "telegram"
+    channel: str  # "dashboard" | "teams" | "telegram"
     conversation_id: str
-    reply_target: str               # channel-specific: user_id, chat_id, etc.
-    user_key: str                   # SSE user key (email or sub)
-    status: str = "pending"         # "pending" | "completed"
-    service_url: str = ""           # Teams Bot Framework service URL
-    is_raw: bool = False            # --raw flag
-    user_message: str = ""          # original user message (for conversation saving)
-    created_at: float = 0.0        # Unix timestamp
-    model_id: str = ""              # Bedrock model ID (with geo prefix) for AI formatting
-    model_short_name: str = ""      # Short display name (e.g. "Nova Micro")
-    route_type: str = ""            # "rule" or "ai" — original routing decision
+    reply_target: str  # channel-specific: user_id, chat_id, etc.
+    user_key: str  # SSE user key (email or sub)
+    status: str = "pending"  # "pending" | "completed"
+    service_url: str = ""  # Teams Bot Framework service URL
+    is_raw: bool = False  # --raw flag
+    user_message: str = ""  # original user message (for conversation saving)
+    created_at: float = 0.0  # Unix timestamp
+    model_id: str = ""  # Bedrock model ID (with geo prefix) for AI formatting
+    model_short_name: str = ""  # Short display name (e.g. "Nova Micro")
+    route_type: str = ""  # "rule" or "ai" — original routing decision
 
 
 class PendingRequestsStore:
@@ -62,24 +63,26 @@ class PendingRequestsStore:
         now = time.time()
         request.created_at = now
 
-        self.table.put_item(Item={
-            "pk": request.request_id,
-            "tenant_id": request.tenant_id,
-            "skill_name": request.skill_name,
-            "channel": request.channel,
-            "conversation_id": request.conversation_id,
-            "reply_target": request.reply_target,
-            "user_key": request.user_key,
-            "status": "pending",
-            "service_url": request.service_url,
-            "is_raw": request.is_raw,
-            "user_message": request.user_message,
-            "model_id": request.model_id,
-            "model_short_name": request.model_short_name,
-            "route_type": request.route_type,
-            "created_at": str(now),
-            "ttl": int(now + PENDING_TTL_SECONDS),
-        })
+        self.table.put_item(
+            Item={
+                "pk": request.request_id,
+                "tenant_id": request.tenant_id,
+                "skill_name": request.skill_name,
+                "channel": request.channel,
+                "conversation_id": request.conversation_id,
+                "reply_target": request.reply_target,
+                "user_key": request.user_key,
+                "status": "pending",
+                "service_url": request.service_url,
+                "is_raw": request.is_raw,
+                "user_message": request.user_message,
+                "model_id": request.model_id,
+                "model_short_name": request.model_short_name,
+                "route_type": request.route_type,
+                "created_at": str(now),
+                "ttl": int(now + PENDING_TTL_SECONDS),
+            }
+        )
 
         logger.info(
             f"PendingRequests: created {request.request_id[:8]} "

@@ -9,14 +9,11 @@ Tests:
 """
 
 import json
-import threading
-import time
-from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
-from types import ModuleType
-
 import sys
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import MagicMock
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Mock boto3 and botocore before any AWS adapter imports
@@ -33,13 +30,13 @@ if "boto3" not in sys.modules:
     sys.modules["botocore"] = botocore_mock
     sys.modules["botocore.exceptions"] = botocore_exceptions
 
-from adapters.aws.sqs_poller import SQSResultPoller
-from adapters.aws.result_router import AsyncResultRouter
 from adapters.aws.pending_requests import PendingRequest, PendingRequestsStore
+from adapters.aws.result_router import AsyncResultRouter
+from adapters.aws.sqs_poller import SQSResultPoller
 from agent.sse import SSEConnectionManager
 
-
 # ─── SQS Poller Tests ─────────────────────────────────────────────────
+
 
 def test_poller_process_valid_message():
     """Poller should parse JSON and call callback with the body."""
@@ -52,11 +49,13 @@ def test_poller_process_valid_message():
 
     msg = {
         "ReceiptHandle": "handle-1",
-        "Body": json.dumps({
-            "request_id": "req-123",
-            "skill_name": "ping",
-            "result": {"status": "ok"},
-        }),
+        "Body": json.dumps(
+            {
+                "request_id": "req-123",
+                "skill_name": "ping",
+                "result": {"status": "ok"},
+            }
+        ),
     }
     poller._process_message(msg)
 
@@ -81,6 +80,7 @@ def test_poller_process_invalid_json():
 
 def test_poller_callback_failure_keeps_message():
     """If callback raises, message should NOT be deleted (returned to queue)."""
+
     def fail_callback(body):
         raise RuntimeError("Simulated failure")
 
@@ -99,6 +99,7 @@ def test_poller_callback_failure_keeps_message():
 
 
 # ─── Result Router Tests ──────────────────────────────────────────────
+
 
 def test_router_dashboard_raw_mode():
     """Raw mode should send JSON result directly via SSE without AI formatting."""
@@ -119,12 +120,14 @@ def test_router_dashboard_raw_mode():
     )
 
     router = AsyncResultRouter(sse, pending)
-    router.handle_result({
-        "request_id": "req-1",
-        "reply_channel": "dashboard",
-        "skill_name": "ping",
-        "result": {"status": "ok"},
-    })
+    router.handle_result(
+        {
+            "request_id": "req-1",
+            "reply_channel": "dashboard",
+            "skill_name": "ping",
+            "result": {"status": "ok"},
+        }
+    )
 
     sse.send_event.assert_called_once()
     call_args = sse.send_event.call_args
@@ -152,12 +155,14 @@ def test_router_dashboard_formatted_without_ai():
     )
 
     router = AsyncResultRouter(sse, pending, ai_provider=None)
-    router.handle_result({
-        "request_id": "req-2",
-        "reply_channel": "dashboard",
-        "skill_name": "ping",
-        "result": {"status": "ok"},
-    })
+    router.handle_result(
+        {
+            "request_id": "req-2",
+            "reply_channel": "dashboard",
+            "skill_name": "ping",
+            "result": {"status": "ok"},
+        }
+    )
 
     sse.send_event.assert_called_once()
     call_args = sse.send_event.call_args
@@ -185,12 +190,14 @@ def test_router_error_result():
     )
 
     router = AsyncResultRouter(sse, pending, ai_provider=None)
-    router.handle_result({
-        "request_id": "req-err",
-        "reply_channel": "dashboard",
-        "skill_name": "jira",
-        "result": {"error": "API token expired"},
-    })
+    router.handle_result(
+        {
+            "request_id": "req-err",
+            "reply_channel": "dashboard",
+            "skill_name": "jira",
+            "result": {"error": "API token expired"},
+        }
+    )
 
     call_args = sse.send_event.call_args
     assert "error" in call_args[0][2]["text"].lower()
@@ -205,12 +212,14 @@ def test_router_unknown_channel():
 
     router = AsyncResultRouter(sse, pending)
     # Should not raise
-    router.handle_result({
-        "request_id": "req-x",
-        "reply_channel": "slack",
-        "skill_name": "ping",
-        "result": {"status": "ok"},
-    })
+    router.handle_result(
+        {
+            "request_id": "req-x",
+            "reply_channel": "slack",
+            "skill_name": "ping",
+            "result": {"status": "ok"},
+        }
+    )
 
     sse.send_event.assert_not_called()
 
@@ -224,17 +233,20 @@ def test_router_no_pending_request_dashboard():
 
     router = AsyncResultRouter(sse, pending)
     # Should not raise — just log a warning
-    router.handle_result({
-        "request_id": "req-expired",
-        "reply_channel": "dashboard",
-        "skill_name": "ping",
-        "result": {"status": "ok"},
-    })
+    router.handle_result(
+        {
+            "request_id": "req-expired",
+            "reply_channel": "dashboard",
+            "skill_name": "ping",
+            "result": {"status": "ok"},
+        }
+    )
 
     sse.send_event.assert_not_called()
 
 
 # ─── Pending Request Tests ────────────────────────────────────────────
+
 
 def test_pending_request_dataclass():
     """PendingRequest should have correct defaults."""

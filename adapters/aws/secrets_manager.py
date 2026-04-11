@@ -7,10 +7,11 @@ Each secret is a JSON blob with integration-specific keys.
 
 import json
 from typing import Any, cast
+
 import boto3  # type: ignore[import-untyped]
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
-from agent.interfaces.secrets_provider import SecretsProvider, SecretNotFound
+from agent.interfaces.secrets_provider import SecretNotFoundError, SecretsProvider
 
 
 class SecretsManagerProvider(SecretsProvider):
@@ -32,9 +33,8 @@ class SecretsManagerProvider(SecretsProvider):
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("ResourceNotFoundException", "DecryptionFailureException"):
-                raise SecretNotFound(
-                    f"No secrets found for tenant '{tenant_id}', "
-                    f"integration '{integration_name}'"
+                raise SecretNotFoundError(
+                    f"No secrets found for tenant '{tenant_id}', integration '{integration_name}'"
                 )
             raise
 

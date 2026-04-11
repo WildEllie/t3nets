@@ -38,12 +38,12 @@ import asyncio
 
 from t3nets_sdk.contracts import SkillContext
 
-from agent.skills.registry import SkillRegistry, SkillNotFound
-from agent.practices.registry import PracticeRegistry
-from adapters.aws.secrets_manager import SecretsManagerProvider
-from adapters.aws.s3_blob_store import S3BlobStore
-from adapters.aws.pending_requests import PendingRequestsStore
 from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
+from adapters.aws.pending_requests import PendingRequestsStore
+from adapters.aws.s3_blob_store import S3BlobStore
+from adapters.aws.secrets_manager import SecretsManagerProvider
+from agent.practices.registry import PracticeRegistry
+from agent.skills.registry import SkillNotFoundError, SkillRegistry
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -192,7 +192,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     try:
         worker_fn = skills.get_worker(skill_name)
-    except SkillNotFound as e:
+    except SkillNotFoundError as e:
         logger.error(f"Lambda: skill not found: {skill_name}")
         _send_result(request_id, detail, {"error": str(e)})
         return {"statusCode": 400, "body": f"Skill not found: {skill_name}"}

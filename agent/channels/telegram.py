@@ -127,9 +127,7 @@ class TelegramAdapter(ChannelAdapter):
         Otherwise sends text via sendMessage.
         """
         # Check for audio attachment
-        audio_attachment = next(
-            (a for a in message.attachments if a.get("type") == "audio"), None
-        )
+        audio_attachment = next((a for a in message.attachments if a.get("type") == "audio"), None)
         if audio_attachment:
             return await self._send_audio(message, audio_attachment)
 
@@ -247,8 +245,7 @@ class TelegramAdapter(ChannelAdapter):
         # audio file field
         body_parts.append(f"--{boundary}\r\n".encode())
         body_parts.append(
-            f'Content-Disposition: form-data; name="audio"; filename="response.{fmt}"\r\n'
-            .encode()
+            f'Content-Disposition: form-data; name="audio"; filename="response.{fmt}"\r\n'.encode()
         )
         body_parts.append(f"Content-Type: audio/{fmt}\r\n\r\n".encode())
         body_parts.append(audio_bytes)
@@ -313,8 +310,8 @@ class TelegramAdapter(ChannelAdapter):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urlopen(req, timeout=5) as resp:
-                pass
+            with urlopen(req, timeout=5):
+                pass  # Fire and forget
         except Exception:
             pass  # Non-critical
 

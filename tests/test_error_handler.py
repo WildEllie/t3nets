@@ -52,9 +52,7 @@ def test_inference_profile_error(handler):
 
 def test_model_access_denied(handler):
     """Model access denied should map to BEDROCK_MODEL_ACCESS."""
-    error = Exception(
-        "Model access is denied due to IAM user or service role is not authorized"
-    )
+    error = Exception("Model access is denied due to IAM user or service role is not authorized")
     result = handler.handle(error, context="chat")
     assert result.error_code == "BEDROCK_MODEL_ACCESS"
 

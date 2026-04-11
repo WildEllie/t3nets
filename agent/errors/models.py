@@ -12,8 +12,8 @@ from typing import Any
 class ErrorSeverity(str, Enum):
     """How serious the error is and who can fix it."""
 
-    INFO = "info"          # Transient — retry likely works (throttling, timeouts)
-    CONFIG = "config"      # Configuration issue — admin action needed
+    INFO = "info"  # Transient — retry likely works (throttling, timeouts)
+    CONFIG = "config"  # Configuration issue — admin action needed
     CRITICAL = "critical"  # Infrastructure issue — deployment action needed
 
 
@@ -21,12 +21,12 @@ class ErrorSeverity(str, Enum):
 class FriendlyError:
     """A user-facing error with context and guidance."""
 
-    message: str                          # Friendly message for the user
-    severity: ErrorSeverity               # info / config / critical
-    error_code: str = ""                  # Machine-readable code (e.g. BEDROCK_MODEL_ACCESS)
-    action: str = ""                      # What to do about it
-    admin_required: bool = False          # Does an admin need to fix this?
-    original_error: str = ""              # Raw error (logged, never shown to user)
+    message: str  # Friendly message for the user
+    severity: ErrorSeverity  # info / config / critical
+    error_code: str = ""  # Machine-readable code (e.g. BEDROCK_MODEL_ACCESS)
+    action: str = ""  # What to do about it
+    admin_required: bool = False  # Does an admin need to fix this?
+    original_error: str = ""  # Raw error (logged, never shown to user)
 
     def to_dict(self) -> dict[str, Any]:
         return {

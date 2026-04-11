@@ -9,8 +9,8 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from agent.models.message import (
-    ChannelType,
     ChannelCapability,
+    ChannelType,
     InboundMessage,
     OutboundMessage,
 )
@@ -65,9 +65,7 @@ class ChannelAdapter(ABC):
         """Show typing indicator. No-op by default."""
         pass
 
-    async def send_acknowledgment(
-        self, conversation_id: str, text: str = "On it..."
-    ) -> None:
+    async def send_acknowledgment(self, conversation_id: str, text: str = "On it...") -> None:
         """Send a quick ack before processing. Useful for slow skills."""
         if ChannelCapability.TYPING_INDICATOR in self.capabilities():
             await self.send_typing_indicator(conversation_id)
@@ -89,7 +87,7 @@ class ChannelRegistry:
     def get(self, channel_type: ChannelType) -> ChannelAdapter:
         """Get adapter for a channel type. Raises if not registered."""
         if channel_type not in self._adapters:
-            raise ChannelNotRegistered(
+            raise ChannelNotRegisteredError(
                 f"Channel '{channel_type.value}' is not registered. "
                 f"Available: {[c.value for c in self._adapters.keys()]}"
             )
@@ -103,5 +101,5 @@ class ChannelRegistry:
         return channel_type in self._adapters
 
 
-class ChannelNotRegistered(Exception):
+class ChannelNotRegisteredError(Exception):
     pass

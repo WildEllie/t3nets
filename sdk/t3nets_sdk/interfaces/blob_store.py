@@ -31,7 +31,7 @@ class BlobStore(ABC):
             Raw bytes of the object
 
         Raises:
-            BlobNotFound: If the object doesn't exist
+            BlobNotFoundError: If the object doesn't exist
         """
         ...
 
@@ -77,7 +77,7 @@ class BlobStore(ABC):
         ...
 
 
-class BlobNotFound(Exception):
+class BlobNotFoundError(Exception):
     """Raised when a requested blob doesn't exist."""
 
     pass

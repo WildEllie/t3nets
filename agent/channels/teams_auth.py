@@ -14,23 +14,18 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
 logger = logging.getLogger("t3nets.teams.auth")
 
 # Microsoft Bot Framework OpenID metadata endpoints
-BOT_FRAMEWORK_OPENID_URL = (
-    "https://login.botframework.com/v1/.well-known/openid-configuration"
-)
+BOT_FRAMEWORK_OPENID_URL = "https://login.botframework.com/v1/.well-known/openid-configuration"
 EMULATOR_OPENID_URL = (
-    "https://login.microsoftonline.com/botframework.com/v2.0/"
-    ".well-known/openid-configuration"
+    "https://login.microsoftonline.com/botframework.com/v2.0/.well-known/openid-configuration"
 )
 
 # Token endpoint for outbound bot-to-user messages
-BOT_TOKEN_URL = (
-    "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
-)
+BOT_TOKEN_URL = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
 BOT_TOKEN_SCOPE = "https://api.botframework.com/.default"
 
 # Valid issuers for Bot Framework JWTs
@@ -294,9 +289,7 @@ class BotFrameworkAuth:
                     access_token=access_token,
                     expires_at=time.time() + expires_in,
                 )
-                logger.info(
-                    f"Acquired Bot Framework token (expires in {expires_in}s)"
-                )
+                logger.info(f"Acquired Bot Framework token (expires in {expires_in}s)")
 
             return access_token
 

@@ -12,7 +12,7 @@ For multi-tenant tests, pass `tenant_id=` or call `put()` directly.
 import copy
 from typing import Any, Optional
 
-from t3nets_sdk.interfaces.secrets_provider import SecretNotFound, SecretsProvider
+from t3nets_sdk.interfaces.secrets_provider import SecretNotFoundError, SecretsProvider
 
 
 class MockSecretsProvider(SecretsProvider):
@@ -40,7 +40,7 @@ class MockSecretsProvider(SecretsProvider):
         try:
             return copy.deepcopy(self._store[(tenant_id, integration_name)])
         except KeyError as e:
-            raise SecretNotFound(f"{tenant_id}/{integration_name}") from e
+            raise SecretNotFoundError(f"{tenant_id}/{integration_name}") from e
 
     async def put(
         self,

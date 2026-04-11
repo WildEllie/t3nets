@@ -12,9 +12,10 @@ Schema (single-table design):
 
 import json
 from typing import Any, Optional
+
 import boto3  # type: ignore[import-untyped]
 
-from agent.interfaces.tenant_store import TenantStore, TenantNotFound, UserNotFound
+from agent.interfaces.tenant_store import TenantNotFoundError, TenantStore, UserNotFoundError
 from agent.models.tenant import Invitation, Tenant, TenantSettings, TenantUser
 
 
@@ -32,7 +33,7 @@ class DynamoDBTenantStore(TenantStore):
         )
         item = response.get("Item")
         if not item:
-            raise TenantNotFound(f"Tenant '{tenant_id}' not found")
+            raise TenantNotFoundError(f"Tenant '{tenant_id}' not found")
         return self._item_to_tenant(item)
 
     async def create_tenant(self, tenant: Tenant) -> None:
@@ -64,13 +65,15 @@ class DynamoDBTenantStore(TenantStore):
 
         items = response.get("Items", [])
         if not items:
-            raise TenantNotFound(f"No tenant mapped to {channel_type}:{channel_specific_id}")
+            raise TenantNotFoundError(f"No tenant mapped to {channel_type}:{channel_specific_id}")
 
         # The item's pk contains the tenant_id
         tenant_id = items[0]["pk"].replace("TENANT#", "")
         return await self.get_tenant(tenant_id)
 
-    async def set_channel_mapping(self, tenant_id: str, channel_type: str, channel_specific_id: str) -> None:
+    async def set_channel_mapping(
+        self, tenant_id: str, channel_type: str, channel_specific_id: str
+    ) -> None:
         gsi_key = f"CHANNEL#{channel_type}#{channel_specific_id}"
 
         self.table.put_item(
@@ -91,7 +94,7 @@ class DynamoDBTenantStore(TenantStore):
         )
         item = response.get("Item")
         if not item:
-            raise UserNotFound(f"User '{user_id}' not found in tenant '{tenant_id}'")
+            raise UserNotFoundError(f"User '{user_id}' not found in tenant '{tenant_id}'")
         return self._item_to_user(item)
 
     async def get_user_by_email(self, tenant_id: str, email: str) -> Optional[TenantUser]:
@@ -109,7 +112,10 @@ class DynamoDBTenantStore(TenantStore):
         return self._item_to_user(items[0]) if items else None
 
     async def get_user_by_channel_identity(
-        self, tenant_id: str, channel_type: str, channel_user_id: str,
+        self,
+        tenant_id: str,
+        channel_type: str,
+        channel_user_id: str,
     ) -> Optional[TenantUser]:
         # Query all users and filter by channel identity
         response = self.table.query(
@@ -152,7 +158,7 @@ class DynamoDBTenantStore(TenantStore):
 
     async def create_invitation(self, invitation: Invitation) -> None:
         """Store a new invitation in DynamoDB with TTL."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         item: dict[str, Any] = {
             "pk": f"INVITE#{invitation.invite_code}",

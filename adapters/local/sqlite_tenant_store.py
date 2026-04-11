@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from agent.interfaces.tenant_store import TenantStore, TenantNotFound, UserNotFound
+from agent.interfaces.tenant_store import TenantNotFoundError, TenantStore, UserNotFoundError
 from agent.models.tenant import Invitation, Tenant, TenantSettings, TenantUser
 
 
@@ -69,8 +69,7 @@ class SQLiteTenantStore(TenantStore):
             # --- Safe migrations for new columns ---
             # Add cognito_sub and last_login columns if they don't exist yet
             existing_cols = {
-                row[1]
-                for row in conn.execute("PRAGMA table_info(tenant_users)").fetchall()
+                row[1] for row in conn.execute("PRAGMA table_info(tenant_users)").fetchall()
             }
             if "cognito_sub" not in existing_cols:
                 conn.execute(
@@ -113,15 +112,18 @@ class SQLiteTenantStore(TenantStore):
                         "UPDATE tenants SET settings = ? WHERE tenant_id = ?",
                         (json.dumps(settings), tenant_id),
                     )
-                return self._row_to_tenant(conn.execute(
-                    "SELECT * FROM tenants WHERE tenant_id = ?",
-                    (tenant_id,),
-                ).fetchone())
+                return self._row_to_tenant(
+                    conn.execute(
+                        "SELECT * FROM tenants WHERE tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchone()
+                )
 
             settings = TenantSettings(
                 enabled_skills=enabled_skills or ["sprint_status"],
             )
             from datetime import datetime, timezone
+
             now = datetime.now(timezone.utc).isoformat()
 
             conn.execute(
@@ -153,23 +155,32 @@ class SQLiteTenantStore(TenantStore):
                 (tenant_id,),
             ).fetchone()
         if not row:
-            raise TenantNotFound(f"Tenant '{tenant_id}' not found")
+            raise TenantNotFoundError(f"Tenant '{tenant_id}' not found")
         return self._row_to_tenant(row)
 
     async def create_tenant(self, tenant: Tenant) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO tenants VALUES (?, ?, ?, ?, ?)",
-                (tenant.tenant_id, tenant.name, tenant.status,
-                 tenant.created_at, json.dumps(tenant.settings.__dict__)),
+                (
+                    tenant.tenant_id,
+                    tenant.name,
+                    tenant.status,
+                    tenant.created_at,
+                    json.dumps(tenant.settings.__dict__),
+                ),
             )
 
     async def update_tenant(self, tenant: Tenant) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "UPDATE tenants SET name=?, status=?, settings=? WHERE tenant_id=?",
-                (tenant.name, tenant.status,
-                 json.dumps(tenant.settings.__dict__), tenant.tenant_id),
+                (
+                    tenant.name,
+                    tenant.status,
+                    json.dumps(tenant.settings.__dict__),
+                    tenant.tenant_id,
+                ),
             )
 
     async def list_tenants(self) -> list[Tenant]:
@@ -182,16 +193,17 @@ class SQLiteTenantStore(TenantStore):
     async def get_by_channel_id(self, channel_type: str, channel_specific_id: str) -> Tenant:
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
-                "SELECT tenant_id FROM channel_mappings WHERE channel_type=? AND channel_specific_id=?",
+                "SELECT tenant_id FROM channel_mappings "
+                "WHERE channel_type=? AND channel_specific_id=?",
                 (channel_type, channel_specific_id),
             ).fetchone()
         if not row:
-            raise TenantNotFound(
-                f"No tenant mapped to {channel_type}:{channel_specific_id}"
-            )
+            raise TenantNotFoundError(f"No tenant mapped to {channel_type}:{channel_specific_id}")
         return await self.get_tenant(row[0])
 
-    async def set_channel_mapping(self, tenant_id: str, channel_type: str, channel_specific_id: str) -> None:
+    async def set_channel_mapping(
+        self, tenant_id: str, channel_type: str, channel_specific_id: str
+    ) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """INSERT INTO channel_mappings VALUES (?, ?, ?)
@@ -209,7 +221,7 @@ class SQLiteTenantStore(TenantStore):
                 (tenant_id, user_id),
             ).fetchone()
         if not row:
-            raise UserNotFound(f"User '{user_id}' not found in tenant '{tenant_id}'")
+            raise UserNotFoundError(f"User '{user_id}' not found in tenant '{tenant_id}'")
         return self._row_to_user(row)
 
     async def get_user_by_email(self, tenant_id: str, email: str) -> Optional[TenantUser]:
@@ -221,7 +233,10 @@ class SQLiteTenantStore(TenantStore):
         return self._row_to_user(row) if row else None
 
     async def get_user_by_channel_identity(
-        self, tenant_id: str, channel_type: str, channel_user_id: str,
+        self,
+        tenant_id: str,
+        channel_type: str,
+        channel_user_id: str,
     ) -> Optional[TenantUser]:
         # For local dev, just return the admin user
         with sqlite3.connect(self.db_path) as conn:
@@ -248,10 +263,17 @@ class SQLiteTenantStore(TenantStore):
                 "INSERT INTO tenant_users (user_id, tenant_id, email, display_name,"
                 " role, channel_identities, cognito_sub, last_login, avatar_url)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (user.user_id, user.tenant_id, user.email,
-                 user.display_name, user.role,
-                 json.dumps(user.channel_identities),
-                 user.cognito_sub, user.last_login, user.avatar_url),
+                (
+                    user.user_id,
+                    user.tenant_id,
+                    user.email,
+                    user.display_name,
+                    user.role,
+                    json.dumps(user.channel_identities),
+                    user.cognito_sub,
+                    user.last_login,
+                    user.avatar_url,
+                ),
             )
 
     async def update_user(self, user: TenantUser) -> None:
@@ -261,10 +283,17 @@ class SQLiteTenantStore(TenantStore):
                 " channel_identities=?, cognito_sub=?, last_login=?,"
                 " avatar_url=?"
                 " WHERE tenant_id=? AND user_id=?",
-                (user.email, user.display_name, user.role,
-                 json.dumps(user.channel_identities),
-                 user.cognito_sub, user.last_login, user.avatar_url,
-                 user.tenant_id, user.user_id),
+                (
+                    user.email,
+                    user.display_name,
+                    user.role,
+                    json.dumps(user.channel_identities),
+                    user.cognito_sub,
+                    user.last_login,
+                    user.avatar_url,
+                    user.tenant_id,
+                    user.user_id,
+                ),
             )
 
     async def delete_user(self, tenant_id: str, user_id: str) -> None:
@@ -292,10 +321,15 @@ class SQLiteTenantStore(TenantStore):
                 " invited_by, created_at, expires_at, accepted_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    invitation.invite_code, invitation.tenant_id,
-                    invitation.email, invitation.role, invitation.status,
-                    invitation.invited_by, invitation.created_at,
-                    invitation.expires_at, invitation.accepted_at,
+                    invitation.invite_code,
+                    invitation.tenant_id,
+                    invitation.email,
+                    invitation.role,
+                    invitation.status,
+                    invitation.invited_by,
+                    invitation.created_at,
+                    invitation.expires_at,
+                    invitation.accepted_at,
                 ),
             )
 
@@ -322,10 +356,7 @@ class SQLiteTenantStore(TenantStore):
                 "SELECT * FROM invitations WHERE tenant_id=? AND status='pending'",
                 (tenant_id,),
             ).fetchall()
-        return [
-            inv for inv in (self._row_to_invitation(r) for r in rows)
-            if inv.is_valid()
-        ]
+        return [inv for inv in (self._row_to_invitation(r) for r in rows) if inv.is_valid()]
 
     def _row_to_invitation(self, row: tuple[object, ...]) -> Invitation:
         return Invitation(

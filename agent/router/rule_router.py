@@ -9,8 +9,8 @@ If Tier 1 matches with high confidence, skip Claude for routing entirely.
 Claude is still used to FORMAT the response after the skill returns data.
 """
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -22,16 +22,18 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RouteMatch:
     """Result of rule-based routing."""
+
     skill_name: str
     action: str
     params: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0  # 0.0 to 1.0
-    raw_mode: bool = False   # --raw flag detected
+    raw_mode: bool = False  # --raw flag detected
 
 
 @dataclass
 class RuleSet:
     """Rules for matching a single skill."""
+
     skill_name: str
     supports_raw: bool = False
     # Exact trigger phrases (case-insensitive)
@@ -199,9 +201,7 @@ class RuleBasedRouter:
 
             # Compile detection patterns
             pattern_strings = SKILL_PATTERNS.get(skill.name, [])
-            rule_set.patterns = [
-                re.compile(p, re.IGNORECASE) for p in pattern_strings
-            ]
+            rule_set.patterns = [re.compile(p, re.IGNORECASE) for p in pattern_strings]
 
             # Compile action routing rules
             action_rule_strings = SKILL_ACTION_RULES.get(skill.name, [])
@@ -256,10 +256,9 @@ class RuleBasedRouter:
             )
             return best_match
 
+        best_summary = f"{best_match.skill_name} @ {best_confidence:.2f}" if best_match else "none"
         logger.info(
-            f"RuleBasedRouter: no confident match "
-            f"(best: {best_match.skill_name + ' @ ' + f'{best_confidence:.2f}' if best_match else 'none'}), "
-            f"falling back to Claude"
+            f"RuleBasedRouter: no confident match (best: {best_summary}), falling back to Claude"
         )
         return None
 
@@ -283,9 +282,7 @@ class RuleBasedRouter:
                 score = max(score, 0.7 + (ratio * 0.3))
 
         # Regex pattern match — count how many hit
-        pattern_hits = sum(
-            1 for p in rule_set.patterns if p.search(text_lower)
-        )
+        pattern_hits = sum(1 for p in rule_set.patterns if p.search(text_lower))
         if pattern_hits > 0:
             # 1 hit = 0.5, 2 hits = 0.65, 3+ hits = 0.75+
             pattern_score = min(0.5 + (pattern_hits * 0.15), 0.9)
@@ -312,7 +309,7 @@ class RuleBasedRouter:
 
         # Extract email addresses (for "mine" action)
         if action == "mine":
-            email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', text_lower)
+            email_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", text_lower)
             if email_match:
                 params["assignee_email"] = email_match.group()
 
@@ -333,13 +330,13 @@ class RuleBasedRouter:
             return quoted.group(1)
 
         # Match version patterns: v1.0, v2.5.0, 1.0.0, etc.
-        version_match = re.search(r'\bv?\d+\.\d+(?:\.\d+)?(?:-\w+)?\b', text)
+        version_match = re.search(r"\bv?\d+\.\d+(?:\.\d+)?(?:-\w+)?\b", text)
         if version_match:
             return version_match.group()
 
         # Match "release <name>" or "version <name>" patterns
         named = re.search(
-            r'\b(?:release|version)\s+([A-Za-z0-9][A-Za-z0-9._\- ]*)',
+            r"\b(?:release|version)\s+([A-Za-z0-9][A-Za-z0-9._\- ]*)",
             text,
         )
         if named:

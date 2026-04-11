@@ -124,14 +124,14 @@ class SkillRegistry:
         """
         skill = self._skills.get(skill_name)
         if not skill:
-            raise SkillNotFound(f"Skill '{skill_name}' not registered")
+            raise SkillNotFoundError(f"Skill '{skill_name}' not registered")
 
         if skill.worker_path:
             spec = importlib.util.spec_from_file_location(
                 f"practice_worker_{skill_name}", skill.worker_path
             )
             if spec is None or spec.loader is None:
-                raise SkillNotFound(
+                raise SkillNotFoundError(
                     f"Cannot load worker for '{skill_name}' from {skill.worker_path}"
                 )
             module = importlib.util.module_from_spec(spec)
@@ -140,7 +140,9 @@ class SkillRegistry:
             module = importlib.import_module(skill.worker_module)
 
         if not hasattr(module, "execute"):
-            raise SkillNotFound(f"Skill '{skill_name}' worker module has no execute() function")
+            raise SkillNotFoundError(
+                f"Skill '{skill_name}' worker module has no execute() function"
+            )
         return _normalize_worker(module.execute, skill_name)
 
     def list_skills(self) -> list[SkillDefinition]:
@@ -151,7 +153,7 @@ class SkillRegistry:
         return list(self._skills.keys())
 
 
-class SkillNotFound(Exception):
+class SkillNotFoundError(Exception):
     pass
 
 

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agent.interfaces.blob_store import BlobNotFound, BlobStore
+from agent.interfaces.blob_store import BlobNotFoundError, BlobStore
 
 
 class FileStore(BlobStore):
@@ -26,7 +26,7 @@ class FileStore(BlobStore):
     async def get(self, tenant_id: str, key: str) -> bytes:
         p = self._path(tenant_id, key)
         if not p.exists():
-            raise BlobNotFound(f"{tenant_id}/{key}")
+            raise BlobNotFoundError(f"{tenant_id}/{key}")
         return p.read_bytes()
 
     async def get_json(self, tenant_id: str, key: str) -> dict[str, Any]:

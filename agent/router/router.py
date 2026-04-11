@@ -8,15 +8,15 @@ and either responds directly or dispatches skill execution.
 import logging
 from typing import Any, Optional
 
-from agent.models.message import ChannelType, InboundMessage, OutboundMessage
-from agent.models.context import RequestContext
-from agent.models.tenant import Tenant
 from agent.channels.base import ChannelRegistry
-from agent.skills.registry import SkillRegistry
 from agent.interfaces.ai_provider import AIProvider
 from agent.interfaces.conversation_store import ConversationStore
 from agent.interfaces.event_bus import EventBus
 from agent.interfaces.tenant_store import TenantStore
+from agent.models.context import RequestContext
+from agent.models.message import ChannelType, OutboundMessage
+from agent.models.tenant import Tenant
+from agent.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,7 @@ class Router:
             logger.info(f"Unknown user {message.channel_user_id} for tenant {tenant.tenant_id}")
             # For prototype: create a basic user record
             from agent.models.tenant import TenantUser
+
             user = TenantUser(
                 user_id=message.channel_user_id,
                 tenant_id=tenant.tenant_id,
@@ -139,9 +140,7 @@ class Router:
         # 10b. Skill invocation (async via event bus)
         else:
             for tool_call in response.tool_calls:
-                logger.info(
-                    f"{ctx.log_prefix()} Invoking skill: {tool_call.tool_name}"
-                )
+                logger.info(f"{ctx.log_prefix()} Invoking skill: {tool_call.tool_name}")
                 await self.events.publish_skill_invocation(
                     tenant_id=ctx.tenant_id,
                     skill_name=tool_call.tool_name,
@@ -180,11 +179,13 @@ class Router:
 
     def _build_system_prompt(self, ctx: RequestContext) -> str:
         """Build the system prompt with tenant context."""
+        default_tone = "Be direct, helpful, and action-oriented. Flag risks early. Suggest actions."
+        tone = ctx.tenant.settings.system_prompt_override or default_tone
         base = f"""You are an AI assistant for {ctx.tenant.name} on the T3nets platform.
 
 You are talking to {ctx.user.display_name} ({ctx.user.email}).
 
-{ctx.tenant.settings.system_prompt_override or "Be direct, helpful, and action-oriented. Flag risks early. Suggest actions."}
+{tone}
 
 Communication channel: {ctx.channel.value}
 """

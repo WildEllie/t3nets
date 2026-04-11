@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.channels.telegram import TelegramAdapter
-from agent.models.message import ChannelType, ChannelCapability
+from agent.models.message import ChannelCapability, ChannelType
 
 
 class TestTelegramAdapter(unittest.TestCase):
@@ -194,27 +194,51 @@ class TestTelegramAdapter(unittest.TestCase):
         self.assertFalse(self.adapter.validate_webhook({}, b""))
 
     def test_is_message_update(self):
-        self.assertTrue(TelegramAdapter.is_message_update({
-            "message": {"text": "hello"},
-        }))
-        self.assertFalse(TelegramAdapter.is_message_update({
-            "message": {"text": ""},
-        }))
-        self.assertFalse(TelegramAdapter.is_message_update({
-            "message": {},
-        }))
+        self.assertTrue(
+            TelegramAdapter.is_message_update(
+                {
+                    "message": {"text": "hello"},
+                }
+            )
+        )
+        self.assertFalse(
+            TelegramAdapter.is_message_update(
+                {
+                    "message": {"text": ""},
+                }
+            )
+        )
+        self.assertFalse(
+            TelegramAdapter.is_message_update(
+                {
+                    "message": {},
+                }
+            )
+        )
         self.assertFalse(TelegramAdapter.is_message_update({}))
 
     def test_is_group_chat(self):
-        self.assertTrue(TelegramAdapter.is_group_chat({
-            "message": {"chat": {"type": "group"}},
-        }))
-        self.assertTrue(TelegramAdapter.is_group_chat({
-            "message": {"chat": {"type": "supergroup"}},
-        }))
-        self.assertFalse(TelegramAdapter.is_group_chat({
-            "message": {"chat": {"type": "private"}},
-        }))
+        self.assertTrue(
+            TelegramAdapter.is_group_chat(
+                {
+                    "message": {"chat": {"type": "group"}},
+                }
+            )
+        )
+        self.assertTrue(
+            TelegramAdapter.is_group_chat(
+                {
+                    "message": {"chat": {"type": "supergroup"}},
+                }
+            )
+        )
+        self.assertFalse(
+            TelegramAdapter.is_group_chat(
+                {
+                    "message": {"chat": {"type": "private"}},
+                }
+            )
+        )
 
     def test_api_base_url(self):
         """Verify API base URL is constructed correctly."""

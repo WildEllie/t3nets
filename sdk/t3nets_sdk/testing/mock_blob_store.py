@@ -2,13 +2,13 @@
 MockBlobStore — in-memory BlobStore for tests.
 
 Tenant-isolated. Round-trips bytes and JSON. Mirrors the semantics of the
-real S3 / FileStore implementations: missing keys raise BlobNotFound.
+real S3 / FileStore implementations: missing keys raise BlobNotFoundError.
 """
 
 import json
 from typing import Any
 
-from t3nets_sdk.interfaces.blob_store import BlobNotFound, BlobStore
+from t3nets_sdk.interfaces.blob_store import BlobNotFoundError, BlobStore
 
 
 class MockBlobStore(BlobStore):
@@ -22,7 +22,7 @@ class MockBlobStore(BlobStore):
         try:
             return self._store[(tenant_id, key)]
         except KeyError as e:
-            raise BlobNotFound(f"{tenant_id}/{key}") from e
+            raise BlobNotFoundError(f"{tenant_id}/{key}") from e
 
     async def get_json(self, tenant_id: str, key: str) -> dict[str, Any]:
         raw = await self.get(tenant_id, key)

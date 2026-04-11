@@ -7,6 +7,7 @@ Implementations: DynamoDBTenantStore (AWS), SQLiteTenantStore (local), etc.
 
 from abc import ABC, abstractmethod
 from typing import Optional
+
 from agent.models.tenant import Tenant, TenantUser
 
 
@@ -19,7 +20,7 @@ class TenantStore(ABC):
 
     @abstractmethod
     async def get_tenant(self, tenant_id: str) -> Tenant:
-        """Get a tenant by ID. Raises TenantNotFound if missing."""
+        """Get a tenant by ID. Raises TenantNotFoundError if missing."""
         ...
 
     @abstractmethod
@@ -53,7 +54,7 @@ class TenantStore(ABC):
             get_by_channel_id("slack", "workspace-id")
             get_by_channel_id("whatsapp", "+15551234567")
 
-        Raises TenantNotFound if no mapping exists.
+        Raises TenantNotFoundError if no mapping exists.
         """
         ...
 
@@ -75,7 +76,7 @@ class TenantStore(ABC):
         tenant_id: str,
         user_id: str,
     ) -> TenantUser:
-        """Get a user within a tenant. Raises UserNotFound if missing."""
+        """Get a user within a tenant. Raises UserNotFoundError if missing."""
         ...
 
     @abstractmethod
@@ -139,9 +140,9 @@ class TenantStore(ABC):
         ...
 
 
-class TenantNotFound(Exception):
+class TenantNotFoundError(Exception):
     pass
 
 
-class UserNotFound(Exception):
+class UserNotFoundError(Exception):
     pass

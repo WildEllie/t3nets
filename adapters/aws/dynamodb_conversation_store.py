@@ -11,9 +11,10 @@ Schema:
 
 import json
 import time
-from typing import Any, Optional, cast
-import boto3  # type: ignore[import-untyped]
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
+
+import boto3  # type: ignore[import-untyped]
 
 from agent.interfaces.conversation_store import ConversationStore
 
@@ -40,7 +41,7 @@ class DynamoDBConversationStore(ConversationStore):
             return []
 
         messages = cast(list[dict[str, Any]], json.loads(item.get("messages", "[]")))
-        return messages[-(max_turns * 2):]
+        return messages[-(max_turns * 2) :]
 
     async def save_turn(
         self,

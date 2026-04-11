@@ -6,8 +6,10 @@ Calls Claude via Bedrock. Uses IAM role auth (no API key needed).
 
 import json
 from typing import Any
+
 import boto3  # type: ignore[import-untyped]
-from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolDefinition, ToolCall
+
+from agent.interfaces.ai_provider import AIProvider, AIResponse, ToolCall, ToolDefinition
 
 
 class BedrockProvider(AIProvider):
@@ -112,22 +114,26 @@ class BedrockProvider(AIProvider):
                     if isinstance(block, dict):
                         # Anthropic API format → convert to Bedrock format
                         if block.get("type") == "tool_use":
-                            bedrock_content.append({
-                                "toolUse": {
-                                    "toolUseId": block["id"],
-                                    "name": block["name"],
-                                    "input": block["input"],
+                            bedrock_content.append(
+                                {
+                                    "toolUse": {
+                                        "toolUseId": block["id"],
+                                        "name": block["name"],
+                                        "input": block["input"],
+                                    }
                                 }
-                            })
+                            )
                         elif block.get("type") == "tool_result":
-                            bedrock_content.append({
-                                "toolResult": {
-                                    "toolUseId": block["tool_use_id"],
-                                    "content": [{"json": json.loads(block["content"])}]
-                                    if isinstance(block["content"], str)
-                                    else [{"json": block["content"]}],
+                            bedrock_content.append(
+                                {
+                                    "toolResult": {
+                                        "toolUseId": block["tool_use_id"],
+                                        "content": [{"json": json.loads(block["content"])}]
+                                        if isinstance(block["content"], str)
+                                        else [{"json": block["content"]}],
+                                    }
                                 }
-                            })
+                            )
                         # Already in Bedrock-native format — pass through
                         elif "toolUse" in block:
                             bedrock_content.append(block)
@@ -138,16 +144,20 @@ class BedrockProvider(AIProvider):
                     else:
                         bedrock_content.append({"text": str(block)})
 
-                converted.append({
-                    "role": msg["role"],
-                    "content": bedrock_content,
-                })
+                converted.append(
+                    {
+                        "role": msg["role"],
+                        "content": bedrock_content,
+                    }
+                )
             # Simple string content
             else:
-                converted.append({
-                    "role": msg["role"],
-                    "content": [{"text": str(content)}],
-                })
+                converted.append(
+                    {
+                        "role": msg["role"],
+                        "content": [{"text": str(content)}],
+                    }
+                )
 
         return converted
 
