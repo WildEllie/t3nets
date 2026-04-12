@@ -13,7 +13,7 @@
 ###############################################################################
 
 locals {
-  name_prefix       = "${var.project}-${var.environment}"
+  name_prefix        = "${var.project}-${var.environment}"
   api_gateway_domain = trimsuffix(replace(var.api_gateway_url, "https://", ""), "/")
 }
 
@@ -117,8 +117,8 @@ resource "aws_cloudfront_cache_policy" "static_short" {
 
 locals {
   # AWS managed CloudFront policy IDs (stable, do not change)
-  managed_caching_disabled            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-  managed_all_viewer_except_host      = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+  managed_caching_disabled       = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+  managed_all_viewer_except_host = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 }
 
 # --- CloudFront Function: rewrite extensionless paths to .html ---

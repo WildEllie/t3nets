@@ -14,7 +14,8 @@
 #   - adapters/aws/lambda_handler.py, pending_requests.py, secrets_manager.py
 #   - agent/skills/registry.py + agent/skills/ping/ only
 #   - agent/interfaces/, agent/models/ (framework imports)
-#   - PyYAML (pip installed)
+#   - t3nets-sdk (contracts, manifest validators, interfaces)
+#   - PyYAML, pydantic (pip installed via sdk)
 #   - __init__.py files for all packages
 ###############################################################################
 
@@ -67,8 +68,8 @@ cp "${PROJECT_ROOT}/agent/practices/registry.py" "${BUILD_DIR}/agent/practices/"
 # Copy built-in practices (dev-jira etc.)
 cp -r "${PROJECT_ROOT}/agent/practices/dev-jira" "${BUILD_DIR}/agent/practices/" 2>/dev/null || true
 
-# --- Install PyYAML (boto3 is in Lambda runtime) ---
-pip3 install pyyaml -t "${BUILD_DIR}" --quiet 2>/dev/null
+# --- Install PyYAML + t3nets-sdk (boto3 is in Lambda runtime) ---
+pip3 install pyyaml "${PROJECT_ROOT}/sdk" -t "${BUILD_DIR}" --quiet 2>/dev/null
 
 # --- Remove __pycache__ dirs ---
 find "${BUILD_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

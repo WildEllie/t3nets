@@ -121,8 +121,8 @@ if [ "$USE_ASYNC" = "true" ]; then
         cp agent/skills/registry.py "${LAMBDA_DIR}/agent/skills/"
         cp -r "${SKILL_DIR}/" "${LAMBDA_DIR}/agent/skills/${SKILL_NAME}/"
 
-        # Install PyYAML (boto3 is in Lambda runtime)
-        pip3 install pyyaml -t "${LAMBDA_DIR}" --quiet 2>/dev/null
+        # Install PyYAML + t3nets-sdk (boto3 is in Lambda runtime)
+        pip3 install pyyaml ./sdk -t "${LAMBDA_DIR}" --quiet 2>/dev/null
 
         # Create ZIP
         LAMBDA_ZIP="/tmp/${FUNC_NAME}.zip"

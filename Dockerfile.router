@@ -2,7 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install t3nets-sdk first (contracts, models, interfaces used by agent/)
+COPY sdk/ sdk/
+RUN pip install --no-cache-dir ./sdk
+
+# Install remaining platform dependencies
 COPY pyproject.toml .
 RUN pip install --no-cache-dir ".[aws,local]"
 

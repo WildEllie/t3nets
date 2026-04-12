@@ -127,10 +127,10 @@ resource "aws_security_group" "ws_lambda" {
   vpc_id      = var.vpc_id
 
   egress {
-    description = "Reach ALB on port 80"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
+    description     = "Reach ALB on port 80"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
     security_groups = [var.alb_security_group_id]
   }
 
@@ -174,9 +174,9 @@ resource "aws_lambda_function" "ws_proxy" {
 # --- Integration (Lambda AWS_PROXY) ---
 
 resource "aws_apigatewayv2_integration" "lambda" {
-  api_id             = aws_apigatewayv2_api.websocket.id
-  integration_type   = "AWS_PROXY"
-  integration_uri    = aws_lambda_function.ws_proxy.invoke_arn
+  api_id           = aws_apigatewayv2_api.websocket.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_function.ws_proxy.invoke_arn
 }
 
 # --- Lambda permission for API Gateway ---
