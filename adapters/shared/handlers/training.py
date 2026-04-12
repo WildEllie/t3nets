@@ -135,6 +135,6 @@ class TrainingHandlers:
             "tenant_id": tenant_id,
             "version": rule_set.version if rule_set else 0,
             "generated_at": rule_set.generated_at if rule_set else None,
-            "skill_count": len(rule_set.rules) if rule_set else 0,
+            "skill_count": len(rule_set.skill_rules) if rule_set else 0,
             "engine_loaded": engine is not None,
         }, 200
