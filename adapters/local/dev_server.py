@@ -1176,7 +1176,7 @@ app = Starlette(routes=routes, middleware=middleware)
 # ---------------------------------------------------------------------------
 
 
-async def init() -> None:
+async def init(extra_practice_dirs: list[Path] | None = None) -> None:
     """Initialize all components."""
     global \
         ai, \
@@ -1237,6 +1237,9 @@ async def init() -> None:
     practices_dir = Path(__file__).parent.parent.parent / "agent" / "practices"
     practices.load_builtin(practices_dir)
     practices.load_uploaded(Path("data"))
+    for extra_dir in extra_practice_dirs or []:
+        practices.load_builtin(extra_dir)
+        logger.info(f"Loaded extra practice dir: {extra_dir}")
     practices.register_skills(skills)
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
     logger.info(f"Loaded practices: {[p.name for p in practices.list_all()]}")
@@ -1401,10 +1404,29 @@ def _api_key_preview() -> str:
     return "not set" if not api_key else "***"
 
 
-def main() -> None:
-    asyncio.run(init())
+def main(argv: list[str] | None = None) -> None:
+    import argparse
 
-    port = int(os.getenv("PORT", "8080"))
+    parser = argparse.ArgumentParser(description="T3nets local dev server")
+    parser.add_argument(
+        "--extra-practice-dir",
+        action="append",
+        default=[],
+        dest="extra_practice_dirs",
+        help="Additional practice directory to load (can be repeated)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Port to listen on (default: PORT env var or 8080)",
+    )
+    args = parser.parse_args(argv)
+
+    extra_dirs = [Path(d).resolve() for d in args.extra_practice_dirs]
+    asyncio.run(init(extra_practice_dirs=extra_dirs))
+
+    port = args.port or int(os.getenv("PORT", "8080"))
     logger.info("")
     logger.info("  +======================================+")
     logger.info("  |  T3nets Dev Server                   |")

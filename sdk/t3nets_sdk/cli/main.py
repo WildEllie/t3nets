@@ -13,6 +13,7 @@ import sys
 
 from t3nets_sdk.cli import init as init_cmd
 from t3nets_sdk.cli import package as package_cmd
+from t3nets_sdk.cli import run_local as run_local_cmd
 from t3nets_sdk.cli import validate as validate_cmd
 
 
@@ -55,6 +56,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output zip path (default: <dir>/dist/practice.zip)",
     )
     pkg_p.set_defaults(func=package_cmd.run)
+
+    run_p = practice_sub.add_parser(
+        "run-local",
+        help="Boot the dev server with this practice loaded",
+    )
+    run_p.add_argument(
+        "--dir",
+        default=".",
+        help="Practice directory (default: current directory)",
+    )
+    run_p.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Port to listen on (default: PORT env var or 8080)",
+    )
+    run_p.set_defaults(func=run_local_cmd.run)
 
     return parser
 
