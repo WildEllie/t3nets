@@ -77,3 +77,25 @@ variable "ollama_memory_mb" {
   type        = number
   default     = 4096
 }
+
+# --- Custom domain (optional) ---
+# Set root_domain to serve the dashboard at <dashboard_subdomain>.<root_domain>
+# (e.g. www.t3nets.dev). Leave empty to keep the default CloudFront URL.
+
+variable "root_domain" {
+  description = "Custom root domain (e.g. t3nets.dev). Empty = use default CloudFront URL."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_subdomain" {
+  description = "Subdomain for the dashboard. Final URL is https://<dashboard_subdomain>.<root_domain>."
+  type        = string
+  default     = "www"
+}
+
+variable "manage_route53_zone" {
+  description = "If true, Terraform creates a Route 53 hosted zone for root_domain. Set to false if you manage DNS externally (the NS records must still resolve to AWS for cert validation to work automatically — otherwise add the validation CNAMEs by hand)."
+  type        = bool
+  default     = true
+}

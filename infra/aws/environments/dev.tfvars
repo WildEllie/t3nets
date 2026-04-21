@@ -24,3 +24,9 @@ cognito_logout_urls = [
   "https://i9yxlqqro8.execute-api.us-east-1.amazonaws.com/login",
   "https://d3ma51b4qocpkj.cloudfront.net/login"
 ]
+
+# Custom domain — dashboard served at https://www.t3nets.dev
+# (the callback/logout URLs for the custom domain are appended automatically).
+root_domain         = "t3nets.dev"
+dashboard_subdomain = "www"
+manage_route53_zone = true

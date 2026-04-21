@@ -134,6 +134,17 @@ resource "aws_cloudfront_function" "rewrite_html" {
   code = <<-EOF
     async function handler(event) {
       var uri = event.request.uri;
+      // Root path → 302 redirect to /chat (the dashboard entry point).
+      if (uri === '/') {
+        return {
+          statusCode: 302,
+          statusDescription: 'Found',
+          headers: {
+            'location': { value: '/chat' },
+            'cache-control': { value: 'no-cache, no-store' }
+          }
+        };
+      }
       // If the path has no extension (no dot after the last slash), append .html
       var lastSegment = uri.split('/').pop();
       if (lastSegment && !lastSegment.includes('.')) {
@@ -152,6 +163,7 @@ resource "aws_cloudfront_distribution" "main" {
   enabled         = true
   is_ipv6_enabled = true
   comment         = "${local.name_prefix} — static HTML + API proxy"
+  aliases         = var.aliases
 
   # Origin 1: S3 (default — static HTML files)
   origin {
@@ -220,7 +232,10 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    cloudfront_default_certificate = var.acm_certificate_arn == "" ? true : null
+    acm_certificate_arn            = var.acm_certificate_arn == "" ? null : var.acm_certificate_arn
+    ssl_support_method             = var.acm_certificate_arn == "" ? null : "sni-only"
+    minimum_protocol_version       = var.acm_certificate_arn == "" ? null : "TLSv1.2_2021"
   }
 
   tags = { Name = "${local.name_prefix}-cdn" }

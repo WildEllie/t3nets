@@ -83,3 +83,20 @@ output "s3_bucket_name" {
   description = "S3 bucket name for static HTML files"
   value       = module.cdn.s3_bucket_name
 }
+
+# --- Custom domain ---
+
+output "custom_domain_url" {
+  description = "Custom-domain dashboard URL (empty when root_domain is not set)"
+  value       = local.custom_dashboard_url
+}
+
+output "route53_nameservers" {
+  description = "Nameservers to set at your registrar the first time you enable a custom domain (empty when manage_route53_zone = false or root_domain is not set)"
+  value       = var.root_domain != "" && var.manage_route53_zone ? module.dns[0].zone_nameservers : []
+}
+
+output "acm_validation_records" {
+  description = "CNAMEs to add at your external DNS provider for ACM certificate validation (populated only when root_domain is set and manage_route53_zone = false)"
+  value       = var.root_domain != "" && !var.manage_route53_zone ? module.dns[0].cert_validation_records : []
+}

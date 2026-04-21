@@ -55,6 +55,30 @@ provider "aws" {
   }
 }
 
+# CloudFront ACM certificates must live in us-east-1 regardless of aws_region.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = "t3nets"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
+locals {
+  # Custom-domain dashboard URL (empty when root_domain is not set).
+  custom_dashboard_url = var.root_domain != "" ? "https://${var.dashboard_subdomain}.${var.root_domain}" : ""
+
+  # Append the custom-domain callback/logout URLs so Cognito accepts them
+  # in addition to whatever is in the tfvars (localhost, the raw CloudFront URL).
+  cognito_callback_urls = local.custom_dashboard_url != "" ? concat(var.cognito_callback_urls, ["${local.custom_dashboard_url}/callback"]) : var.cognito_callback_urls
+  cognito_logout_urls   = local.custom_dashboard_url != "" ? concat(var.cognito_logout_urls, ["${local.custom_dashboard_url}/login"]) : var.cognito_logout_urls
+}
+
 # --- Networking ---
 module "networking" {
   source = "./modules/networking"
@@ -88,6 +112,20 @@ module "ecr" {
   environment = var.environment
 }
 
+# --- DNS (Route 53 zone + ACM certificate in us-east-1) ---
+module "dns" {
+  count  = var.root_domain != "" ? 1 : 0
+  source = "./modules/dns"
+
+  providers = {
+    aws.cloudfront = aws.us_east_1
+  }
+
+  root_domain         = var.root_domain
+  dashboard_subdomain = var.dashboard_subdomain
+  manage_zone         = var.manage_route53_zone
+}
+
 # --- Authentication (Cognito) ---
 module "cognito" {
   source = "./modules/cognito"
@@ -95,8 +133,8 @@ module "cognito" {
   project     = var.project
   environment = var.environment
 
-  callback_urls = var.cognito_callback_urls
-  logout_urls   = var.cognito_logout_urls
+  callback_urls = local.cognito_callback_urls
+  logout_urls   = local.cognito_logout_urls
 }
 
 # --- Compute (ECS Fargate) ---
@@ -207,4 +245,38 @@ module "cdn" {
   environment = var.environment
 
   api_gateway_url = module.api.api_endpoint
+
+  # Custom-domain wiring (no-op when root_domain is empty).
+  # Both the subdomain (www.t3nets.dev) and the apex (t3nets.dev) are served.
+  aliases             = var.root_domain != "" ? [module.dns[0].dashboard_fqdn, module.dns[0].apex_fqdn] : []
+  acm_certificate_arn = var.root_domain != "" ? module.dns[0].certificate_arn : ""
+}
+
+# Route 53 A-alias records for the custom domain.
+# Lives in the root module because they need outputs from both dns and cdn.
+
+resource "aws_route53_record" "dashboard_alias" {
+  count   = var.root_domain != "" && var.manage_route53_zone ? 1 : 0
+  zone_id = module.dns[0].zone_id
+  name    = module.dns[0].dashboard_fqdn
+  type    = "A"
+
+  alias {
+    name                   = module.cdn.cloudfront_domain
+    zone_id                = module.cdn.cloudfront_hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "apex_alias" {
+  count   = var.root_domain != "" && var.manage_route53_zone ? 1 : 0
+  zone_id = module.dns[0].zone_id
+  name    = module.dns[0].apex_fqdn
+  type    = "A"
+
+  alias {
+    name                   = module.cdn.cloudfront_domain
+    zone_id                = module.cdn.cloudfront_hosted_zone_id
+    evaluate_target_health = false
+  }
 }
