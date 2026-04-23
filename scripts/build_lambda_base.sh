@@ -68,8 +68,32 @@ cp "${PROJECT_ROOT}/agent/practices/registry.py" "${BUILD_DIR}/agent/practices/"
 # Copy built-in practices (dev-jira etc.)
 cp -r "${PROJECT_ROOT}/agent/practices/dev-jira" "${BUILD_DIR}/agent/practices/" 2>/dev/null || true
 
-# --- Install PyYAML + t3nets-sdk (boto3 is in Lambda runtime) ---
-pip3 install pyyaml "${PROJECT_ROOT}/sdk" -t "${BUILD_DIR}" --quiet 2>/dev/null
+# --- Install dependencies (boto3 is in Lambda runtime) ---
+#
+# Two-phase install to get Linux-native wheels into a macOS build:
+#   1. Third-party deps with C extensions (pydantic-core, PyYAML) —
+#      forced to manylinux x86_64 cp312 so they match the Lambda runtime.
+#      Without --platform/--python-version, pip would grab host-native
+#      wheels (e.g. macOS arm64 pydantic_core) which fail at import in
+#      Lambda with ImportModuleError. --only-binary guards against pip
+#      falling through to a source build, which would be host-native.
+#   2. Local t3nets-sdk — pure Python, installed from source. Must go in
+#      a separate step since --only-binary=:all: would reject it.
+pip3 install \
+  --platform manylinux2014_x86_64 \
+  --python-version 3.12 \
+  --only-binary=:all: \
+  --implementation cp \
+  pyyaml pydantic \
+  -t "${BUILD_DIR}" \
+  --upgrade \
+  --quiet
+
+pip3 install "${PROJECT_ROOT}/sdk" \
+  -t "${BUILD_DIR}" \
+  --no-deps \
+  --upgrade \
+  --quiet
 
 # --- Remove __pycache__ dirs ---
 find "${BUILD_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

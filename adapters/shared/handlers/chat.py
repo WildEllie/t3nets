@@ -19,6 +19,7 @@ from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from t3nets_sdk.contracts import pop_render_meta, strip_render_meta
 
 from adapters.shared.multi_provider import MultiAIProvider
 from adapters.shared.server_utils import _format_raw_json, _strip_metadata
@@ -51,7 +52,14 @@ FireAndForget = Callable[[Any], None]
 
 # skill_invoker: the server passes either a sync or async skill dispatch fn.
 # Signature: (tenant_id, skill_name, params, conversation_id, request_id,
-#              reply_channel, reply_target) -> skill_result dict | None
+#              reply_channel, reply_target, is_raw, user_message, model_id,
+#              model_short_name) -> skill_result dict | Response | None.
+#
+# user_message / model_id / model_short_name are carried through so the AWS
+# async dispatcher can persist them on the pending-request row — they're
+# what the result router later reads to save the conversation turn and tag
+# the rendered message with the AI model used. Sync dispatchers can ignore
+# them.
 SkillInvoker = Callable[..., Awaitable[dict[str, Any] | None]]
 
 # Optional enricher called on Tier-1/2 matches (AWS only).
@@ -324,6 +332,10 @@ class ChatHandlers:
                 f"rule-{conversation_id}",
                 "dashboard",
                 user_email or "user",
+                is_raw,
+                clean_text,
+                active_model,
+                model_short_name,
             )
 
             # skill_invoker may return a Response (async dispatch)
@@ -365,17 +377,22 @@ class ChatHandlers:
                 self._stats["raw"] += 1
                 self._stats["rule_routed"] += 1
                 return (
-                    _format_raw_json(skill_result),
+                    _format_raw_json(strip_render_meta(skill_result)),
                     0,
                     "rule",
                     True,
                 )
 
             self._stats["rule_routed"] += 1
+            worker_text, render_prompt = pop_render_meta(skill_result)
+            # Skill rendered its own text — send verbatim, no Bedrock round-trip.
+            if worker_text:
+                return (worker_text, 0, "rule", False)
+            instruction = render_prompt or "Format this clearly."
             prompt = (
                 f'{system}\n\nThe user asked: "{clean_text}"\n\n'
                 f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
-                "Format this clearly."
+                f"{instruction}"
             )
             messages = history + [{"role": "user", "content": prompt}]
             response = await provider_ai.chat(active_model, system, messages, [])
@@ -413,6 +430,10 @@ class ChatHandlers:
                 f"ai-{conversation_id}",
                 "dashboard",
                 user_email or "user",
+                is_raw,
+                clean_text,
+                active_model,
+                model_short_name,
             )
 
             # skill_invoker may return a Response (async dispatch)
@@ -469,10 +490,22 @@ class ChatHandlers:
             if is_raw and engine and engine.supports_raw(tc.tool_name):
                 self._stats["raw"] += 1
                 return (
-                    _format_raw_json(skill_result),
+                    _format_raw_json(strip_render_meta(skill_result)),
                     response.input_tokens + response.output_tokens,
                     "ai",
                     True,
+                )
+
+            # Skill rendered its own text — short-circuit the second
+            # Claude round-trip. Tier-3 only means Claude *picked* the
+            # tool; if the skill says "here's the reply", trust it.
+            worker_text, _render_prompt = pop_render_meta(skill_result)
+            if worker_text:
+                return (
+                    worker_text,
+                    response.input_tokens + response.output_tokens,
+                    "ai",
+                    False,
                 )
 
             messages_with_tool = messages + [

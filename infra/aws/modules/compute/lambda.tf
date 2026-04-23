@@ -129,6 +129,9 @@ locals {
     "${local.project_root}/agent/models/practice.py",
     "${local.project_root}/agent/models/tenant.py",
     "${local.project_root}/agent/interfaces/blob_store.py",
+    "${local.project_root}/sdk/t3nets_sdk/contracts.py",
+    "${local.project_root}/sdk/t3nets_sdk/interfaces/event_bus.py",
+    "${local.project_root}/scripts/build_lambda_base.sh",
   ]
 
   # Hash of all source files — triggers rebuild when any change

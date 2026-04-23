@@ -80,13 +80,28 @@ if [ "$USE_ASYNC" = "true" ]; then
     echo "  Queue:   ${SQS_QUEUE_URL}"
     echo ""
 
-    # Domain skills to deploy (ping is managed by Terraform)
+    # Domain skills to deploy (ping is managed by Terraform).
+    # Each entry is a skill name; we auto-locate it under agent/skills/
+    # (legacy layout) or agent/practices/*/skills/ (practice-owned skills).
     DOMAIN_SKILLS=("sprint_status" "release_notes")
 
     for SKILL_NAME in "${DOMAIN_SKILLS[@]}"; do
-        SKILL_DIR="agent/skills/${SKILL_NAME}"
-        if [ ! -d "${SKILL_DIR}" ]; then
-            echo "  ⚠ Skipping ${SKILL_NAME} — directory not found"
+        # Find the skill: first under agent/skills/, then under any practice
+        SKILL_DIR=""
+        PRACTICE_DIR=""
+        if [ -f "agent/skills/${SKILL_NAME}/skill.yaml" ]; then
+            SKILL_DIR="agent/skills/${SKILL_NAME}"
+        else
+            for p in agent/practices/*/skills/"${SKILL_NAME}"/skill.yaml; do
+                [ -f "$p" ] || continue
+                SKILL_DIR="$(dirname "$p")"
+                PRACTICE_DIR="$(dirname "$(dirname "$SKILL_DIR")")"
+                break
+            done
+        fi
+
+        if [ -z "${SKILL_DIR}" ]; then
+            echo "  ⚠ Skipping ${SKILL_NAME} — skill.yaml not found"
             continue
         fi
 
@@ -94,18 +109,24 @@ if [ "$USE_ASYNC" = "true" ]; then
         LOG_GROUP="/aws/lambda/${FUNC_NAME}"
         RULE_NAME="${NAME_PREFIX}-skill-invoke-${SKILL_NAME}"
 
-        echo "→ Deploying skill: ${SKILL_NAME}"
+        if [ -n "${PRACTICE_DIR}" ]; then
+            echo "→ Deploying skill: ${SKILL_NAME} (practice: $(basename "${PRACTICE_DIR}"))"
+        else
+            echo "→ Deploying skill: ${SKILL_NAME}"
+        fi
 
         # --- Step 1: Package Lambda ZIP ---
         LAMBDA_DIR=$(mktemp -d)
 
-        # Copy AWS adapter files
+        # Copy AWS adapter files (lambda_handler pulls in these imports)
         mkdir -p "${LAMBDA_DIR}/adapters/aws"
         touch "${LAMBDA_DIR}/adapters/__init__.py"
         touch "${LAMBDA_DIR}/adapters/aws/__init__.py"
         cp adapters/aws/lambda_handler.py "${LAMBDA_DIR}/adapters/aws/"
         cp adapters/aws/pending_requests.py "${LAMBDA_DIR}/adapters/aws/"
         cp adapters/aws/secrets_manager.py "${LAMBDA_DIR}/adapters/aws/"
+        cp adapters/aws/s3_blob_store.py "${LAMBDA_DIR}/adapters/aws/"
+        cp adapters/aws/dynamodb_tenant_store.py "${LAMBDA_DIR}/adapters/aws/"
 
         # Copy agent framework
         mkdir -p "${LAMBDA_DIR}/agent"
@@ -115,14 +136,39 @@ if [ "$USE_ASYNC" = "true" ]; then
         cp -r agent/models "${LAMBDA_DIR}/agent/"
         touch "${LAMBDA_DIR}/agent/models/__init__.py"
 
-        # Copy skill registry + this skill only
-        mkdir -p "${LAMBDA_DIR}/agent/skills/${SKILL_NAME}"
+        # Skill registry is always needed; include ping as a filler so the
+        # built-in skills dir is non-empty on the practice-skill path.
+        mkdir -p "${LAMBDA_DIR}/agent/skills"
         touch "${LAMBDA_DIR}/agent/skills/__init__.py"
         cp agent/skills/registry.py "${LAMBDA_DIR}/agent/skills/"
-        cp -r "${SKILL_DIR}/" "${LAMBDA_DIR}/agent/skills/${SKILL_NAME}/"
 
-        # Install PyYAML + t3nets-sdk (boto3 is in Lambda runtime)
-        pip3 install pyyaml ./sdk -t "${LAMBDA_DIR}" --quiet 2>/dev/null
+        if [ -n "${PRACTICE_DIR}" ]; then
+            # Practice skill: copy the practice registry + the full
+            # practice directory. register_skills() will pick up the
+            # target skill via worker_path.
+            mkdir -p "${LAMBDA_DIR}/agent/practices"
+            touch "${LAMBDA_DIR}/agent/practices/__init__.py"
+            cp agent/practices/registry.py "${LAMBDA_DIR}/agent/practices/"
+            cp -r "${PRACTICE_DIR}" "${LAMBDA_DIR}/agent/practices/"
+        else
+            # Legacy layout: copy just this skill under agent/skills/
+            mkdir -p "${LAMBDA_DIR}/agent/skills/${SKILL_NAME}"
+            cp -r "${SKILL_DIR}/" "${LAMBDA_DIR}/agent/skills/${SKILL_NAME}/"
+        fi
+
+        # Install deps with manylinux wheels so pydantic_core etc. match
+        # the Lambda runtime (boto3 is already in the runtime). Two-phase
+        # install: native wheels first, then pure-Python sdk with --no-deps.
+        pip3 install \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            --implementation cp \
+            pyyaml pydantic \
+            -t "${LAMBDA_DIR}" \
+            --upgrade \
+            --quiet
+        pip3 install ./sdk -t "${LAMBDA_DIR}" --no-deps --upgrade --quiet
 
         # Create ZIP
         LAMBDA_ZIP="/tmp/${FUNC_NAME}.zip"

@@ -52,7 +52,47 @@
       "Bash(git -C /Users/ellieportugali/projects/t3nets worktree remove --force /Users/ellieportugali/projects/t3nets/.claude/worktrees/agent-ab9f606a)",
       "Bash(ls:*)",
       "Bash(python -c \"import t3nets_sdk\")",
-      "Bash(wc -l adapters/shared/handlers/*.py)"
+      "Bash(wc -l adapters/shared/handlers/*.py)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install -e ./sdk)",
+      "Bash(venv/bin/python -m pip install -e ./sdk)",
+      "Bash(venv/bin/python:*)",
+      "Bash(terraform -chdir=infra/aws fmt -check -recursive)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(terraform:*)",
+      "Bash(curl -s http://localhost:8080/health)",
+      "Bash(curl -sI https://www.t3nets.dev/ -o /dev/null -w \"HTTP %{http_code}\\\\nSSL verify: %{ssl_verify_result}\\\\nCert subject: %{certs}\\\\n\")",
+      "Bash(curl -sI https://www.t3nets.dev/api/health)",
+      "Bash(aws lambda *)",
+      "Bash(dig +short A t3nets.dev @8.8.8.8)",
+      "Bash(dig +short CNAME t3nets.dev @8.8.8.8)",
+      "Bash(dig +short A www.t3nets.dev @8.8.8.8)",
+      "Bash(curl -sI https://t3nets.dev/ -o /tmp/apex_headers)",
+      "Bash(curl -sk https://t3nets.dev/)",
+      "Bash(curl -sk https://www.t3nets.dev/)",
+      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://www.t3nets.dev/chat)",
+      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://d3ma51b4qocpkj.cloudfront.net/)",
+      "Bash(curl -skI https://www.t3nets.dev/)",
+      "Bash(curl -skI https://t3nets.dev/)",
+      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://t3nets.dev/chat)",
+      "Bash(openssl s_client -servername t3nets.dev -connect t3nets.dev:443)",
+      "Bash(openssl x509 *)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets add infra/aws/README.md infra/aws/environments/dev.tfvars infra/aws/main.tf infra/aws/variables.tf infra/aws/outputs.tf infra/aws/modules/cdn/main.tf infra/aws/modules/cdn/outputs.tf infra/aws/modules/cdn/variables.tf infra/aws/modules/dns/)",
+      "Bash(git -C /Users/ellieportugali/projects/t3nets status --short)",
+      "Bash(git *)",
+      "Bash(bash *)",
+      "Bash(docker info *)",
+      "Bash(aws ecs describe-task-definition *)",
+      "Bash(pytest --version)",
+      "Bash(/Users/ellieportugali/projects/t3nets/.venv/bin/pytest tests/test_release_notes.py)",
+      "Bash(./venv/bin/pytest tests/test_release_notes.py)",
+      "Bash(./venv/bin/pytest)",
+      "Bash(./venv/bin/ruff check *)",
+      "Bash(./venv/bin/ruff format *)",
+      "Bash(USE_ASYNC_SKILLS=true bash scripts/deploy.sh)",
+      "Bash(./venv/bin/pytest tests/test_chat_tags_regression.py -x -v)",
+      "Bash(./venv/bin/pytest tests/test_chat_tags_regression.py -v)",
+      "Bash(./venv/bin/pytest tests/test_chat_tags_regression.py tests/test_async_skills.py -v)"
     ]
   },
   "mcpServers": {
@@ -89,6 +129,13 @@
       "args": [
         "-y",
         "@paretools/test"
+      ]
+    },
+    "pare-python": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@paretools/python"
       ]
     }
   }

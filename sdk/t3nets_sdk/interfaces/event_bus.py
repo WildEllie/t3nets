@@ -43,9 +43,16 @@ class EventBus(ABC):
         request_id: str,
         reply_channel: str,
         reply_target: str,
+        *,
+        is_raw: bool = False,
     ) -> None:
         """
         Convenience method for the most common event type.
+
+        `is_raw` is forwarded so worker hosts (DirectBus, Lambda handler)
+        can populate `SkillContext.raw`. Skills that render their own
+        output use this to skip the rendering step when the user asked
+        for the raw payload.
         """
         await self.publish(
             source="agent.router",
@@ -58,5 +65,6 @@ class EventBus(ABC):
                 "request_id": request_id,
                 "reply_channel": reply_channel,
                 "reply_target": reply_target,
+                "is_raw": is_raw,
             },
         )

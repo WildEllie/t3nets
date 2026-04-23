@@ -169,6 +169,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     skill_name = detail.get("skill_name", "")
     tenant_id = detail.get("tenant_id", "")
     params = detail.get("params", {})
+    is_raw = bool(detail.get("is_raw", False))
 
     logger.info(
         f"Lambda: invoked for skill={skill_name}, request={request_id[:8]}, tenant={tenant_id}"
@@ -221,6 +222,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             secrets=skill_secrets,
             logger=logging.getLogger(f"t3nets.skill.{skill_name}"),
             blob_store=_init_blobs(),
+            raw=is_raw,
         )
         skill_result = asyncio.get_event_loop().run_until_complete(worker_fn(skill_ctx, params))
         result = skill_result.to_dict()

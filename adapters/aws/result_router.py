@@ -21,6 +21,8 @@ import json
 import logging
 from typing import Any, Coroutine, Optional, Protocol
 
+from t3nets_sdk.contracts import pop_render_meta, strip_render_meta
+
 from adapters.aws.pending_requests import PendingRequest, PendingRequestsStore
 from agent.interfaces.ai_provider import AIProvider
 from agent.interfaces.conversation_store import ConversationStore
@@ -150,14 +152,14 @@ class AsyncResultRouter:
                     "model": "",
                 },
             )
-        # For raw mode, send the result directly
+        # For raw mode, send the result directly (minus skill-render metadata)
         elif is_raw:
             delivered = self.sse.send_event(
                 user_key,
                 "message",
                 {
                     "request_id": request_id,
-                    "text": json.dumps(result, indent=2),
+                    "text": json.dumps(strip_render_meta(result), indent=2),
                     "raw": True,
                     "skill": skill_name,
                     "route": route_type,
@@ -189,7 +191,11 @@ class AsyncResultRouter:
         # Save conversation turn with full metadata (survives page reload)
         if pending_req and self.memory:
             try:
-                text = formatted_text if not is_raw else json.dumps(result, indent=2)
+                text = (
+                    formatted_text
+                    if not is_raw
+                    else json.dumps(strip_render_meta(result), indent=2)
+                )
                 save_tokens = fmt_tokens if not is_raw else 0
                 save_model = fmt_model if not is_raw else ""
                 import time as _time
@@ -280,7 +286,7 @@ class AsyncResultRouter:
                     teams_audio["audio_b64"] = result["audio_b64"]
                 attachments = [teams_audio]
             elif is_raw:
-                formatted_text = json.dumps(result, indent=2)
+                formatted_text = json.dumps(strip_render_meta(result), indent=2)
                 fmt_tokens, fmt_model = 0, ""
                 attachments = []
             else:
@@ -379,7 +385,7 @@ class AsyncResultRouter:
                     audio_att["audio_b64"] = result["audio_b64"]
                 attachments = [audio_att]
             elif is_raw:
-                formatted_text = json.dumps(result, indent=2)
+                formatted_text = json.dumps(strip_render_meta(result), indent=2)
                 fmt_tokens, fmt_model = 0, ""
                 attachments = []
             else:
@@ -482,7 +488,7 @@ class AsyncResultRouter:
                 # Whapi.cloud voice needs a URL — skip base64
                 attachments = [audio_att] if audio_att.get("audio_url") else []
             elif is_raw:
-                formatted_text = json.dumps(result, indent=2)
+                formatted_text = json.dumps(strip_render_meta(result), indent=2)
                 fmt_tokens, fmt_model = 0, ""
                 attachments = []
             else:
@@ -542,19 +548,30 @@ class AsyncResultRouter:
         skill_name: str,
         pending_req: Optional[PendingRequest],
     ) -> tuple[str, int, str]:
-        """
-        Format a skill result into human-readable text.
+        """Format a skill result into human-readable text.
 
-        Returns (formatted_text, total_tokens, model_short_name).
-        If AI provider is available, uses Claude to format the result.
-        Otherwise, returns a simple JSON dump with 0 tokens.
+        Precedence (set by the skill worker via `SkillResult`):
+            1. Worker-rendered `text`  → sent verbatim, zero tokens.
+            2. Worker-supplied `render_prompt` → AI formatter uses it.
+            3. Neither → legacy generic "format this clearly" prompt.
+
+        Mutates `result` to strip the render-metadata keys so downstream
+        JSON dumps and conversation storage see clean data.
         """
         if "error" in result:
+            # Make sure the failure path doesn't leak meta keys either.
+            strip_render_meta(result)  # no-op copy, but defends future changes
             return (
                 f"Sorry, the {skill_name} skill encountered an error: {result['error']}",
                 0,
                 "",
             )
+
+        worker_text, render_prompt = pop_render_meta(result)
+
+        # Skill rendered its own output — send verbatim.
+        if worker_text:
+            return (worker_text, 0, "")
 
         # Use tenant's model from the pending request, fall back to server default
         active_model = (pending_req.model_id if pending_req else "") or self._bedrock_model_id
@@ -563,14 +580,18 @@ class AsyncResultRouter:
         if self.ai and active_model:
             try:
                 user_msg = pending_req.user_message if pending_req else ""
+                instruction = render_prompt or "Format this clearly and concisely for the user."
                 prompt = (
                     f'The user asked: "{user_msg}"\n\n'
                     f"Tool data from {skill_name}:\n"
                     f"{json.dumps(result, indent=2)}\n\n"
-                    "Format this clearly and concisely for the user."
+                    f"{instruction}"
+                )
+                provider = (
+                    self.ai.for_provider("bedrock") if hasattr(self.ai, "for_provider") else self.ai
                 )
                 response = _run_async(
-                    self.ai.chat(
+                    provider.chat(
                         active_model,
                         "You are a helpful assistant. Format the data clearly.",
                         [{"role": "user", "content": prompt}],

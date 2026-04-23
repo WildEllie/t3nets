@@ -1039,7 +1039,14 @@ async def _handle_async_skill(
     )
     pending_store.create(pending_req)  # type: ignore[union-attr]
     await event_bus.publish_skill_invocation(  # type: ignore[union-attr]
-        tenant_id, skill_name, params, conversation_id, request_id, "dashboard", user_key
+        tenant_id,
+        skill_name,
+        params,
+        conversation_id,
+        request_id,
+        "dashboard",
+        user_key,
+        is_raw=is_raw,
     )
     stats[f"{route_type}_routed"] += 1
     logger.info(
@@ -1827,11 +1834,14 @@ async def init() -> None:
         request_id: str,
         reply_channel: str,
         reply_target: str,
+        is_raw: bool = False,
+        user_message: str = "",
+        model_id: str = "",
+        model_short_name: str = "",
     ) -> dict[str, Any] | Response | None:
         # Async dispatch for dashboard chat
         if USE_ASYNC_SKILLS and event_bus and pending_store:
             user_email = reply_target  # reply_target is the user_email for dashboard
-            is_raw = False  # raw flag already stripped by ChatHandlers
             route_type = "rule" if request_id.startswith("rule-") else "ai"
             return await _handle_async_skill(
                 tenant_id,
@@ -1839,15 +1849,22 @@ async def init() -> None:
                 skill_name,
                 params,
                 conversation_id,
-                "",  # user_message — not needed for async dispatch
+                user_message,
                 is_raw,
                 route_type,
-                "",
-                "",
+                model_id,
+                model_short_name,
             )
         # Sync dispatch via DirectBus
         await bus.publish_skill_invocation(
-            tenant_id, skill_name, params, conversation_id, request_id, reply_channel, reply_target
+            tenant_id,
+            skill_name,
+            params,
+            conversation_id,
+            request_id,
+            reply_channel,
+            reply_target,
+            is_raw=is_raw,
         )
         return bus.get_result(request_id)
 

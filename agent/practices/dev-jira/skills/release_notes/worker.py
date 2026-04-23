@@ -1,13 +1,11 @@
-"""
-Release Notes Worker
+"""Release Notes worker — new SDK contract.
 
-Follows the T3nets skill contract:
-    def execute(params: dict, secrets: dict) -> dict
-
-Pulls Jira releases and issue breakdowns for release note generation.
-No cloud imports. No Lambda knowledge. Pure business logic.
-Secrets are injected by the infrastructure layer.
+Returns structured data plus a `render_prompt` so the router's AI
+formatter produces rich markdown (headings, tables, contributor call-outs).
+In `--raw` mode the router skips the formatter entirely.
 """
+
+from __future__ import annotations
 
 import base64
 import json
@@ -15,47 +13,69 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from t3nets_sdk.contracts import SkillContext, SkillResult
 
-def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
-    """
-    Skill contract entry point.
+_RENDER_PROMPTS: dict[str, str] = {
+    "list_releases": (
+        "Format this list of project releases for the user. Lead with the project "
+        "key and a one-line summary (total versions, released vs unreleased). "
+        "Then render two markdown sections — **Unreleased** first (sorted by name, "
+        "include planned release date if present), **Released** second (sorted by "
+        "release date descending). Use bullets `name · date`. Cap each section at "
+        "20 entries and note the remainder."
+    ),
+    "summarize": (
+        "Produce a release-notes-style summary for this release. Lead with a "
+        "heading `### <release name>` plus release/unreleased status, date, and "
+        "total ticket/point counts. Then render: a progress line by status; a "
+        "breakdown by issue type; top contributors (up to 5); and a per-type "
+        "section listing tickets as `KEY — summary · status · (assignee)`. If the "
+        "`not_started` flag is set, skip the breakdown and just show the message. "
+        "Use markdown headings (### / ####), bold labels, and bullet lists."
+    ),
+}
 
-    Args:
-        params: {"action": "list_releases|summarize", "release_name": "..."}
-        secrets: {"url": "...", "email": "...", "api_token": "...", "board_id": "..."}
 
-    Returns:
-        dict with release data or {"error": "..."}
-    """
+async def execute(ctx: SkillContext, params: dict[str, Any]) -> SkillResult:
+    """Dispatch on `action` and return a SkillResult with a render_prompt."""
     required = ["url", "email", "api_token"]
-    missing = [k for k in required if not secrets.get(k)]
+    missing = [k for k in required if not ctx.secrets.get(k)]
     if missing:
-        return {"error": f"Missing Jira credentials: {', '.join(missing)}"}
+        return SkillResult.fail(f"Missing Jira credentials: {', '.join(missing)}")
 
     action = params.get("action", "list_releases")
 
     try:
         if action == "list_releases":
-            return _list_releases(secrets)
+            data = _list_releases(ctx.secrets)
         elif action == "summarize":
             release_name = params.get("release_name", "")
             if not release_name:
-                return {"error": "release_name is required for 'summarize' action"}
-            return _summarize_release(secrets, release_name)
+                return SkillResult.fail("release_name is required for 'summarize' action")
+            data = _summarize_release(ctx.secrets, release_name)
         else:
-            return {"error": f"Unknown action: {action}"}
+            return SkillResult.fail(f"Unknown action: {action}")
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""
-        return {"error": f"Jira API error ({e.code}): {body[:500]}"}
+        ctx.logger.exception("release_notes HTTP error")
+        return SkillResult.fail(f"Jira API error ({e.code}): {body[:500]}")
     except Exception as e:
-        return {"error": f"Jira API error: {str(e)}"}
+        ctx.logger.exception("release_notes failed")
+        return SkillResult.fail(f"Jira API error: {e}")
+
+    if "error" in data:
+        return SkillResult.fail(
+            str(data["error"]), **{k: v for k, v in data.items() if k != "error"}
+        )
+
+    render_prompt = None if ctx.raw else _RENDER_PROMPTS.get(action)
+    return SkillResult.ok(data, render_prompt=render_prompt)
 
 
-# --- Jira API helpers ---
+# --- Jira API helpers --------------------------------------------------------
 
 
 def _make_headers(secrets: dict[str, Any]) -> dict[str, str]:
-    """Create Basic Auth headers for Jira Cloud."""
     creds = base64.b64encode(f"{secrets['email']}:{secrets['api_token']}".encode()).decode()
     return {
         "Authorization": f"Basic {creds}",
@@ -65,11 +85,6 @@ def _make_headers(secrets: dict[str, Any]) -> dict[str, str]:
 
 
 def _jira_rest_request(secrets: dict[str, Any], endpoint: str) -> Any:
-    """Make authenticated request to Jira Cloud REST API v3.
-
-    Returns Any because some endpoints return a dict (search, filter)
-    while others return a list (project versions).
-    """
     url = f"{secrets['url'].rstrip('/')}/rest/api/3/{endpoint}"
     req = urllib.request.Request(url, headers=_make_headers(secrets))
     with urllib.request.urlopen(req) as response:
@@ -79,11 +94,6 @@ def _jira_rest_request(secrets: dict[str, Any], endpoint: str) -> Any:
 def _jira_search(
     secrets: dict[str, Any], jql: str, fields: list[str], max_per_page: int = 100
 ) -> list[dict[str, Any]]:
-    """Execute a JQL search with automatic pagination.
-
-    Uses the /rest/api/3/search/jql endpoint with nextPageToken pagination.
-    The old /rest/api/3/search endpoint was removed by Atlassian on 2025-08-01.
-    """
     all_issues: list[dict[str, Any]] = []
     next_page_token: str | None = None
 
@@ -101,7 +111,6 @@ def _jira_search(
         issues = data.get("issues", [])
         all_issues.extend(issues)
 
-        # Token-based pagination: stop when no nextPageToken or isLast is True
         next_page_token = data.get("nextPageToken")
         if not next_page_token or data.get("isLast", False) or not issues:
             break
@@ -109,22 +118,18 @@ def _jira_search(
     return all_issues
 
 
-# --- Actions ---
+# --- Actions -----------------------------------------------------------------
 
 
 def _list_releases(secrets: dict[str, Any]) -> dict[str, Any]:
-    """List all fix versions (releases) for the project."""
-    # Derive project key from board if available, or list all projects
-    project_key = secrets.get("project_key", "")
-
-    if not project_key:
-        # Try to get from board
-        project_key = _get_project_key_from_board(secrets)
+    project_key = secrets.get("project_key", "") or _get_project_key_from_board(secrets)
 
     if not project_key:
         return {
-            "error": "Could not determine project key. "
-            "Add 'project_key' to your Jira integration settings."
+            "error": (
+                "Could not determine project key. "
+                "Add 'project_key' to your Jira integration settings."
+            )
         }
 
     data = _jira_rest_request(secrets, f"project/{project_key}/versions")
@@ -147,7 +152,6 @@ def _list_releases(secrets: dict[str, Any]) -> dict[str, Any]:
         else:
             unreleased.append(entry)
 
-    # Sort released by date descending, unreleased by name
     released.sort(key=lambda v: v.get("release_date", ""), reverse=True)
     unreleased.sort(key=lambda v: v.get("name", ""))
 
@@ -160,12 +164,8 @@ def _list_releases(secrets: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, Any]:
-    """Pull all issues for a release and structure for release notes."""
-    project_key = secrets.get("project_key", "")
-    if not project_key:
-        project_key = _get_project_key_from_board(secrets)
+    project_key = secrets.get("project_key", "") or _get_project_key_from_board(secrets)
 
-    # Check if the release version exists and whether work has started
     version_info = _get_version_info(secrets, project_key, release_name)
     if not version_info:
         return {
@@ -174,7 +174,6 @@ def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, 
             "error": f"Release '{release_name}' was not found in project '{project_key}'.",
         }
 
-    # Build JQL
     jql = f'fixVersion = "{release_name}"'
     if project_key:
         jql = f'project = "{project_key}" AND {jql}'
@@ -200,7 +199,6 @@ def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, 
     raw_issues = _jira_search(secrets, jql, fields)
 
     if not raw_issues:
-        # Release exists but no issues — work hasn't started
         if not version_info.get("released", False):
             return {
                 "release": release_name,
@@ -219,7 +217,6 @@ def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, 
             "error": f"No issues found for release '{release_name}'.",
         }
 
-    # Check if this is a future release with no meaningful work done
     if not version_info.get("released", False):
         status_names = [
             (issue.get("fields", {}).get("status") or {}).get("name", "") for issue in raw_issues
@@ -238,16 +235,13 @@ def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, 
                 ),
             }
 
-    # Parse issues
     issues = [_extract_issue(secrets, issue) for issue in raw_issues]
 
-    # Group by type
     by_type: dict[str, list[dict[str, Any]]] = {}
     for issue in issues:
         issue_type = issue["issue_type"]
         by_type.setdefault(issue_type, []).append(issue)
 
-    # Stats
     statuses: dict[str, int] = {}
     priorities: dict[str, int] = {}
     assignees: dict[str, int] = {}
@@ -274,11 +268,10 @@ def _summarize_release(secrets: dict[str, Any], release_name: str) -> dict[str, 
     }
 
 
-# --- Helpers ---
+# --- Helpers -----------------------------------------------------------------
 
 
 def _extract_issue(secrets: dict[str, Any], issue: dict[str, Any]) -> dict[str, Any]:
-    """Flatten a Jira issue into a clean dict."""
     f = issue.get("fields", {})
     base_url = secrets["url"].rstrip("/")
     key = issue.get("key", "")
@@ -303,7 +296,6 @@ def _extract_issue(secrets: dict[str, Any], issue: dict[str, Any]) -> dict[str, 
 def _get_version_info(
     secrets: dict[str, Any], project_key: str, release_name: str
 ) -> dict[str, Any]:
-    """Get metadata for a specific version."""
     if not project_key:
         return {}
 
@@ -325,7 +317,6 @@ def _get_version_info(
 
 
 def _get_project_key_from_board(secrets: dict[str, Any]) -> str:
-    """Try to derive the project key from the board configuration."""
     board_id = secrets.get("board_id", "")
     if not board_id:
         return ""
@@ -336,12 +327,10 @@ def _get_project_key_from_board(secrets: dict[str, Any]) -> str:
         with urllib.request.urlopen(req) as response:
             data = json.loads(response.read().decode())
 
-        # The filter query usually contains the project key
         filter_id = data.get("filter", {}).get("id", "")
         if filter_id:
             filter_data = _jira_rest_request(secrets, f"filter/{filter_id}")
             jql = str(filter_data.get("jql", ""))
-            # Try to extract project key from JQL like "project = PROJ ..."
             if "project" in jql.lower():
                 parts = jql.split()
                 for i, part in enumerate(parts):
@@ -350,7 +339,6 @@ def _get_project_key_from_board(secrets: dict[str, Any]) -> str:
                         if key and key.isalpha():
                             return key
 
-        # Fallback: get project from board location
         location = data.get("location", {})
         project_key = str(location.get("projectKey", ""))
         if project_key:

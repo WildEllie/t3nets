@@ -53,6 +53,7 @@ class DirectBus(EventBus):
         tenant_id = detail["tenant_id"]
         params = detail.get("params", {})
         request_id = detail["request_id"]
+        is_raw = bool(detail.get("is_raw", False))
 
         logger.info(f"DirectBus: executing skill '{skill_name}' for tenant '{tenant_id}'")
 
@@ -77,6 +78,7 @@ class DirectBus(EventBus):
                 secrets=secrets,
                 logger=logging.getLogger(f"t3nets.skill.{skill_name}"),
                 blob_store=self.context.get("blob_store"),
+                raw=is_raw,
                 extras={k: v for k, v in self.context.items() if k != "blob_store"},
             )
 

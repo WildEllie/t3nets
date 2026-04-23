@@ -19,6 +19,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from t3nets_sdk.contracts import SkillContext  # noqa: E402
+
 from agent.practices.registry import PracticeRegistry  # noqa: E402
 from agent.router.rule_router import RuleBasedRouter, strip_raw_flag  # noqa: E402
 from agent.skills.registry import SkillRegistry  # noqa: E402
@@ -56,6 +58,10 @@ FAKE_SECRETS = {
 }
 
 
+def _ctx(secrets: dict | None = None, *, raw: bool = False) -> SkillContext:
+    return SkillContext(tenant_id="test", secrets=dict(secrets or {}), raw=raw)
+
+
 def _fake_jira_response(data: dict) -> MagicMock:
     """Create a mock urllib response."""
     mock_resp = MagicMock()
@@ -68,32 +74,33 @@ def _fake_jira_response(data: dict) -> MagicMock:
 # --- Worker: credential validation ---
 
 
-def test_execute_missing_credentials():
+async def test_execute_missing_credentials():
     """Should return error when Jira credentials are missing."""
-    result = execute({"action": "list_releases"}, {})
-    assert "error" in result
-    assert "Missing Jira credentials" in result["error"]
+    result = await execute(_ctx({}), {"action": "list_releases"})
+    assert result.success is False
+    assert "Missing Jira credentials" in (result.error or "")
 
 
-def test_execute_partial_credentials():
+async def test_execute_partial_credentials():
     """Should list specific missing keys."""
-    result = execute({"action": "list_releases"}, {"url": "https://x.atlassian.net"})
-    assert "email" in result["error"]
-    assert "api_token" in result["error"]
+    result = await execute(_ctx({"url": "https://x.atlassian.net"}), {"action": "list_releases"})
+    assert result.success is False
+    assert "email" in (result.error or "")
+    assert "api_token" in (result.error or "")
 
 
-def test_execute_unknown_action():
+async def test_execute_unknown_action():
     """Should return error for unknown action."""
-    result = execute({"action": "bogus"}, FAKE_SECRETS)
-    assert "error" in result
-    assert "Unknown action" in result["error"]
+    result = await execute(_ctx(FAKE_SECRETS), {"action": "bogus"})
+    assert result.success is False
+    assert "Unknown action" in (result.error or "")
 
 
 # --- Worker: list_releases ---
 
 
 @patch("release_notes_worker._jira_rest_request")
-def test_list_releases_success(mock_req):
+async def test_list_releases_success(mock_req):
     """Should group released and unreleased versions."""
     mock_req.return_value = [
         {
@@ -114,41 +121,46 @@ def test_list_releases_success(mock_req):
         },
     ]
 
-    result = execute({"action": "list_releases"}, FAKE_SECRETS)
+    result = await execute(_ctx(FAKE_SECRETS), {"action": "list_releases"})
 
-    assert result["project"] == "PROJ"
-    assert result["total_versions"] == 2
-    assert len(result["released"]) == 1
-    assert len(result["unreleased"]) == 1
-    assert result["released"][0]["name"] == "v1.0.0"
-    assert result["unreleased"][0]["name"] == "v2.0.0"
+    assert result.success is True
+    assert result.data["project"] == "PROJ"
+    assert result.data["total_versions"] == 2
+    assert len(result.data["released"]) == 1
+    assert len(result.data["unreleased"]) == 1
+    assert result.data["released"][0]["name"] == "v1.0.0"
+    assert result.data["unreleased"][0]["name"] == "v2.0.0"
+    # Worker delegates rendering to the router's AI formatter.
+    assert result.text is None
+    assert result.render_prompt is not None
+    assert "Unreleased" in result.render_prompt
 
 
 @patch("release_notes_worker._get_project_key_from_board")
-def test_list_releases_no_project_key(mock_board):
+async def test_list_releases_no_project_key(mock_board):
     """Should error if project key cannot be determined."""
     mock_board.return_value = ""
     secrets = {k: v for k, v in FAKE_SECRETS.items() if k != "project_key"}
 
-    result = execute({"action": "list_releases"}, secrets)
+    result = await execute(_ctx(secrets), {"action": "list_releases"})
 
-    assert "error" in result
-    assert "project key" in result["error"].lower()
+    assert result.success is False
+    assert "project key" in (result.error or "").lower()
 
 
 # --- Worker: summarize ---
 
 
-def test_summarize_missing_release_name():
+async def test_summarize_missing_release_name():
     """Should error when release_name is missing for summarize."""
-    result = execute({"action": "summarize"}, FAKE_SECRETS)
-    assert "error" in result
-    assert "release_name is required" in result["error"]
+    result = await execute(_ctx(FAKE_SECRETS), {"action": "summarize"})
+    assert result.success is False
+    assert "release_name is required" in (result.error or "")
 
 
 @patch("release_notes_worker._get_version_info")
 @patch("release_notes_worker._jira_search")
-def test_summarize_success(mock_search, mock_version_info):
+async def test_summarize_success(mock_search, mock_version_info):
     """Should return structured release summary."""
     mock_version_info.return_value = {
         "name": "v1.0.0",
@@ -190,24 +202,27 @@ def test_summarize_success(mock_search, mock_version_info):
         },
     ]
 
-    result = execute(
+    result = await execute(
+        _ctx(FAKE_SECRETS),
         {"action": "summarize", "release_name": "v1.0.0"},
-        FAKE_SECRETS,
     )
 
-    assert result["release"] == "v1.0.0"
-    assert result["total_issues"] == 2
-    assert result["total_story_points"] == 8
-    assert "Story" in result["issues_by_type"]
-    assert "Bug" in result["issues_by_type"]
-    assert result["summary"]["by_type"]["Story"] == 1
-    assert result["summary"]["by_type"]["Bug"] == 1
-    assert result["summary"]["contributors"]["Alice"] == 2
+    assert result.success is True
+    assert result.data["release"] == "v1.0.0"
+    assert result.data["total_issues"] == 2
+    assert result.data["total_story_points"] == 8
+    assert "Story" in result.data["issues_by_type"]
+    assert "Bug" in result.data["issues_by_type"]
+    assert result.data["summary"]["by_type"]["Story"] == 1
+    assert result.data["summary"]["by_type"]["Bug"] == 1
+    assert result.data["summary"]["contributors"]["Alice"] == 2
+    assert result.text is None
+    assert result.render_prompt is not None
 
 
 @patch("release_notes_worker._get_version_info")
 @patch("release_notes_worker._jira_search")
-def test_summarize_no_issues(mock_search, mock_version_info):
+async def test_summarize_no_issues(mock_search, mock_version_info):
     """Should return not_started when unreleased version has no issues."""
     mock_search.return_value = []
     mock_version_info.return_value = {
@@ -216,33 +231,34 @@ def test_summarize_no_issues(mock_search, mock_version_info):
         "release_date": "",
     }
 
-    result = execute(
+    result = await execute(
+        _ctx(FAKE_SECRETS),
         {"action": "summarize", "release_name": "v99.0.0"},
-        FAKE_SECRETS,
     )
 
-    assert result["total_issues"] == 0
-    assert result.get("not_started") is True
-    assert "not started" in result["message"].lower()
+    assert result.success is True
+    assert result.data["total_issues"] == 0
+    assert result.data.get("not_started") is True
+    assert "not started" in result.data["message"].lower()
 
 
 @patch("release_notes_worker._get_version_info")
-def test_summarize_release_not_found(mock_version_info):
+async def test_summarize_release_not_found(mock_version_info):
     """Should return error when release doesn't exist in Jira."""
     mock_version_info.return_value = {}
 
-    result = execute(
+    result = await execute(
+        _ctx(FAKE_SECRETS),
         {"action": "summarize", "release_name": "v999.0.0"},
-        FAKE_SECRETS,
     )
 
-    assert "error" in result
-    assert "not found" in result["error"].lower()
+    assert result.success is False
+    assert "not found" in (result.error or "").lower()
 
 
 @patch("release_notes_worker._get_version_info")
 @patch("release_notes_worker._jira_search")
-def test_summarize_future_release_no_work_started(mock_search, mock_version_info):
+async def test_summarize_future_release_no_work_started(mock_search, mock_version_info):
     """Should return not_started when issues exist but none have started."""
     mock_version_info.return_value = {
         "name": "v3.0.0",
@@ -282,19 +298,20 @@ def test_summarize_future_release_no_work_started(mock_search, mock_version_info
         },
     ]
 
-    result = execute(
+    result = await execute(
+        _ctx(FAKE_SECRETS),
         {"action": "summarize", "release_name": "v3.0.0"},
-        FAKE_SECRETS,
     )
 
-    assert result.get("not_started") is True
-    assert result["total_issues"] == 2
-    assert "no work to summarize" in result["message"].lower()
+    assert result.success is True
+    assert result.data.get("not_started") is True
+    assert result.data["total_issues"] == 2
+    assert "no work to summarize" in result.data["message"].lower()
 
 
 @patch("release_notes_worker._get_version_info")
 @patch("release_notes_worker._jira_search")
-def test_summarize_future_release_with_work(mock_search, mock_version_info):
+async def test_summarize_future_release_with_work(mock_search, mock_version_info):
     """Should summarize normally if unreleased version has work in progress."""
     mock_version_info.return_value = {
         "name": "v2.0.0",
@@ -320,14 +337,25 @@ def test_summarize_future_release_with_work(mock_search, mock_version_info):
         },
     ]
 
-    result = execute(
+    result = await execute(
+        _ctx(FAKE_SECRETS),
         {"action": "summarize", "release_name": "v2.0.0"},
-        FAKE_SECRETS,
     )
 
-    assert result.get("not_started") is not True
-    assert result["total_issues"] == 1
-    assert "issues_by_type" in result
+    assert result.success is True
+    assert result.data.get("not_started") is not True
+    assert result.data["total_issues"] == 1
+    assert "issues_by_type" in result.data
+
+
+@patch("release_notes_worker._jira_rest_request")
+async def test_raw_flag_skips_render_prompt(mock_req):
+    """ctx.raw=True → worker returns data only, no render_prompt."""
+    mock_req.return_value = []
+    result = await execute(_ctx(FAKE_SECRETS, raw=True), {"action": "list_releases"})
+    assert result.success is True
+    assert result.text is None
+    assert result.render_prompt is None
 
 
 # --- Worker: search endpoint and pagination ---
@@ -427,7 +455,7 @@ def test_extract_issue_nulls():
 
 
 @patch("release_notes_worker._jira_rest_request")
-def test_http_error_handling(mock_req):
+async def test_http_error_handling(mock_req):
     """Should catch HTTP errors and return friendly message."""
     import urllib.error
 
@@ -439,10 +467,10 @@ def test_http_error_handling(mock_req):
         fp=MagicMock(read=lambda: b"Access denied"),
     )
 
-    result = execute({"action": "list_releases"}, FAKE_SECRETS)
+    result = await execute(_ctx(FAKE_SECRETS), {"action": "list_releases"})
 
-    assert "error" in result
-    assert "403" in result["error"]
+    assert result.success is False
+    assert "403" in (result.error or "")
 
 
 # --- Routing: rule_router integration ---

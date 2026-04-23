@@ -1047,8 +1047,18 @@ async def _handle_sync_skill(
     request_id: str,
     reply_channel: str,
     reply_target: str,
+    is_raw: bool = False,
+    user_message: str = "",
+    model_id: str = "",
+    model_short_name: str = "",
 ) -> dict[str, Any] | None:
-    """Invoke a skill synchronously via DirectBus and return the result."""
+    """Invoke a skill synchronously via DirectBus and return the result.
+
+    The extra user_message / model_* kwargs are part of the SkillInvoker
+    contract for async dashboards (AWS). Sync dispatch doesn't need them —
+    the chat handler saves the turn itself with the same info — so they
+    are accepted and ignored here.
+    """
     await bus.publish_skill_invocation(
         tenant_id,
         skill_name,
@@ -1057,6 +1067,7 @@ async def _handle_sync_skill(
         request_id,
         reply_channel,
         reply_target,
+        is_raw=is_raw,
     )
     return bus.get_result(request_id)
 

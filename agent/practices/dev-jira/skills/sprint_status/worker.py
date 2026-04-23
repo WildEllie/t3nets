@@ -1,12 +1,12 @@
-"""
-Sprint Status Worker
+"""Sprint Status worker — new SDK contract.
 
-Follows the T3nets skill contract:
-    def execute(params: dict, secrets: dict) -> dict
-
-No cloud imports. No Lambda knowledge. Pure business logic.
-Secrets are injected by the infrastructure layer.
+Returns structured data and a `render_prompt` that steers the router's
+AI formatter to produce a rich status report with tables / section
+headers / blockers callouts. In `--raw` mode the router bypasses the
+formatter and the user sees the JSON payload directly.
 """
+
+from __future__ import annotations
 
 import base64
 import json
@@ -14,47 +14,68 @@ import urllib.request
 from datetime import datetime
 from typing import Any, cast
 
+from t3nets_sdk.contracts import SkillContext, SkillResult
 
-def execute(params: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]:
-    """
-    Skill contract entry point.
+_RENDER_PROMPTS: dict[str, str] = {
+    "status": (
+        "Format this sprint report for a standup audience. Lead with the sprint "
+        "name, end date (with days remaining), and progress line (tickets done / "
+        "story points done). Then render, in this order and only if non-empty: "
+        "(1) a Blockers section listing each blocked ticket as `KEY — summary "
+        "(assignee)`; (2) a Large unstarted section (≥5 pts); (3) an In progress "
+        "section. Use markdown headings (###), bold labels, and bullet lists. "
+        "Call out risks — flag an overdue sprint, stalled tickets, or unassigned "
+        "story points. Keep it skimmable."
+    ),
+    "blockers": (
+        "List the blockers in the active sprint as a markdown section. If there "
+        "are none, say so cheerfully in one line. Otherwise use bullets "
+        "`KEY — summary · status · (assignee)`."
+    ),
+    "mine": (
+        "Format the user's assigned sprint tickets. Lead with a short summary "
+        "line (count, sprint name), then bullet each ticket "
+        "`KEY — summary · status · points`. Put flagged/blocked tickets first."
+    ),
+}
 
-    Args:
-        params: {"action": "status|blockers|mine", "assignee_email": "..."}
-        secrets: {"url": "...", "email": "...", "api_token": "...", "board_id": "..."}
 
-    Returns:
-        dict with sprint data or {"error": "..."}
-    """
-    # Validate secrets
+async def execute(ctx: SkillContext, params: dict[str, Any]) -> SkillResult:
+    """Dispatch on `action` and return a SkillResult with a render_prompt."""
     required = ["url", "email", "api_token", "board_id"]
-    missing = [k for k in required if not secrets.get(k)]
+    missing = [k for k in required if not ctx.secrets.get(k)]
     if missing:
-        return {"error": f"Missing Jira credentials: {', '.join(missing)}"}
+        return SkillResult.fail(f"Missing Jira credentials: {', '.join(missing)}")
 
     action = params.get("action", "status")
 
     try:
         if action == "status":
-            return _get_status(secrets)
+            data = _get_status(ctx.secrets)
         elif action == "blockers":
-            return _get_blockers(secrets)
+            data = _get_blockers(ctx.secrets)
         elif action == "mine":
             email = params.get("assignee_email", "")
             if not email:
-                return {"error": "assignee_email required for 'mine' action"}
-            return _get_mine(secrets, email)
+                return SkillResult.fail("assignee_email required for 'mine' action")
+            data = _get_mine(ctx.secrets, email)
         else:
-            return {"error": f"Unknown action: {action}"}
+            return SkillResult.fail(f"Unknown action: {action}")
     except Exception as e:
-        return {"error": f"Jira API error: {str(e)}"}
+        ctx.logger.exception("sprint_status failed")
+        return SkillResult.fail(f"Jira API error: {e}")
+
+    if "error" in data:
+        return SkillResult.fail(str(data["error"]))
+
+    render_prompt = None if ctx.raw else _RENDER_PROMPTS.get(action)
+    return SkillResult.ok(data, render_prompt=render_prompt)
 
 
-# --- Internal functions (same logic as your working local script) ---
+# --- Jira HTTP ---------------------------------------------------------------
 
 
 def _jira_request(secrets: dict[str, Any], endpoint: str) -> dict[str, Any]:
-    """Make authenticated request to Jira Cloud REST API."""
     url = f"{secrets['url'].rstrip('/')}/rest/agile/1.0/{endpoint}"
     credentials = base64.b64encode(f"{secrets['email']}:{secrets['api_token']}".encode()).decode()
 
@@ -67,7 +88,6 @@ def _jira_request(secrets: dict[str, Any], endpoint: str) -> dict[str, Any]:
 
 
 def _get_active_sprint(secrets: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    """Get currently active sprint for the board."""
     data = _jira_request(secrets, f"board/{secrets['board_id']}/sprint?state=active")
     sprints = data.get("values", [])
     if not sprints:
@@ -76,7 +96,6 @@ def _get_active_sprint(secrets: dict[str, Any]) -> tuple[dict[str, Any] | None, 
 
 
 def _get_sprint_issues(secrets: dict[str, Any], sprint_id: int) -> list[dict[str, Any]]:
-    """Get all issues in the sprint."""
     issues = []
     start_at = 0
     max_results = 50
@@ -96,7 +115,6 @@ def _get_sprint_issues(secrets: dict[str, Any], sprint_id: int) -> list[dict[str
 
 
 def _parse_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Parse Jira issues into clean structure."""
     parsed = []
     for issue in issues:
         fields = issue.get("fields", {})
@@ -122,7 +140,6 @@ def _parse_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _build_report(sprint: dict[str, Any], issues: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build status report for Claude to interpret."""
     today = datetime.now()
     end_date = sprint.get("endDate", "")[:10]
 
@@ -173,6 +190,9 @@ def _build_report(sprint: dict[str, Any], issues: list[dict[str, Any]]) -> dict[
             "todo": categories.get("To Do", []),
         },
     }
+
+
+# --- Actions -----------------------------------------------------------------
 
 
 def _get_status(secrets: dict[str, Any]) -> dict[str, Any]:

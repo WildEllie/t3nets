@@ -16,7 +16,7 @@ from t3nets_sdk.contracts import SkillContext, SkillResult
 
 
 async def execute(ctx: SkillContext, params: dict[str, Any]) -> SkillResult:
-    """Return basic system info for the model to interpret."""
+    """Return basic system info plus a human-readable one-liner."""
     now = datetime.now(timezone.utc)
     echo = params.get("echo", "")
 
@@ -34,4 +34,15 @@ async def execute(ctx: SkillContext, params: dict[str, Any]) -> SkillResult:
     if echo:
         data["echo"] = echo
 
-    return SkillResult.ok(data)
+    # User asked for --raw: let the router JSON-dump `data`. Skip rendering.
+    if ctx.raw:
+        return SkillResult.ok(data)
+
+    render_prompt = (
+        "Format this as a friendly health-check reply. Lead with a bold "
+        "**Pong!** and a ✅ status line. Then a short markdown section with "
+        "bold labels for Time, Platform, and Python version. If an `echo` "
+        "field is present, quote it back on its own line. Keep it upbeat "
+        "and skimmable — two or three short lines, no tables."
+    )
+    return SkillResult.ok(data, render_prompt=render_prompt)
