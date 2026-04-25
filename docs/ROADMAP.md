@@ -310,7 +310,8 @@ Practices are complete team experience bundles: skills + custom console pages + 
       ↳ ✅ `adapters/aws/lambda_handler.py:83-115` loads practices via `PracticeRegistry`
 - [x] `t3nets-sdk` bundled into Docker image and Lambda ZIPs so uploaded practices resolve `t3nets_sdk` on cold start
       ↳ ✅ step 7.1 — see commit `69dd002`
-- [ ] **Milestone:** Practices work end-to-end on AWS — *pending: terraform apply + smoke test on dev*
+- [x] **Milestone:** Practices work end-to-end on AWS
+      ↳ ✅ terraform applied + smoke-tested on dev 2026-04-25 — `/p/*` CDN behavior live, ECS task def has `CLOUDFRONT_DISTRIBUTION_ID`, IAM perms for `cloudfront:CreateInvalidation` in place
 
 **Phase 6d — Practices SDK (external practice authors)**
 
