@@ -11,10 +11,13 @@ here rather than in a real practice repo.
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 import zipfile
 from pathlib import Path
 
 from t3nets_sdk.cli.main import build_parser
+from t3nets_sdk.contracts import SkillContext, SkillResult
 from t3nets_sdk.manifest import parse_practice_yaml
 
 
@@ -53,6 +56,23 @@ class TestInit:
         (tmp_path / "busy").mkdir()
         rc = _run(["practice", "init", "busy", "--dir", str(tmp_path)])
         assert rc != 0
+
+    def test_scaffolded_worker_matches_typed_contract(self, tmp_path: Path) -> None:
+        """The scaffolded worker must accept (SkillContext, params) and return
+        a SkillResult — this is the runtime contract the platform calls. A
+        regression here means new authors hit a TypeError on first invoke."""
+        _run(["practice", "init", "demo", "--dir", str(tmp_path)])
+        worker_path = tmp_path / "demo" / "skills" / "example" / "worker.py"
+        spec = importlib.util.spec_from_file_location("scaffolded_worker", worker_path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        ctx = SkillContext(tenant_id="test-tenant")
+        result = asyncio.run(module.execute(ctx, {"message": "hi"}))
+        assert isinstance(result, SkillResult)
+        assert result.success
+        assert result.data == {"echo": "hi"}
 
 
 # ---------- validate ----------

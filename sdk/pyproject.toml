@@ -1,6 +1,6 @@
 [project]
 name = "t3nets-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Public SDK for building t3nets practices — contracts, models, interfaces, test doubles."
 readme = "README.md"
 license = {text = "MIT"}

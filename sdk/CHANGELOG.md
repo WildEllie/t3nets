@@ -5,6 +5,18 @@ All notable changes to `t3nets-sdk` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-04-26
+
+### Fixed
+
+- `t3nets practice init` now scaffolds a worker that matches the v0.1.0
+  `Worker` contract (`async def execute(ctx: SkillContext, params) ->
+  SkillResult`). The 0.1.0 scaffold shipped the legacy `(params, secrets)
+  -> dict` shape, which raised `TypeError` on first invocation by the
+  platform. The accompanying test stub now exercises the worker through
+  its real contract so regressions surface in the practice repo's own
+  test run.
+
 ## [0.1.0] — 2026-04-25
 
 Initial public release. Practice authors can now build practices in a

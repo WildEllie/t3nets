@@ -55,21 +55,56 @@ parameters:
 """
 
 _WORKER_PY = '''\
-"""Example skill worker. Replace with your real implementation."""
+"""Example skill worker. Replace with your real implementation.
+
+The worker contract: receive a typed `SkillContext` (tenant id, secrets,
+logger, blob store) and return a `SkillResult`. Use `SkillResult.ok(...)`
+for happy paths and `SkillResult.fail("...")` for errors.
+"""
 
 from __future__ import annotations
 
+from typing import Any
 
-async def execute(params: dict, secrets: dict) -> dict:
-    return {"echo": params.get("message", "")}
+from t3nets_sdk.contracts import SkillContext, SkillResult
+
+
+async def execute(ctx: SkillContext, params: dict[str, Any]) -> SkillResult:
+    message = params.get("message", "")
+    return SkillResult.ok({"echo": message})
 '''
 
 _TEST_PY = '''\
-"""Placeholder test — expand once you wire up SDK mocks."""
+"""Example test for the example skill.
+
+Loads the worker by file path so the test runs without any pytest config —
+the platform itself loads workers the same way at install time.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+from pathlib import Path
+
+from t3nets_sdk.contracts import SkillContext, SkillResult
 
 
-def test_placeholder() -> None:
-    assert True
+def _load_worker():
+    path = Path(__file__).resolve().parent.parent / "skills" / "example" / "worker.py"
+    spec = importlib.util.spec_from_file_location("example_worker", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_example_echoes_message() -> None:
+    worker = _load_worker()
+    ctx = SkillContext(tenant_id="test-tenant")
+    result: SkillResult = asyncio.run(worker.execute(ctx, {"message": "hello"}))
+    assert result.success
+    assert result.data == {"echo": "hello"}
 '''
 
 _README = """\
