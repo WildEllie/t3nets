@@ -354,10 +354,12 @@ Now that handler logic is extracted (Phase 5d) and Practices + the SDK have land
 - [ ] Conversation history browser
       ↳ ⚠️ History loads inline in chat via `/api/history`; no dedicated browsing UI
 
-### Phase 9: Multi-cloud
-- [ ] Set up another cloud (Azure or GCP)
-- [ ] Update terraform to support deployment for another cloud
-- [ ] Deploy and test
+### Phase 9: Email Delivery
+- [ ] SES domain verification + IAM in Terraform
+- [ ] HTML invite email template with tenant branding
+- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
+- [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
+- [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
 
 
 ### Phase 10: Expand Skills
@@ -367,12 +369,10 @@ Now that handler logic is extracted (Phase 5d) and Practices + the SDK have land
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
 
-### Phase 11: Email Delivery
-- [ ] SES domain verification + IAM in Terraform
-- [ ] HTML invite email template with tenant branding
-- [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
-- [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
-- [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
+### Phase 11: Multi-cloud
+- [ ] Set up another cloud (Azure or GCP)
+- [ ] Update terraform to support deployment for another cloud
+- [ ] Deploy and test
 
 ### Phase 12: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
