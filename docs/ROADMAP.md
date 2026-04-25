@@ -1,6 +1,6 @@
 # T3nets — Roadmap & TODO
 
-**Last Updated:** April 3, 2026 (Phase 7b Practices framework complete; 7c deployment gap identified)
+**Last Updated:** April 25, 2026 (Phase reorder: Practices → Phase 6, Dashboard → Phase 7, Multi-cloud → Phase 8, Expand Skills → Phase 9)
 
 ---
 
@@ -11,6 +11,8 @@
 - [x] Project scaffolded (interfaces, models, channels, skills)
 - [x] GitHub repo live (WildEllie/t3nets)
 - [x] Sprint status skill (Jira integration)
+- [x] Release notes skill (Jira integration) — routing, --raw support, future release handling, Jira API v3 migration
+      ↳ ✅ See [handoff notes](../handoffs/001-fix-release-notes-skill.md)
 - [x] Local adapters (Anthropic API, SQLite, env secrets, direct bus)
 - [x] Dev server with chat UI
 - [x] Hybrid routing (rules → Claude fallback)
@@ -33,10 +35,6 @@
 - [x] Geographic inference profiles for Bedrock (us/eu/apac prefixes)
 - [x] Cross-region IAM for Bedrock inference (us-east-1, us-east-2, us-west-2)
 - [x] Bedrock tool_use/tool_result message conversion fix
-
----
-
-## Up Next 🔜
 
 ### Phase 1b: Deploy & Settings
 - [x] `terraform apply` — deploy infrastructure to AWS
@@ -143,10 +141,7 @@ Replace the synchronous DirectBus with an event-driven architecture. The router 
 - [x] Auto-reload dev server — uvicorn `--reload` flag available now that both servers use uvicorn
 - [x] Strict mypy compliance — 0 errors across all 60 source files in `agent/` + `adapters/` (284 fixed)
 - [x] License compliance — `THIRD_PARTY_LICENSES` with BSD-3-Clause attribution for uvicorn
-- [ ] CLI tool for scaffolding new skills
-- [ ] Local development docker-compose with hot reload
 - [x] Unit test suite for router, rule engine, skills (tenant isolation, release notes, error handler)
-- [ ] Integration test harness
 
 ### Phase 4: Invitation Flow
       ↳ 📐 Full plan: [plan-invitation-signup-flow.md](plan-invitation-signup-flow.md)
@@ -240,39 +235,35 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 - [x] Unit tests for OllamaProvider (mock HTTP, tool call mapping)
 - [x] **Milestone:** Free models selectable for any tenant; zero-cost local dev without API key
 
+---
+
+## Up Next 🔜
+
 ### Phase 5d: Server Architecture Refactor
 
 Extract ~1,400 lines of duplicated handler logic from the two monolithic server files into a shared handler layer. Both servers become thin wiring layers over shared business logic — eliminating dual-pathway debugging and making the codebase testable per-handler.
 
-- [ ] Create `adapters/shared/handlers/` — settings, integrations, chat, history, training, health, practices, webhooks
-- [ ] Extract `SettingsHandlers` — `GET/POST /api/settings` (~150 lines, 95% duplicated)
-- [ ] Extract `IntegrationHandlers` — list/get/post/test integrations (~200 lines, 95% duplicated)
-- [ ] Extract `ChatHandlers` — Tier 0/1/2 routing, skill dispatch, AI fallback (~250 lines, 85% shared; inject `skill_invoker` callable for async/sync divergence)
-- [ ] Extract `HistoryHandlers`, `TrainingHandlers`, `HealthHandlers` (~200 lines combined)
-- [ ] Extract `PracticeHandlers` + `WebhookHandlers` (Teams/Telegram/WhatsApp dispatch logic)
-- [ ] Slim `adapters/aws/server.py` to ~400 lines (Cognito auth, SQS, WebSocket, Lambda deploy, route wiring)
-- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (env auth, DirectBus, route wiring)
+- [x] Create `adapters/shared/handlers/` — settings, integrations, chat, history, training, health, practices, webhooks
+      ↳ ✅ all 8 handler modules live under `adapters/shared/handlers/`
+- [x] Extract `SettingsHandlers` — `GET/POST /api/settings`
+- [x] Extract `IntegrationHandlers` — list/get/post/test integrations
+- [x] Extract `ChatHandlers` — Tier 0/1/2 routing, skill dispatch, AI fallback (`skill_invoker` callable threads user_message + model metadata for async dispatch)
+- [x] Extract `HistoryHandlers`, `TrainingHandlers`, `HealthHandlers`
+- [x] Extract `PracticeHandlers` + `WebhookHandlers` (Teams/Telegram/WhatsApp dispatch logic)
+- [ ] Slim `adapters/aws/server.py` to ~400 lines (currently ~2,000 — handlers extracted, route wiring still inline)
+- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (currently ~1,460 — same reason)
 - [ ] Split `agent/practices/registry.py` (643 lines) → `registry` + `installer` + `deployer` + `assets`
 - [ ] Fix `adapters/aws/admin_api.py`: replace manual path parsing + remove `asyncio.run()` calls
 - [ ] **Milestone:** No handler logic duplicated across servers; each handler file independently testable
 
       ↳ 📋 Full handoff: `.claude/plans/server-refactor-handoff.md`
 
-### Phase 6: Expand Skills
-- [x] Release notes skill — routing, --raw support, future release handling, Jira API v3 migration
-      ↳ ✅ Completed — see [handoff notes](../handoffs/001-fix-release-notes-skill.md)
-- [ ] Meeting prep skill (Google Calendar / Outlook)
-- [ ] Email triage skill (Gmail / Outlook)
-- [ ] Skill marketplace page in dashboard
-- [ ] **Milestone:** 3+ skills across 2+ channels
-
-
-### Phase 7: Practices — Team Experience Bundles
+### Phase 6: Practices — Team Experience Bundles
       ↳ 📐 Full plan: [plan-practices-team-experience-bundles.md](plan-practices-team-experience-bundles.md)
 
 Practices are complete team experience bundles: skills + custom console pages + functionality, uploadable as ZIPs. Pages interact with data through skills (same async EventBus flow as chat). One primary practice per tenant + add-on skills/pages from other practices.
 
-**Phase 7a — Core Practice Framework**
+**Phase 6a — Core Practice Framework**
 - [x] Practice data models (`PracticeDefinition`, `PracticePage`) and `PracticeRegistry`
       ↳ ✅ `agent/models/practice.py`, `agent/practices/registry.py`
 - [x] Built-in engineering practice: move existing skills into `agent/practices/engineering/`
@@ -295,7 +286,7 @@ Practices are complete team experience bundles: skills + custom console pages + 
       ↳ ✅ Both servers call it on init
 - [x] **Milestone:** Built-in engineering practice works with pages served at `/p/engineering/sprint`
 
-**Phase 7b — Practice Upload & Management**
+**Phase 6b — Practice Upload & Management**
 - [x] `POST /api/practices/upload` — ZIP upload, validation (structure, safety, name uniqueness), extraction
       ↳ ✅ Both servers: `aws/server.py:2628`, `local/dev_server.py:2103`
 - [x] Settings UI: Practices tab (select primary, upload, manage add-ons)
@@ -308,7 +299,7 @@ Practices are complete team experience bundles: skills + custom console pages + 
       ↳ ✅ `PracticeRegistry.install_zip()` version checking at lines 154-168
 - [x] **Milestone:** Admin can upload a practice ZIP and activate it for their tenant
 
-**Phase 7c — AWS Deployment**
+**Phase 6c — AWS Deployment**
 - [ ] `deploy.sh`: sync built-in practice pages to S3 under `p/` prefix
       ↳ ⚠️ deploy.sh only syncs HTML/CSS/JS/PNG — practice assets not included
 - [ ] CloudFront: `/p/*` cache behavior pointing to S3 origin
@@ -316,14 +307,37 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] ECS task role: S3 GetObject/PutObject for `practices/*` prefix
 - [x] Lambda hot-reload — pull uploaded practice skills from S3 on cold start
       ↳ ✅ `adapters/aws/lambda_handler.py:83-115` loads practices via `PracticeRegistry`
+- [x] `t3nets-sdk` bundled into Docker image and Lambda ZIPs so uploaded practices resolve `t3nets_sdk` on cold start
+      ↳ ✅ step 7.1 — see commit `69dd002`
 - [ ] **Milestone:** Practices work end-to-end on AWS
 
-### Phase 8: Dashboard & UX
+**Phase 6d — Practices SDK (external practice authors)**
+
+A standalone `t3nets-sdk` package (under `sdk/`) so practices can live in their own repos, import a stable typed contract, and ship without pulling the platform repo as a dependency.
+
+- [x] `t3nets_sdk.models` + `t3nets_sdk.interfaces` — cloud-free core (Step 1)
+- [x] `t3nets_sdk.testing` — `MockSecretsProvider`, `MockBlobStore`, `MockEventBus`, `MockConversationStore` (Step 2)
+- [x] `t3nets_sdk.manifest` — pydantic validators for `practice.yaml` / `skill.yaml` (Step 3)
+- [x] `t3nets` CLI — `practice init`, `practice validate`, `practice package` (Step 4)
+      ↳ ✅ `sdk/t3nets_sdk/cli/`
+- [x] `t3nets_sdk.contracts` — typed `SkillContext` / `SkillResult` worker contract (Step 5)
+      ↳ ✅ platform migrated — old `dict → dict` worker shape retired
+- [x] Built-in skills migrated to the new contract (`ping`, `sprint_status`, `release_notes`)
+- [x] `t3nets practice run-local` + dev server `--extra-practice-dir` for out-of-tree development loops (Step 7)
+- [x] Skill-owned rendering — skills set `text=` (verbatim) or `render_prompt=` (router AI formatter) on `SkillResult`; reserved transport keys survive SQS/Lambda
+      ↳ ✅ `sdk/t3nets_sdk/contracts.py` + `adapters/shared/handlers/chat.py` + `adapters/aws/result_router.py`
+- [x] Bundle SDK with Docker + Lambda deployments (Step 7.1)
+- [ ] Publish `t3nets-sdk` to PyPI (pending: verify AWS deploy against the new contract end-to-end)
+- [ ] **Milestone:** `pip install t3nets-sdk` + `t3nets practice init` gets a contributor from zero to a passing local test run
+
+### Phase 7: Dashboard & UX
 - [x] Markdown rendering in chat responses
 - [x] S3 + CloudFront CDN module: private bucket (OAC), path-based routing (`/api/*` → API GW, `/*` → S3), 5-min TTL
       ↳ ✅ Completed — `infra/aws/modules/cdn/`
 - [x] CloudFront Function: extensionless path rewriting (`/chat` → `/chat.html`) at viewer-request stage
 - [x] `deploy.sh`: HTML sync to S3 + CloudFront invalidation (`/*`) after ECS stabilises
+- [x] Custom domain support — set `root_domain` in tfvars; Terraform provisions Route53 zone (optional), ACM cert in us-east-1, CloudFront aliases for apex + www, and a root-path 302 to `/chat`
+      ↳ ✅ `infra/aws/modules/dns/` + `infra/aws/modules/cdn/` — see commit `b583747`
 - [x] Dashboard theming — dark mode toggle
       ↳ ✅ `adapters/local/theme.js`; `data-theme` attribute in HTML pages
 - [x] Skill configuration UI
@@ -334,10 +348,17 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [ ] Conversation history browser
       ↳ ⚠️ History loads inline in chat via `/api/history`; no dedicated browsing UI
 
-### Phase 9: Multi-cloud
+### Phase 8: Multi-cloud
 - [ ] Set up another cloud (Azure or GCP)
 - [ ] Update terraform to support deployment for another cloud
 - [ ] Deploy and test
+
+
+### Phase 9: Expand Skills
+- [ ] Meeting prep skill (Google Calendar / Outlook)
+- [ ] Email triage skill (Gmail / Outlook)
+- [ ] Skill marketplace page in dashboard
+- [ ] **Milestone:** 3+ skills across 2+ channels
 
 
 ### Phase 10: Email Delivery
@@ -353,6 +374,12 @@ Practices are complete team experience bundles: skills + custom console pages + 
       ↳ ✅ WhatsApp adapter completed via Whapi.cloud — see [handoff](../handoffs/022-whatsapp-channel-telegram-fixes.md)
 - [ ] OSS contributor guides
 - [ ] **Milestone:** Public release
+
+### Phase 12: Expanded Developer Experience
+- [ ] CLI tool for scaffolding new skills (beyond `t3nets practice init`)
+- [ ] Local development docker-compose with hot reload
+- [ ] Integration test harness
+- [ ] **Milestone:** A contributor can scaffold, run, and integration-test a new skill end-to-end with one-command tooling
 
 ---
 

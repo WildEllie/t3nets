@@ -46,7 +46,7 @@ A Practice is a bundle — skills, dashboards, workflows, behaviors — that tea
 
 You don't fork t3nets to customize it. You write a Practice, drop it in, and the platform picks it up. That's the seam. That's where your domain knowledge lives. Everything else is ours to maintain.
 
-*Practices ship in Phase 7. The skill and channel extension points they build on are live today — see [Extend](#extend) below.*
+*Practices are live today. Build yours with the [`t3nets-sdk`](sdk/) package and the `t3nets practice` CLI — scaffold, validate, run locally against a dev server, package. See [Extend](#extend) below.*
 
 ## Where this is going
 
@@ -202,6 +202,15 @@ terraform init && terraform apply -var-file=environments/dev.tfvars
 
 AWS is the reference implementation. GCP and Azure adapters are in progress — see [adapters/gcp/](adapters/gcp/) and [adapters/azure/](adapters/azure/).
 
+### Custom Domain
+
+Set `root_domain` in your tfvars and Terraform handles the rest — Route53 zone (optional, skip if DNS is managed elsewhere), ACM certificate in us-east-1 with DNS validation, CloudFront aliases for both the apex and `www`, and a root-path 302 to `/chat`. Cognito callback URLs and CORS origins auto-derive from `root_domain`, so one variable covers the chain.
+
+```hcl
+# environments/dev.tfvars
+root_domain = "t3nets.dev"
+```
+
 See [AWS Infrastructure Guide](docs/aws-infrastructure.md) for full deployment details.
 
 ---
@@ -210,10 +219,10 @@ See [AWS Infrastructure Guide](docs/aws-infrastructure.md) for full deployment d
 
 ### Add a Skill
 
-A skill is a `skill.yaml` + `worker.py` pair. The YAML tells the router when to invoke it and what parameters the AI model should extract. The worker is pure business logic — no cloud imports, no framework knowledge, no awareness of how it was invoked.
+A skill is a `skill.yaml` + `worker.py` pair. The YAML tells the router when to invoke it and what parameters the AI model should extract. The worker is pure business logic — no cloud imports, no framework knowledge, no awareness of how it was invoked. It receives a typed `SkillContext` and returns a `SkillResult` from the [`t3nets-sdk`](sdk/) package.
 
 ```yaml
-# agent/skills/my_skill/skill.yaml
+# skill.yaml
 name: my_skill
 description: >
   What this skill does and when the AI model should use it.
@@ -235,14 +244,42 @@ parameters:
 ```
 
 ```python
-# agent/skills/my_skill/worker.py
-def execute(params: dict, secrets: dict) -> dict:
-    # params: extracted by the AI model from the user's message
-    # secrets: injected by the infrastructure layer (env locally, Secrets Manager on AWS)
-    return {"result": "..."}
+# worker.py
+from t3nets_sdk.contracts import SkillContext, SkillResult
+
+
+async def execute(ctx: SkillContext, params: dict) -> SkillResult:
+    # ctx.secrets     — integration credentials for this tenant
+    # ctx.blob_store  — scoped blob handle (optional)
+    # ctx.raw         — True when the user appended --raw (skip rendering)
+    data = {"count": 42, "items": [...]}
+
+    # Three rendering modes — skills decide how their output reaches the user:
+    #   SkillResult.ok(data)                             # router falls back to a generic format prompt
+    #   SkillResult.ok(data, text="42 items")            # verbatim, zero AI tokens
+    #   SkillResult.ok(data, render_prompt="Lead with ...")  # router's AI formatter uses your prompt
+    return SkillResult.ok(data, render_prompt="Summarise as a bulleted list with bold labels.")
 ```
 
 The router picks it up automatically — no registration needed. Trigger phrases feed the hybrid rule engine so common requests are handled at $0 without an AI call.
+
+### Build a Practice
+
+A Practice bundles skills + pages + prompts into a single uploadable ZIP. Practices typically live in their own repo — `t3nets-sdk` is the only t3nets dependency they need.
+
+```bash
+pip install t3nets-sdk
+
+t3nets practice init my-practice       # scaffold a new practice repo
+cd my-practice
+t3nets practice validate               # lint practice.yaml + skill.yaml against pydantic schema
+t3nets practice run-local              # spin up a dev server with this practice wired in
+t3nets practice package                # produce a ZIP ready for the Practices tab in settings
+```
+
+`run-local` uses the platform's dev server with `--extra-practice-dir` pointing at your repo, so the in-tree built-ins and your external practice both register. The SDK also ships `Mock*` doubles (`MockSecretsProvider`, `MockBlobStore`, `MockEventBus`, `MockConversationStore`) for unit-testing workers without spinning up cloud services.
+
+See [sdk/README.md](sdk/README.md) for the full SDK surface.
 
 **How a skill executes in the cloud:**
 
@@ -316,11 +353,15 @@ t3nets/
 | 4 | Done | Invitation flow — link-based invites, join page, team management |
 | 4.5 | Done | Session management — silent refresh, idle expiry, role-based access |
 | 4.6 | Done | Platform admin — tenant lifecycle (create, suspend, delete) |
-| 5 | Planned | Expand skills — GitHub Issues, Google Calendar, Email triage |
-| 6 | Planned | Email delivery — SES invitations, tenant branding |
-| 7 | Planned | Practices — team experience bundles (skills + pages as uploadable ZIPs) |
-| 8 | Planned | Dashboard & UX — SPA, dark mode, mobile responsive |
-| 9 | Planned | Long-term memory, more channels, public release |
+| 5 | Done | AI-generated rule engine — per-tenant rules, admin training tools, Ollama free models |
+| 5d | In progress | Server refactor — shared handlers extracted; slim wiring layers pending |
+| 6 | In progress | Practices — team bundles with SDK, CLI, skill-owned rendering (6a/6b/6d done; 6c AWS asset sync + PyPI publish pending) |
+| 7 | In progress | Dashboard & UX — CloudFront/S3, custom domain, dark mode done; SPA + mobile pending |
+| 8 | Planned | Multi-cloud — Azure / GCP adapters |
+| 9 | Planned | Expand skills — release notes done; meeting prep, email triage pending |
+| 10 | Planned | Email delivery — SES invitations, tenant branding |
+| 11 | Planned | Long-term memory, more channels, public release |
+| 12 | Planned | Expanded developer experience — skill scaffolding CLI, hot-reload compose, integration test harness |
 
 Full roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 
