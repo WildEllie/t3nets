@@ -329,8 +329,14 @@ A standalone `t3nets-sdk` package (under `sdk/`) so practices can live in their 
 - [x] Skill-owned rendering — skills set `text=` (verbatim) or `render_prompt=` (router AI formatter) on `SkillResult`; reserved transport keys survive SQS/Lambda
       ↳ ✅ `sdk/t3nets_sdk/contracts.py` + `adapters/shared/handlers/chat.py` + `adapters/aws/result_router.py`
 - [x] Bundle SDK with Docker + Lambda deployments (Step 7.1)
-- [ ] Publish `t3nets-sdk` to PyPI (pending: verify AWS deploy against the new contract end-to-end)
-- [ ] **Milestone:** `pip install t3nets-sdk` + `t3nets practice init` gets a contributor from zero to a passing local test run
+- [x] Publish `t3nets-sdk` to PyPI
+      ↳ ✅ 0.1.0 shipped 2026-04-25 via `.github/workflows/publish-sdk.yml` (OIDC trusted publishing, gated on `pypi` GH Environment manual approval). 0.1.1 shipped 2026-04-26 with the init-scaffold contract fix.
+- [x] Pin platform to PyPI SDK
+      ↳ ✅ commit `e997db8` — root `pyproject.toml` declares `t3nets-sdk>=0.1,<0.2`; Dockerfile + Lambda packaging install from PyPI; validated end-to-end on dev (ECS rev 28, ping ~1s).
+- [x] Public-facing guide for practice authors
+      ↳ ✅ `docs/practice-development.md` — install, init walkthrough, `SkillContext`/`SkillResult` contract, manifest reference, testing patterns, packaging.
+- [x] **Milestone:** `pip install t3nets-sdk` + `t3nets practice init` gets a contributor from zero to a passing local test run
+      ↳ ✅ end-to-end verified 2026-04-26: scaffold → validate → scaffolded test passes.
 
 ### Phase 7: Server Slim — Wiring Layer Cleanup
 

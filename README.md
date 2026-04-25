@@ -374,6 +374,7 @@ Full roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 |-------|-------------|
 | [Local Development](docs/local-development.md) | Quick start, dev server, local adapters |
 | [AWS Infrastructure](docs/aws-infrastructure.md) | Terraform, deployment, Bedrock, DynamoDB |
+| [Practice Development](docs/practice-development.md) | External author guide: SDK install, contracts, manifests, packaging |
 | [Hybrid Routing](docs/hybrid-routing.md) | Three-tier routing engine, cost analysis |
 | [AI Models & Pricing](docs/ai-models-pricing.md) | Model options and tiered strategy |
 | [DynamoDB Schema](docs/dynamodb-schema.md) | Table design, key patterns |

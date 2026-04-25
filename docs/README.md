@@ -10,6 +10,7 @@ Welcome to the T3nets project documentation. These docs capture accumulated arch
 |--------------|-----------|
 | Run the project locally | [Local Development Guide](local-development.md) |
 | Deploy to AWS | [AWS Infrastructure Reference](aws-infrastructure.md) |
+| Build a practice | [Practice Development Guide](practice-development.md) |
 | Understand how routing works | [Hybrid Routing Architecture](hybrid-routing.md) |
 | Choose an AI model | [AI Models & Pricing Guide](ai-models-pricing.md) |
 | Understand the DynamoDB schema | [DynamoDB Schema Reference](dynamodb-schema.md) |

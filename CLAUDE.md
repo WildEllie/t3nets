@@ -105,6 +105,7 @@ Inbound message → ChannelAdapter.parse_inbound()
 | `docs/README.md` | Docs index, architecture overview, project status |
 | `docs/local-development.md` | Quick start, dev server, local adapters |
 | `docs/aws-infrastructure.md` | Terraform, deployment, DynamoDB, Bedrock |
+| `docs/practice-development.md` | External author guide: SDK install, init, contracts, manifests, packaging |
 | `docs/hybrid-routing.md` | Three-tier routing, rule engine, cost comparison |
 | `docs/ai-models-pricing.md` | Model options, tiered strategy |
 | `docs/dynamodb-schema.md` | Table schemas, key patterns |
