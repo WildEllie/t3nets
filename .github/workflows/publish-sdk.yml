@@ -1,0 +1,71 @@
+name: Publish SDK to PyPI
+
+on:
+  push:
+    tags:
+      - "sdk/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run SDK tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install platform + SDK (editable) with dev extras
+        run: |
+          pip install -e ./sdk
+          pip install -e ".[local,dev]"
+      - name: Run pytest
+        run: pytest tests/ -q
+
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify tag matches sdk/pyproject.toml version
+        run: |
+          tag_version="${GITHUB_REF_NAME#sdk/v}"
+          pkg_version=$(python -c "import tomllib; print(tomllib.loads(open('sdk/pyproject.toml','rb').read().decode())['project']['version'])")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag version ($tag_version) does not match sdk/pyproject.toml version ($pkg_version)"
+            exit 1
+          fi
+          echo "Tag and package version match: $tag_version"
+      - name: Install build + twine
+        run: pip install --upgrade build twine
+      - name: Build sdist + wheel
+        working-directory: sdk
+        run: python -m build
+      - name: Check distribution metadata
+        run: twine check sdk/dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: sdk/dist/
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: pypi
+      url: https://pypi.org/p/t3nets-sdk
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

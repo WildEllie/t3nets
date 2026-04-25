@@ -9,25 +9,29 @@ they need.
 
 ## What's in here
 
-- **Models** — `RequestContext`, `Tenant`, `TenantUser`, `TenantSettings`,
-  `InboundMessage`, `OutboundMessage`, channel types.
-- **Interfaces** — `BlobStore`, `SecretsProvider`, `EventBus`,
-  `ConversationStore`. Abstract ports a skill worker may receive at runtime.
-
-Future additions (see `docs/plan-practices-sdk.md` in the platform repo):
-
-- `t3nets_sdk.contracts` — typed `SkillContext` / `SkillResult` worker contract
-- `t3nets_sdk.manifest` — pydantic validators for `practice.yaml` / `skill.yaml`
-- `t3nets_sdk.testing` — in-memory `Mock*` doubles for local skill tests
-- `t3nets` CLI — `init`, `validate`, `package`, `run-local`
+- **Models** (`t3nets_sdk.models`) — `RequestContext`, `Tenant`, `TenantUser`,
+  `TenantSettings`, `InboundMessage`, `OutboundMessage`, channel types.
+- **Interfaces** (`t3nets_sdk.interfaces`) — `BlobStore`, `SecretsProvider`,
+  `EventBus`, `ConversationStore`. Abstract ports a skill worker may receive
+  at runtime.
+- **Contracts** (`t3nets_sdk.contracts`) — typed `SkillContext` /
+  `SkillResult` worker contract. Workers receive a `SkillContext` and return
+  a `SkillResult` carrying either `text` (verbatim) or `render_prompt`
+  (router AI formatter).
+- **Manifest validators** (`t3nets_sdk.manifest`) — pydantic validators for
+  `practice.yaml` / `skill.yaml`.
+- **Test doubles** (`t3nets_sdk.testing`) — in-memory `Mock*` implementations
+  of every interface, for offline skill tests.
+- **CLI** (`t3nets`) — `practice init`, `practice validate`,
+  `practice package`, `practice run-local`.
 
 ## Design rules
 
 - **Zero cloud SDKs.** No `boto3`, no `anthropic`, no `starlette`. The SDK must
   stay light enough to drop into any practice repo.
 - **Stable surface.** SemVer strict. Practices pin a major.
-- **Stdlib dataclasses on the hot path.** Pydantic only for manifest parsing
-  (when added) — keeps Lambda cold starts lean.
+- **Stdlib dataclasses on the hot path.** Pydantic only for manifest parsing —
+  keeps Lambda cold starts lean.
 
 ## Installation
 

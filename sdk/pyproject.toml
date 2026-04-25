@@ -18,6 +18,12 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/WildEllie/t3nets"
+Repository = "https://github.com/WildEllie/t3nets"
+Issues = "https://github.com/WildEllie/t3nets/issues"
+Changelog = "https://github.com/WildEllie/t3nets/blob/main/sdk/CHANGELOG.md"
+
 [project.scripts]
 t3nets = "t3nets_sdk.cli.main:main"
 
