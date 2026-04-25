@@ -4,21 +4,26 @@ Practice Registry — manages installed practices.
 Loads practice manifests (practice.yaml) from built-in and uploaded
 directories, registers their skills with the SkillRegistry, and
 provides page resolution for the dev server.
+
+Implementation is split across:
+- ``installer.py`` — manifest loading, ZIP install, BlobStore restore, hooks
+- ``deployer.py`` — AWS Lambda + EventBridge deployment
+- ``assets.py`` — page/nav resolution for tenants
+
+This module owns the in-memory ``_practices`` state and the public API.
 """
 
-import asyncio
-import importlib.util
+from __future__ import annotations
+
 import logging
-import zipfile
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
-from t3nets_sdk.manifest import parse_practice_yaml
 
 from agent.interfaces.blob_store import BlobStore
-from agent.models.practice import PracticeDefinition, PracticePage
+from agent.models.practice import PracticeDefinition
+from agent.practices import assets, deployer, installer
 from agent.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -45,7 +50,7 @@ class PracticeRegistry:
             if not manifest.exists():
                 continue
 
-            practice = self._load_manifest(manifest, built_in=True)
+            practice = installer.load_manifest(manifest, built_in=True)
             if practice:
                 self._practices[practice.name] = practice
                 logger.info(f"Loaded built-in practice: {practice.name}")
@@ -66,7 +71,7 @@ class PracticeRegistry:
             if not manifest.exists():
                 continue
 
-            practice = self._load_manifest(manifest, built_in=False)
+            practice = installer.load_manifest(manifest, built_in=False)
             if practice:
                 self._practices[practice.name] = practice
                 logger.info(f"Loaded uploaded practice: {practice.name}")
@@ -78,34 +83,10 @@ class PracticeRegistry:
         data_dir: Path,
         installed_versions: dict[str, str] | None = None,
     ) -> int:
-        """Download and extract uploaded practices from BlobStore on startup.
-
-        Uses installed_versions (from DynamoDB tenant settings) to know which
-        practices to restore. Only downloads ZIPs for practices that aren't
-        already extracted locally.
-
-        Returns count of restored practices.
-        """
-        if not installed_versions:
-            return 0
-
-        restored = 0
-        for name, version in installed_versions.items():
-            dest = data_dir / "practices" / name
-            if dest.exists():
-                continue  # Already extracted (built-in or previous restore)
-
-            zip_key = f"practices/{name}/practice.zip"
-            try:
-                zip_bytes = await blob_store.get(tenant_id, zip_key)
-                # Install without blob_store/versions to avoid re-uploading or re-checking
-                await self.install_zip(zip_bytes, data_dir)
-                restored += 1
-                logger.info(f"Restored practice from S3: {name} v{version}")
-            except Exception as e:
-                logger.warning(f"Failed to restore practice {name}: {e}")
-
-        return restored
+        """Download and extract uploaded practices from BlobStore on startup."""
+        return await installer.restore_from_blob_store(
+            self._practices, blob_store, tenant_id, data_dir, installed_versions
+        )
 
     async def install_zip(
         self,
@@ -115,120 +96,15 @@ class PracticeRegistry:
         tenant_id: str = "",
         installed_versions: dict[str, str] | None = None,
     ) -> PracticeDefinition:
-        """
-        Validate and extract a practice ZIP to the data directory.
-        Optionally uploads assets to BlobStore and runs install hooks.
-
-        Args:
-            installed_versions: dict of {name: version} from tenant settings.
-                If provided, enforces version checks:
-                - Same version as installed → ValueError (duplicate)
-                - Lower version → ValueError (downgrade not allowed)
-                - Higher version → upgrade proceeds
-
-        Returns the installed PracticeDefinition.
-        Raises ValueError if validation fails.
-        """
-        buf = BytesIO(zip_bytes)
-        try:
-            zf = zipfile.ZipFile(buf)
-        except zipfile.BadZipFile as e:
-            raise ValueError(f"Invalid ZIP file: {e}") from e
-
-        # Find practice.yaml in the ZIP
-        manifest_path = self._find_manifest_in_zip(zf)
-        if not manifest_path:
-            raise ValueError("ZIP must contain practice.yaml at root or in a single subdirectory")
-
-        # Determine prefix (files might be in a subdirectory)
-        prefix = ""
-        parts = manifest_path.split("/")
-        if len(parts) > 1:
-            prefix = "/".join(parts[:-1]) + "/"
-
-        # Parse + validate manifest via the SDK pydantic schema. ManifestError
-        # is a ValueError subclass, so existing callers that `except ValueError`
-        # keep working.
-        manifest = parse_practice_yaml(zf.read(manifest_path).decode("utf-8"))
-        name = manifest.name
-
-        # Version check against installed_versions (from DynamoDB tenant settings)
-        new_version = manifest.version
-        if installed_versions and name in installed_versions:
-            cur_version = installed_versions[name]
-            new_v = self._parse_version(new_version)
-            cur_v = self._parse_version(cur_version)
-            if new_v == cur_v:
-                raise ValueError(f"Practice '{name}' v{new_version} is already installed")
-            if new_v < cur_v:
-                raise ValueError(
-                    f"Downgrade not allowed: '{name}' v{new_version} < installed v{cur_version}"
-                )
-            logger.info(f"Upgrading practice '{name}': v{cur_version} → v{new_version}")
-
-        # Validate skill files are present in the ZIP.
-        names = set(zf.namelist())
-        for skill_name in manifest.skills:
-            skill_yaml = f"{prefix}skills/{skill_name}/skill.yaml"
-            skill_worker = f"{prefix}skills/{skill_name}/worker.py"
-            if skill_yaml not in names:
-                raise ValueError(f"Missing skill.yaml for skill '{skill_name}'")
-            if skill_worker not in names:
-                raise ValueError(f"Missing worker.py for skill '{skill_name}'")
-
-        # Validate page files are present in the ZIP.
-        for page in manifest.pages:
-            page_file = f"{prefix}{page.file}"
-            if page_file not in names:
-                raise ValueError(f"Missing page file: {page.file}")
-
-        # Security: reject path traversal
-        for member in names:
-            if ".." in member or member.startswith("/"):
-                raise ValueError(f"Invalid path in ZIP: {member}")
-
-        # Extract to data/practices/{name}/
-        dest = data_dir / "practices" / name
-        dest.mkdir(parents=True, exist_ok=True)
-
-        for member in zf.namelist():
-            if member.endswith("/"):
-                continue  # skip directories
-            # Strip prefix if present
-            relative = member[len(prefix) :] if prefix and member.startswith(prefix) else member
-            target = dest / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(zf.read(member))
-
-        zf.close()
-
-        # Load the installed practice
-        practice = self._load_manifest(dest / "practice.yaml", built_in=False)
-        if not practice:
-            raise ValueError("Failed to load installed practice manifest")
-
-        # Persist ZIP to BlobStore for restart durability
-        if blob_store and tenant_id:
-            zip_key = f"practices/{practice.name}/practice.zip"
-            await blob_store.put(tenant_id, zip_key, zip_bytes)
-            logger.info(f"Persisted practice ZIP to BlobStore: {zip_key}")
-
-        # Upload assets to BlobStore
-        if blob_store and tenant_id and practice.assets:
-            for asset in practice.assets:
-                asset_path = dest / "assets" / asset
-                if asset_path.exists():
-                    blob_key = f"practices/{practice.name}/assets/{asset}"
-                    await blob_store.put(tenant_id, blob_key, asset_path.read_bytes())
-                    logger.info(f"Uploaded practice asset: {blob_key}")
-
-        # Run install hooks
-        if practice.hooks.get("on_install"):
-            await self._run_install_hook(practice, dest, blob_store=blob_store, tenant_id=tenant_id)
-
-        self._practices[practice.name] = practice
-        logger.info(f"Installed practice: {practice.name} v{practice.version}")
-        return practice
+        """Validate and extract a practice ZIP, register the result."""
+        return await installer.install_zip(
+            self._practices,
+            zip_bytes,
+            data_dir,
+            blob_store=blob_store,
+            tenant_id=tenant_id,
+            installed_versions=installed_versions,
+        )
 
     def get(self, name: str) -> PracticeDefinition | None:
         """Get a practice by name."""
@@ -239,69 +115,12 @@ class PracticeRegistry:
         return list(self._practices.values())
 
     def get_pages_for_tenant(self, tenant: Any) -> list[dict[str, Any]]:
-        """
-        Get pages available to a tenant based on their practice configuration.
-        Returns list of dicts with {slug, title, nav_label, url, practice}.
-        """
-        pages: list[dict[str, Any]] = []
-        settings = tenant.settings
-
-        # Pages from primary practice
-        if settings.primary_practice:
-            practice = self._practices.get(settings.primary_practice)
-            if practice:
-                for page in practice.pages:
-                    if page.nav_order > 0 and page.nav_label:
-                        pages.append(
-                            {
-                                "slug": page.slug,
-                                "title": page.title,
-                                "nav_label": page.nav_label,
-                                "nav_order": page.nav_order,
-                                "url": f"/p/{practice.name}/{page.slug}",
-                                "practice": practice.name,
-                            }
-                        )
-
-        # Pages from addons
-        for addon in getattr(settings, "addon_pages", []):
-            parts = addon.split("/", 1)
-            if len(parts) != 2:
-                continue
-            practice_name, page_slug = parts
-            practice = self._practices.get(practice_name)
-            if not practice:
-                continue
-            for page in practice.pages:
-                if page.slug == page_slug and page.nav_label:
-                    pages.append(
-                        {
-                            "slug": page.slug,
-                            "title": page.title,
-                            "nav_label": page.nav_label,
-                            "nav_order": page.nav_order,
-                            "url": f"/p/{practice_name}/{page.slug}",
-                            "practice": practice_name,
-                        }
-                    )
-
-        pages.sort(key=lambda p: p["nav_order"])
-        return pages
+        """Get pages available to a tenant based on their practice configuration."""
+        return assets.get_pages_for_tenant(self._practices, tenant)
 
     def get_page_path(self, practice_name: str, page_slug: str) -> Path | None:
-        """
-        Resolve a practice page to its filesystem path.
-        Returns None if not found.
-        """
-        practice = self._practices.get(practice_name)
-        if not practice:
-            return None
-
-        for page in practice.pages:
-            if page.slug == page_slug:
-                return Path(practice.base_path) / page.file
-
-        return None
+        """Resolve a practice page to its filesystem path."""
+        return assets.get_page_path(self._practices, practice_name, page_slug)
 
     def register_skills(self, skill_registry: SkillRegistry) -> None:
         """
@@ -322,240 +141,17 @@ class PracticeRegistry:
         practice: PracticeDefinition,
         config: dict[str, Any],
     ) -> list[str]:
-        """Deploy Lambda functions + EventBridge rules for each skill with a lambda.zip.
-
-        Args:
-            practice: The installed practice definition
-            config: Lambda deployment config with keys:
-                region, name_prefix, lambda_role_arn, eventbridge_bus_name,
-                eventbridge_bus_arn, eventbridge_dlq_arn, sqs_results_queue_url,
-                secrets_prefix, pending_requests_table, s3_bucket_name,
-                dynamodb_tenants_table, subnet_ids, security_group_id
-
-        Returns list of deployed skill names.
-        """
-        import json
-
-        import boto3  # type: ignore[import-untyped]
-
-        region = config["region"]
-        prefix = config["name_prefix"]
-        lambda_client = boto3.client("lambda", region_name=region)
-        events_client = boto3.client("events", region_name=region)
-        logs_client = boto3.client("logs", region_name=region)
-
-        deployed = []
-        practice_dir = Path(practice.base_path)
-
-        for skill_name in practice.skills:
-            lambda_zip_path = practice_dir / "skills" / skill_name / "lambda.zip"
-            if not lambda_zip_path.exists():
-                logger.warning(f"No lambda.zip for skill {skill_name}, skipping Lambda deploy")
-                continue
-
-            func_name = f"{prefix}-skill-{skill_name}"
-            log_group = f"/aws/lambda/{func_name}"
-            rule_name = f"{prefix}-skill-invoke-{skill_name}"
-            zip_bytes = lambda_zip_path.read_bytes()
-
-            logger.info(f"Deploying Lambda for skill: {skill_name} ({len(zip_bytes)} bytes)")
-
-            # 1. Create/ensure CloudWatch log group
-            try:
-                logs_client.create_log_group(logGroupName=log_group)
-                logs_client.put_retention_policy(logGroupName=log_group, retentionInDays=14)
-            except logs_client.exceptions.ResourceAlreadyExistsException:
-                pass
-
-            # 2. Create or update Lambda function
-            env_vars = {
-                "T3NETS_PLATFORM": "aws",
-                "T3NETS_STAGE": config.get("stage", "dev"),
-                "AWS_REGION_NAME": region,
-                "SECRETS_PREFIX": config["secrets_prefix"],
-                "SQS_RESULTS_QUEUE_URL": config["sqs_results_queue_url"],
-                "PENDING_REQUESTS_TABLE": config["pending_requests_table"],
-                "S3_BUCKET_NAME": config.get("s3_bucket_name", ""),
-                "DYNAMODB_TENANTS_TABLE": config.get("dynamodb_tenants_table", ""),
-            }
-            vpc_config = {}
-            if config.get("subnet_ids") and config.get("security_group_id"):
-                vpc_config = {
-                    "SubnetIds": config["subnet_ids"],
-                    "SecurityGroupIds": [config["security_group_id"]],
-                }
-
-            try:
-                lambda_client.get_function(FunctionName=func_name)
-                # Exists — update code
-                lambda_client.update_function_code(
-                    FunctionName=func_name,
-                    ZipFile=zip_bytes,
-                )
-                logger.info(f"  Updated Lambda: {func_name}")
-            except lambda_client.exceptions.ResourceNotFoundException:
-                # Create new
-                create_kwargs: dict[str, Any] = {
-                    "FunctionName": func_name,
-                    "Role": config["lambda_role_arn"],
-                    "Handler": "adapters.aws.lambda_handler.handler",
-                    "Runtime": "python3.12",
-                    "Timeout": 120,
-                    "MemorySize": 512,
-                    "Code": {"ZipFile": zip_bytes},
-                    "Environment": {"Variables": env_vars},
-                }
-                if vpc_config:
-                    create_kwargs["VpcConfig"] = vpc_config
-                lambda_client.create_function(**create_kwargs)
-                logger.info(f"  Created Lambda: {func_name}")
-
-            # Get Lambda ARN
-            func_info = lambda_client.get_function(FunctionName=func_name)
-            lambda_arn = func_info["Configuration"]["FunctionArn"]
-
-            # 3. Create/update EventBridge rule
-            event_pattern = json.dumps(
-                {
-                    "source": ["agent.router"],
-                    "detail-type": ["skill.invoke"],
-                    "detail": {"skill_name": [skill_name]},
-                }
-            )
-            events_client.put_rule(
-                Name=rule_name,
-                EventBusName=config["eventbridge_bus_name"],
-                EventPattern=event_pattern,
-                Description=f"Route {skill_name} skill invocations to Lambda",
-            )
-            # EventBridge rule ARN format: arn:aws:events:{region}:{account}:rule/{bus}/{rule}
-            account_region = config["eventbridge_bus_arn"].split(":event-bus/")[0]
-            rule_arn = f"{account_region}:rule/{config['eventbridge_bus_name']}/{rule_name}"
-
-            # 4. Set Lambda as target
-            events_client.put_targets(
-                Rule=rule_name,
-                EventBusName=config["eventbridge_bus_name"],
-                Targets=[
-                    {
-                        "Id": f"skill-{skill_name}",
-                        "Arn": lambda_arn,
-                        "RetryPolicy": {
-                            "MaximumRetryAttempts": 2,
-                            "MaximumEventAgeInSeconds": 300,
-                        },
-                        "DeadLetterConfig": {
-                            "Arn": config["eventbridge_dlq_arn"],
-                        },
-                    }
-                ],
-            )
-
-            # 5. Grant EventBridge permission to invoke Lambda
-            # Remove old permission first (may have stale SourceArn)
-            try:
-                lambda_client.remove_permission(
-                    FunctionName=func_name,
-                    StatementId="AllowEventBridgeInvoke",
-                )
-            except Exception:
-                pass
-            try:
-                lambda_client.add_permission(
-                    FunctionName=func_name,
-                    StatementId="AllowEventBridgeInvoke",
-                    Action="lambda:InvokeFunction",
-                    Principal="events.amazonaws.com",
-                    SourceArn=rule_arn,
-                )
-            except lambda_client.exceptions.ResourceConflictException:
-                pass
-
-            deployed.append(skill_name)
-            logger.info(f"  Deployed Lambda + EventBridge for: {skill_name}")
-
-        return deployed
+        """Deploy Lambda functions + EventBridge rules for each skill with a lambda.zip."""
+        return await deployer.deploy_skill_lambdas(practice, config)
 
     async def ensure_skill_lambdas(
         self,
         config: dict[str, Any],
     ) -> int:
-        """Check that Lambdas exist for all practice skills. Deploy if missing.
-
-        Called at startup after restoring practices from S3.
-        Returns count of deployed/fixed Lambdas.
-        """
-        import boto3  # type: ignore[import-untyped]
-
-        lambda_client = boto3.client("lambda", region_name=config["region"])
-        fixed = 0
-
-        for practice in self._practices.values():
-            if practice.built_in:
-                continue  # Built-in practices are deployed by deploy.sh/Terraform
-
-            for skill_name in practice.skills:
-                func_name = f"{config['name_prefix']}-skill-{skill_name}"
-                try:
-                    lambda_client.get_function(FunctionName=func_name)
-                except Exception:
-                    # Lambda missing — deploy it
-                    logger.info(f"Lambda missing for {skill_name}, deploying...")
-                    deployed = await self.deploy_skill_lambdas(practice, config)
-                    fixed += len(deployed)
-                    break  # All skills in this practice deployed together
-
-        return fixed
-
-    @staticmethod
-    def _parse_version(version: str) -> tuple[int, ...]:
-        """Parse a version string like '1.2.3' into a comparable tuple."""
-        try:
-            return tuple(int(x) for x in version.split("."))
-        except (ValueError, AttributeError):
-            return (0, 0, 0)
+        """Check that Lambdas exist for all practice skills. Deploy if missing."""
+        return await deployer.ensure_skill_lambdas(self._practices, config)
 
     # --- Private helpers ---
-
-    def _load_manifest(self, manifest_path: Path, built_in: bool) -> PracticeDefinition | None:
-        """Parse a practice.yaml into a PracticeDefinition."""
-        try:
-            with open(manifest_path) as f:
-                data = yaml.safe_load(f)
-
-            pages = []
-            for p in data.get("pages", []):
-                pages.append(
-                    PracticePage(
-                        slug=p["slug"],
-                        title=p["title"],
-                        nav_label=p.get("nav_label", p["title"]),
-                        nav_order=p.get("nav_order", 0),
-                        file=p["file"],
-                        page_type=p.get("type", "dashboard"),
-                        description=p.get("description", ""),
-                        requires_skills=p.get("requires_skills", []),
-                    )
-                )
-
-            return PracticeDefinition(
-                name=data["name"],
-                display_name=data.get("display_name", data["name"]),
-                description=data.get("description", ""),
-                version=data.get("version", "1.0.0"),
-                icon=data.get("icon", ""),
-                integrations=data.get("integrations", []),
-                skills=data.get("skills", []),
-                pages=pages,
-                assets=data.get("assets", []),
-                hooks=data.get("hooks", {}),
-                system_prompt_addon=data.get("system_prompt_addon", ""),
-                built_in=built_in,
-                base_path=str(manifest_path.parent),
-            )
-        except Exception as e:
-            logger.error(f"Failed to load practice manifest {manifest_path}: {e}")
-            return None
 
     def _load_practice_skills(
         self,
@@ -590,57 +186,3 @@ class PracticeRegistry:
             )
             skill_registry.register(skill)
             logger.info(f"Registered practice skill: {skill.name} (practice: {practice.name})")
-
-    async def _run_install_hook(
-        self,
-        practice: PracticeDefinition,
-        practice_dir: Path,
-        blob_store: BlobStore | None = None,
-        tenant_id: str = "",
-    ) -> None:
-        """Run the on_install hook for a practice."""
-        hook_file = practice.hooks.get("on_install", "")
-        if not hook_file:
-            return
-
-        hook_path = practice_dir / hook_file
-        if not hook_path.exists():
-            logger.warning(f"Install hook not found: {hook_path}")
-            return
-
-        try:
-            spec = importlib.util.spec_from_file_location("install_hook", str(hook_path))
-            if spec is None or spec.loader is None:
-                logger.error(f"Cannot load install hook: {hook_path}")
-                return
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)  # type: ignore[union-attr]
-
-            if hasattr(module, "on_install"):
-                ctx = {
-                    "blob_store": blob_store,
-                    "tenant_id": tenant_id,
-                    "practice_dir": str(practice_dir),
-                }
-                result = module.on_install(ctx)
-                if asyncio.iscoroutine(result):
-                    await result
-                logger.info(f"Ran install hook for practice: {practice.name}")
-        except Exception as e:
-            logger.error(f"Install hook failed for {practice.name}: {e}")
-
-    def _find_manifest_in_zip(self, zf: zipfile.ZipFile) -> str | None:
-        """Find practice.yaml in a ZIP — at root or one level deep."""
-        names = zf.namelist()
-
-        # Direct root
-        if "practice.yaml" in names:
-            return "practice.yaml"
-
-        # One level deep (e.g., cbt-practice/practice.yaml)
-        for name in names:
-            parts = name.split("/")
-            if len(parts) == 2 and parts[1] == "practice.yaml":
-                return name
-
-        return None
