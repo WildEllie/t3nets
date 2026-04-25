@@ -78,8 +78,8 @@ cp -r "${PROJECT_ROOT}/agent/practices/dev-jira" "${BUILD_DIR}/agent/practices/"
 #      wheels (e.g. macOS arm64 pydantic_core) which fail at import in
 #      Lambda with ImportModuleError. --only-binary guards against pip
 #      falling through to a source build, which would be host-native.
-#   2. Local t3nets-sdk — pure Python, installed from source. Must go in
-#      a separate step since --only-binary=:all: would reject it.
+#   2. t3nets-sdk from PyPI — pure Python. --no-deps keeps the manylinux
+#      pyyaml/pydantic from step 1 in place.
 pip3 install \
   --platform manylinux2014_x86_64 \
   --python-version 3.12 \
@@ -90,7 +90,7 @@ pip3 install \
   --upgrade \
   --quiet
 
-pip3 install "${PROJECT_ROOT}/sdk" \
+pip3 install "t3nets-sdk>=0.1,<0.2" \
   -t "${BUILD_DIR}" \
   --no-deps \
   --upgrade \

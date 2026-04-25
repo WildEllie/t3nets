@@ -9,8 +9,12 @@ Multi-tenant AI agent platform that connects teams to productivity tools (Jira, 
 ## Commands
 
 ```bash
-# Install for local development
+# Install for local development (pulls t3nets-sdk from PyPI)
 pip install -e ".[local,dev]"
+
+# Iterating on the SDK alongside the platform? Layer an editable install
+# of the in-tree SDK on top so source edits take effect without a re-tag:
+pip install -e ./sdk
 
 # Run local dev server (serves dashboard at http://localhost:8080)
 python -m adapters.local.dev_server

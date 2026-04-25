@@ -97,7 +97,7 @@ git clone https://github.com/WildEllie/t3nets.git
 cd t3nets
 
 python3 -m venv venv && source venv/bin/activate
-pip install -e ".[local,dev]"
+pip install -e ".[local,dev]"   # pulls t3nets-sdk from PyPI
 
 cp .env.example .env        # Add your Anthropic API key
 python -m adapters.local.dev_server

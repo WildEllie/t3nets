@@ -159,7 +159,8 @@ if [ "$USE_ASYNC" = "true" ]; then
 
         # Install deps with manylinux wheels so pydantic_core etc. match
         # the Lambda runtime (boto3 is already in the runtime). Two-phase
-        # install: native wheels first, then pure-Python sdk with --no-deps.
+        # install: native wheels first, then t3nets-sdk from PyPI with
+        # --no-deps so the manylinux pyyaml/pydantic stay in place.
         pip3 install \
             --platform manylinux2014_x86_64 \
             --python-version 3.12 \
@@ -169,7 +170,7 @@ if [ "$USE_ASYNC" = "true" ]; then
             -t "${LAMBDA_DIR}" \
             --upgrade \
             --quiet
-        pip3 install ./sdk -t "${LAMBDA_DIR}" --no-deps --upgrade --quiet
+        pip3 install "t3nets-sdk>=0.1,<0.2" -t "${LAMBDA_DIR}" --no-deps --upgrade --quiet
 
         # Create ZIP
         LAMBDA_ZIP="/tmp/${FUNC_NAME}.zip"

@@ -11,10 +11,7 @@ authors = [
 
 dependencies = [
     "pyyaml>=6.0",
-    # t3nets-sdk is in this monorepo at ./sdk during early development.
-    # Install it editable alongside the platform:
-    #     pip install -e ./sdk && pip install -e ".[local,dev]"
-    # It will move to a published PyPI dependency once the surface stabilizes.
+    "t3nets-sdk>=0.1,<0.2",
 ]
 
 [project.optional-dependencies]
@@ -58,7 +55,7 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# t3nets-sdk lives at ./sdk in this monorepo. Setuptools' modern editable
-# install uses a meta-path finder that mypy can't walk, so point it at the
-# source tree directly.
+# Point mypy at the in-tree SDK source so monorepo dev (with `pip install -e ./sdk`
+# overriding the published t3nets-sdk) resolves types from the working copy
+# rather than the installed package.
 mypy_path = "sdk"
