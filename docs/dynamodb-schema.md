@@ -71,7 +71,7 @@ Single-table design storing tenants, users, and channel mappings. Uses item type
 | Key | Pattern | Example |
 |-----|---------|---------|
 | gsi1pk | `CHANNEL#{type}#{id}` | `CHANNEL#teams#azure-bot-app-id` |
-| gsi1sk | `TENANT#{tenant_id}` | `TENANT#outlocks` |
+| gsi1sk | `TENANT#{tenant_id}` | `TENANT#acme` |
 
 Used to resolve which tenant owns a channel identifier (from webhook payloads).
 
@@ -81,13 +81,13 @@ Used to resolve which tenant owns a channel identifier (from webhook payloads).
 
 | Field | Key | Example |
 |-------|-----|---------|
-| PK | `TENANT#{tenant_id}` | `TENANT#outlocks` |
+| PK | `TENANT#{tenant_id}` | `TENANT#acme` |
 | SK | `META` | `META` |
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `tenant_id` | String | Unique tenant identifier |
-| `name` | String | Display name (e.g., "Outlocks") |
+| `name` | String | Display name (e.g., "Acme") |
 | `status` | String | `active`, `suspended`, `onboarding` |
 | `created_at` | String (ISO 8601) | Creation timestamp |
 | `settings` | String (JSON) | `TenantSettings` serialized |
@@ -113,7 +113,7 @@ Used to resolve which tenant owns a channel identifier (from webhook payloads).
 
 | Field | Key | Example |
 |-------|-----|---------|
-| PK | `TENANT#{tenant_id}` | `TENANT#outlocks` |
+| PK | `TENANT#{tenant_id}` | `TENANT#acme` |
 | SK | `USER#{user_id}` | `USER#admin` |
 
 | Attribute | Type | Description |
@@ -139,7 +139,7 @@ Used to resolve which tenant owns a channel identifier (from webhook payloads).
 
 | Field | Key | Example |
 |-------|-----|---------|
-| PK | `TENANT#{tenant_id}` | `TENANT#outlocks` |
+| PK | `TENANT#{tenant_id}` | `TENANT#acme` |
 | SK | `CHANNEL#{type}#{id}` | `CHANNEL#teams#azure-bot-app-id` |
 | gsi1pk | `CHANNEL#{type}#{id}` | `CHANNEL#teams#azure-bot-app-id` |
 
@@ -148,7 +148,7 @@ Used for tenant resolution from channel webhooks:
 ```
 Incoming Teams webhook → extract bot_app_id
 → Query GSI: gsi1pk = "CHANNEL#teams#azure-bot-app-id"
-→ Returns TENANT#outlocks
+→ Returns TENANT#acme
 → Load tenant metadata
 ```
 

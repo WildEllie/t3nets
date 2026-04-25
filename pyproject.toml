@@ -6,7 +6,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
 authors = [
-    {name = "Outlocks", email = "dev@outlocks.com"},
+    {name = "Ellie Portugali", email = "ellieportugali@gmail.com"},
 ]
 
 dependencies = [

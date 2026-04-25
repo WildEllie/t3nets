@@ -1,6 +1,6 @@
 # t3nets-sdk
 
-Public SDK for building [t3nets](https://github.com/outlocks/t3nets) practices.
+Public SDK for building [t3nets](https://github.com/WildEllie/t3nets) practices.
 
 A practice is a bundle of skills, pages, and prompts that customizes a t3nets
 deployment for a specific domain (engineering, therapy, ops, etc.). Practices

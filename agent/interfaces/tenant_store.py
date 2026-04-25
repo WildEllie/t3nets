@@ -98,7 +98,7 @@ class TenantStore(ABC):
         """
         Find a user by their channel-specific identity.
 
-        Example: get_user_by_channel_identity("outlocks", "teams", "aad-object-id")
+        Example: get_user_by_channel_identity("acme", "teams", "aad-object-id")
         """
         ...
 

@@ -58,7 +58,7 @@ These came out of the initial design discussion:
 | Question | Decision |
 |---|---|
 | Pydantic vs stdlib dataclasses | **Pydantic for manifest validation** (best author-facing errors). **Stdlib dataclasses for hot-path models** like `RequestContext` (keep Lambda cold starts lean). |
-| Distribution channel for the SDK itself | Start with **GitHub install** (`pip install git+https://github.com/outlocks/t3nets-sdk.git@v0.1.0`) during early iteration. Move to PyPI once the surface stabilizes. |
+| Distribution channel for the SDK itself | Start with **GitHub install** (`pip install "git+https://github.com/WildEllie/t3nets.git@sdk/v0.1.0#subdirectory=sdk"`) during early iteration. Move to PyPI once the surface stabilizes. |
 | Marketplace index — in-repo or separate? | **Separate repo** (`t3nets-marketplace` or a branch of `t3nets.dev`). Different release cadence, different trust model. |
 | Thin "practice runner" for the Lambda path? | Nice-to-have, **not in v1**. Add once there are real practices being shipped. |
 | Test double naming | **`Mock*`**, not `Fake*` (`MockEventBus`, `MockBlobStore`, `MockSecretsProvider`, etc.). |
@@ -186,7 +186,7 @@ Two tiers, both reusing `install_zip()`:
      "name": "engineering",
      "display_name": "Engineering",
      "description": "...",
-     "repo_url": "https://github.com/outlocks/t3nets-practice-engineering",
+     "repo_url": "https://github.com/acme/t3nets-practice-engineering",
      "latest_version": "1.2.0",
      "artifact_url": "https://github.com/.../releases/download/v1.2.0/practice.zip",
      "sha256": "abc...",
