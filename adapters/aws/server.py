@@ -973,7 +973,7 @@ async def handle_invitation_accept(request: Request) -> Response:
 
 
 async def handle_admin(request: Request) -> Response:
-    """Delegate all /api/admin/* routes to AdminAPI (run in thread pool)."""
+    """Delegate all /api/admin/* routes to AdminAPI."""
     method = request.method
     path = str(request.url.path)
     body = None
@@ -986,7 +986,7 @@ async def handle_admin(request: Request) -> Response:
     # Resolve tenant_id server-side (avoids a second DynamoDB lookup inside AdminAPI)
     tenant_id, _ = await _get_auth_info(request)
     headers["x-tenant-id"] = tenant_id
-    data, status = await asyncio.to_thread(admin_api.handle_request, method, path, headers, body)
+    data, status = await admin_api.handle_request(method, path, headers, body)
     return JSONResponse(data, status_code=status)
 
 

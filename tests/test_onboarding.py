@@ -135,16 +135,16 @@ def make_auth_headers(sub="user-123", email="test@example.com"):
 # --- Tests: Tenant Creation ---
 
 
-class TestCreateTenant(unittest.TestCase):
+class TestCreateTenant(unittest.IsolatedAsyncioTestCase):
     """Tests for POST /api/admin/tenants with admin user creation."""
 
-    def test_create_tenant_basic(self):
+    async def test_create_tenant_basic(self):
         api, store, _ = make_admin_api()
         headers = make_auth_headers()  # No tenant yet (onboarding)
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
-            data, status = api._create_tenant(
+            data, status = await api._create_tenant(
                 {
                     "tenant_id": "acme-corp",
                     "name": "Acme Corporation",
@@ -158,13 +158,13 @@ class TestCreateTenant(unittest.TestCase):
         assert "acme-corp" in store.tenants
         assert store.tenants["acme-corp"].name == "Acme Corporation"
 
-    def test_create_tenant_with_admin_user(self):
+    async def test_create_tenant_with_admin_user(self):
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
-            data, status = api._create_tenant(
+            data, status = await api._create_tenant(
                 {
                     "tenant_id": "acme-eng",
                     "name": "Acme Engineering",
@@ -190,18 +190,18 @@ class TestCreateTenant(unittest.TestCase):
         assert users[0].role == "admin"
         assert users[0].cognito_sub == "sub-abc-123"
 
-    def test_create_tenant_missing_fields(self):
+    async def test_create_tenant_missing_fields(self):
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
-            data, status = api._create_tenant({"tenant_id": ""}, headers)
+            data, status = await api._create_tenant({"tenant_id": ""}, headers)
 
         assert status == 400
         assert "required" in data["error"]
 
-    def test_create_tenant_invalid_id(self):
+    async def test_create_tenant_invalid_id(self):
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
 
@@ -209,49 +209,50 @@ class TestCreateTenant(unittest.TestCase):
             mock_auth.side_effect = AuthError("No tenant", 403)
 
             # Too short
-            data, status = api._create_tenant({"tenant_id": "ab", "name": "AB"}, headers)
+            data, status = await api._create_tenant({"tenant_id": "ab", "name": "AB"}, headers)
             assert status == 400
 
             # Uppercase
-            data, status = api._create_tenant({"tenant_id": "MyTeam", "name": "Team"}, headers)
+            data, status = await api._create_tenant(
+                {"tenant_id": "MyTeam", "name": "Team"}, headers
+            )
             assert status == 400
 
             # Special characters
-            data, status = api._create_tenant({"tenant_id": "my_team!", "name": "Team"}, headers)
+            data, status = await api._create_tenant(
+                {"tenant_id": "my_team!", "name": "Team"}, headers
+            )
             assert status == 400
 
-    def test_create_tenant_duplicate(self):
+    async def test_create_tenant_duplicate(self):
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
 
-        # Pre-populate a tenant
-        import asyncio
-
-        asyncio.run(
-            store.create_tenant(
-                Tenant(
-                    tenant_id="existing",
-                    name="Existing",
-                    status="active",
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                )
+        await store.create_tenant(
+            Tenant(
+                tenant_id="existing",
+                name="Existing",
+                status="active",
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
         )
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
-            data, status = api._create_tenant({"tenant_id": "existing", "name": "New"}, headers)
+            data, status = await api._create_tenant(
+                {"tenant_id": "existing", "name": "New"}, headers
+            )
 
         assert status == 409
         assert "already exists" in data["error"]
 
-    def test_create_tenant_default_skills(self):
+    async def test_create_tenant_default_skills(self):
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
-            api._create_tenant({"tenant_id": "new-team", "name": "New Team"}, headers)
+            await api._create_tenant({"tenant_id": "new-team", "name": "New Team"}, headers)
 
         tenant = store.tenants["new-team"]
         assert "sprint_status" in tenant.settings.enabled_skills
@@ -261,52 +262,46 @@ class TestCreateTenant(unittest.TestCase):
 # --- Tests: Tenant Activation ---
 
 
-class TestActivateTenant(unittest.TestCase):
+class TestActivateTenant(unittest.IsolatedAsyncioTestCase):
     """Tests for PATCH /api/admin/tenants/{id}/activate."""
 
-    def test_activate_onboarding_tenant(self):
+    async def test_activate_onboarding_tenant(self):
         api, store, _ = make_admin_api()
-        import asyncio
 
-        asyncio.run(
-            store.create_tenant(
-                Tenant(
-                    tenant_id="test-team",
-                    name="Test Team",
-                    status="onboarding",
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                )
+        await store.create_tenant(
+            Tenant(
+                tenant_id="test-team",
+                name="Test Team",
+                status="onboarding",
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
         )
 
-        data, status = api._activate_tenant("test-team")
+        data, status = await api._activate_tenant("test-team")
         assert status == 200
         assert data["activated"] is True
         assert store.tenants["test-team"].status == "active"
 
-    def test_activate_already_active(self):
+    async def test_activate_already_active(self):
         api, store, _ = make_admin_api()
-        import asyncio
 
-        asyncio.run(
-            store.create_tenant(
-                Tenant(
-                    tenant_id="active-team",
-                    name="Active Team",
-                    status="active",
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                )
+        await store.create_tenant(
+            Tenant(
+                tenant_id="active-team",
+                name="Active Team",
+                status="active",
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
         )
 
-        data, status = api._activate_tenant("active-team")
+        data, status = await api._activate_tenant("active-team")
         assert status == 200
         assert "Already active" in data.get("message", "")
 
-    def test_activate_nonexistent(self):
+    async def test_activate_nonexistent(self):
         api, store, _ = make_admin_api()
 
-        data, status = api._activate_tenant("does-not-exist")
+        data, status = await api._activate_tenant("does-not-exist")
         assert status == 404
 
 
@@ -355,10 +350,10 @@ class TestIntegrationStorage(unittest.TestCase):
 # --- Tests: Admin API Routing ---
 
 
-class TestAdminAPIRouting(unittest.TestCase):
+class TestAdminAPIRouting(unittest.IsolatedAsyncioTestCase):
     """Tests for admin API request routing, especially onboarding relaxation."""
 
-    def test_create_tenant_bypasses_auth(self):
+    async def test_create_tenant_bypasses_auth(self):
         """POST /api/admin/tenants should work without custom:tenant_id."""
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
@@ -366,7 +361,7 @@ class TestAdminAPIRouting(unittest.TestCase):
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             # Simulate user without tenant_id
             mock_auth.side_effect = AuthError("JWT missing 'custom:tenant_id' claim", 403)
-            data, status = api.handle_request(
+            data, status = await api.handle_request(
                 "POST",
                 "/api/admin/tenants",
                 headers,
@@ -378,34 +373,33 @@ class TestAdminAPIRouting(unittest.TestCase):
 
         assert status == 201
 
-    def test_other_routes_require_auth(self):
+    async def test_other_routes_require_auth(self):
         """GET /api/admin/tenants should require full auth."""
         api, _, _ = make_admin_api()
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No auth", 401)
-            data, status = api.handle_request("GET", "/api/admin/tenants", {})
+            data, status = await api.handle_request("GET", "/api/admin/tenants", {})
 
         assert status == 401
 
-    def test_patch_activate_route(self):
+    async def test_patch_activate_route(self):
         """PATCH /api/admin/tenants/{id}/activate should route correctly."""
         api, store, _ = make_admin_api()
-        import asyncio
 
-        asyncio.run(
-            store.create_tenant(
-                Tenant(
-                    tenant_id="my-team",
-                    name="My Team",
-                    status="onboarding",
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                )
+        await store.create_tenant(
+            Tenant(
+                tenant_id="my-team",
+                name="My Team",
+                status="onboarding",
+                created_at=datetime.now(timezone.utc).isoformat(),
             )
         )
 
         headers = make_auth_headers()
-        data, status = api.handle_request("PATCH", "/api/admin/tenants/my-team/activate", headers)
+        data, status = await api.handle_request(
+            "PATCH", "/api/admin/tenants/my-team/activate", headers
+        )
         assert status == 200
         assert data["activated"] is True
 
@@ -448,7 +442,7 @@ class TestTenantModel(unittest.TestCase):
 # --- Tests: Cognito Sub Lookup (DynamoDB fallback) ---
 
 
-class TestCognitoSubLookup(unittest.TestCase):
+class TestCognitoSubLookup(unittest.IsolatedAsyncioTestCase):
     """Tests for get_user_by_cognito_sub and cognito_sub persistence."""
 
     def test_cognito_sub_roundtrip(self):
@@ -515,14 +509,14 @@ class TestCognitoSubLookup(unittest.TestCase):
         found = asyncio.run(store.get_user_by_cognito_sub(""))
         assert found is None
 
-    def test_create_tenant_with_cognito_sub_then_lookup(self):
+    async def test_create_tenant_with_cognito_sub_then_lookup(self):
         """Full flow: create tenant + admin user, then look up by cognito_sub."""
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
-            data, status = api._create_tenant(
+            data, status = await api._create_tenant(
                 {
                     "tenant_id": "startup-xyz",
                     "name": "Startup XYZ",
@@ -539,7 +533,7 @@ class TestCognitoSubLookup(unittest.TestCase):
         assert status == 201
 
         # Now look up by cognito_sub — should resolve to startup-xyz
-        found = asyncio.run(store.get_user_by_cognito_sub("sub-founder-001"))
+        found = await store.get_user_by_cognito_sub("sub-founder-001")
         assert found is not None
         assert found.tenant_id == "startup-xyz"
         assert found.email == "founder@startup.xyz"
@@ -712,7 +706,7 @@ class TestAuthMiddleware(unittest.TestCase):
 # --- Tests: Avatar URL in Model ---
 
 
-class TestAvatarUrl(unittest.TestCase):
+class TestAvatarUrl(unittest.IsolatedAsyncioTestCase):
     """Tests for avatar_url field on TenantUser."""
 
     def test_avatar_url_default_empty(self):
@@ -734,14 +728,14 @@ class TestAvatarUrl(unittest.TestCase):
         )
         assert user.avatar_url == "https://img.example.com/avatar.png"
 
-    def test_create_tenant_with_avatar_url(self):
+    async def test_create_tenant_with_avatar_url(self):
         """Admin API should accept avatar_url in admin_user."""
         api, store, _ = make_admin_api()
         headers = make_auth_headers()
 
         with patch("adapters.aws.admin_api.extract_auth") as mock_auth:
             mock_auth.side_effect = AuthError("No tenant", 403)
-            data, status = api._create_tenant(
+            data, status = await api._create_tenant(
                 {
                     "tenant_id": "avatar-team",
                     "name": "Avatar Team",
