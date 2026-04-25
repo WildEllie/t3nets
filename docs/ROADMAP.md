@@ -239,9 +239,9 @@ Add Ollama as a third AI provider, enabling zero-cost local development and free
 
 ## Up Next 🔜
 
-### Phase 5d: Server Architecture Refactor
+### Phase 5d: Server Architecture Refactor — Internals Cleanup
 
-Extract ~1,400 lines of duplicated handler logic from the two monolithic server files into a shared handler layer. Both servers become thin wiring layers over shared business logic — eliminating dual-pathway debugging and making the codebase testable per-handler.
+Handler logic is already extracted from the two monolithic server files into `adapters/shared/handlers/`. What remains in this phase is the smaller-blast-radius internal cleanup that doesn't touch the request entry points. The riskier server slim-down — moving the route wiring itself — is sequenced separately as Phase 7, after the SDK lands on PyPI.
 
 - [x] Create `adapters/shared/handlers/` — settings, integrations, chat, history, training, health, practices, webhooks
       ↳ ✅ all 8 handler modules live under `adapters/shared/handlers/`
@@ -250,11 +250,9 @@ Extract ~1,400 lines of duplicated handler logic from the two monolithic server 
 - [x] Extract `ChatHandlers` — Tier 0/1/2 routing, skill dispatch, AI fallback (`skill_invoker` callable threads user_message + model metadata for async dispatch)
 - [x] Extract `HistoryHandlers`, `TrainingHandlers`, `HealthHandlers`
 - [x] Extract `PracticeHandlers` + `WebhookHandlers` (Teams/Telegram/WhatsApp dispatch logic)
-- [ ] Slim `adapters/aws/server.py` to ~400 lines (currently ~2,000 — handlers extracted, route wiring still inline)
-- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (currently ~1,460 — same reason)
 - [ ] Split `agent/practices/registry.py` (643 lines) → `registry` + `installer` + `deployer` + `assets`
 - [ ] Fix `adapters/aws/admin_api.py`: replace manual path parsing + remove `asyncio.run()` calls
-- [ ] **Milestone:** No handler logic duplicated across servers; each handler file independently testable
+- [ ] **Milestone:** `practices/registry.py` split into focused modules; `admin_api.py` modernized
 
       ↳ 📋 Full handoff: `.claude/plans/server-refactor-handoff.md`
 
@@ -330,7 +328,15 @@ A standalone `t3nets-sdk` package (under `sdk/`) so practices can live in their 
 - [ ] Publish `t3nets-sdk` to PyPI (pending: verify AWS deploy against the new contract end-to-end)
 - [ ] **Milestone:** `pip install t3nets-sdk` + `t3nets practice init` gets a contributor from zero to a passing local test run
 
-### Phase 7: Dashboard & UX
+### Phase 7: Server Slim — Wiring Layer Cleanup
+
+Now that handler logic is extracted (Phase 5d) and Practices + the SDK have landed on PyPI (Phase 6), collapse the route-wiring layer in both server entry points. Mostly mechanical moves, but they touch live entry points on AWS and local — gate on a smoke-test pass after each.
+
+- [ ] Slim `adapters/aws/server.py` to ~400 lines (currently ~2,000 — handlers extracted, route wiring still inline)
+- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (currently ~1,460 — same reason)
+- [ ] **Milestone:** No handler logic duplicated across servers; each handler file independently testable; both server files are thin wiring layers
+
+### Phase 8: Dashboard & UX
 - [x] Markdown rendering in chat responses
 - [x] S3 + CloudFront CDN module: private bucket (OAC), path-based routing (`/api/*` → API GW, `/*` → S3), 5-min TTL
       ↳ ✅ Completed — `infra/aws/modules/cdn/`
@@ -348,34 +354,34 @@ A standalone `t3nets-sdk` package (under `sdk/`) so practices can live in their 
 - [ ] Conversation history browser
       ↳ ⚠️ History loads inline in chat via `/api/history`; no dedicated browsing UI
 
-### Phase 8: Multi-cloud
+### Phase 9: Multi-cloud
 - [ ] Set up another cloud (Azure or GCP)
 - [ ] Update terraform to support deployment for another cloud
 - [ ] Deploy and test
 
 
-### Phase 9: Expand Skills
+### Phase 10: Expand Skills
 - [ ] Meeting prep skill (Google Calendar / Outlook)
 - [ ] Email triage skill (Gmail / Outlook)
 - [ ] Skill marketplace page in dashboard
 - [ ] **Milestone:** 3+ skills across 2+ channels
 
 
-### Phase 10: Email Delivery
+### Phase 11: Email Delivery
 - [ ] SES domain verification + IAM in Terraform
 - [ ] HTML invite email template with tenant branding
 - [ ] Call SES from create-invitation endpoint (copy-link stays as fallback)
 - [ ] Call SES from platform create-tenant endpoint (same fallback pattern)
 - [ ] **Milestone:** Invitations delivered by email; copy-link remains as fallback
 
-### Phase 11: Long-Term Memory & Polish
+### Phase 12: Long-Term Memory & Polish
 - [ ] S3-based conversation summarization
 - [ ] Additional channels (Slack, ~~WhatsApp~~)
       ↳ ✅ WhatsApp adapter completed via Whapi.cloud — see [handoff](../handoffs/022-whatsapp-channel-telegram-fixes.md)
 - [ ] OSS contributor guides
 - [ ] **Milestone:** Public release
 
-### Phase 12: Expanded Developer Experience
+### Phase 13: Expanded Developer Experience
 - [ ] CLI tool for scaffolding new skills (beyond `t3nets practice init`)
 - [ ] Local development docker-compose with hot reload
 - [ ] Integration test harness

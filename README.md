@@ -354,14 +354,15 @@ t3nets/
 | 4.5 | Done | Session management — silent refresh, idle expiry, role-based access |
 | 4.6 | Done | Platform admin — tenant lifecycle (create, suspend, delete) |
 | 5 | Done | AI-generated rule engine — per-tenant rules, admin training tools, Ollama free models |
-| 5d | In progress | Server refactor — shared handlers extracted; slim wiring layers pending |
+| 5d | In progress | Server refactor — shared handlers extracted; `practices/registry` split + `admin_api` modernization next |
 | 6 | In progress | Practices — team bundles with SDK, CLI, skill-owned rendering (6a/6b/6d done; 6c AWS asset sync + PyPI publish pending) |
-| 7 | In progress | Dashboard & UX — CloudFront/S3, custom domain, dark mode done; SPA + mobile pending |
-| 8 | Planned | Multi-cloud — Azure / GCP adapters |
-| 9 | Planned | Expand skills — release notes done; meeting prep, email triage pending |
-| 10 | Planned | Email delivery — SES invitations, tenant branding |
-| 11 | Planned | Long-term memory, more channels, public release |
-| 12 | Planned | Expanded developer experience — skill scaffolding CLI, hot-reload compose, integration test harness |
+| 7 | Planned | Server slim — collapse route wiring in both server entry points (gated on Phase 6 SDK publish) |
+| 8 | In progress | Dashboard & UX — CloudFront/S3, custom domain, dark mode done; SPA + mobile pending |
+| 9 | Planned | Multi-cloud — Azure / GCP adapters |
+| 10 | Planned | Expand skills — meeting prep, email triage |
+| 11 | Planned | Email delivery — SES invitations, tenant branding |
+| 12 | Planned | Long-term memory, more channels, public release |
+| 13 | Planned | Expanded developer experience — skill scaffolding CLI, hot-reload compose, integration test harness |
 
 Full roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 
