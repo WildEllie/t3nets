@@ -251,7 +251,8 @@ Handler logic is already extracted from the two monolithic server files into `ad
 - [x] Extract `HistoryHandlers`, `TrainingHandlers`, `HealthHandlers`
 - [x] Extract `PracticeHandlers` + `WebhookHandlers` (Teams/Telegram/WhatsApp dispatch logic)
 - [ ] Split `agent/practices/registry.py` (643 lines) → `registry` + `installer` + `deployer` + `assets`
-- [ ] Fix `adapters/aws/admin_api.py`: replace manual path parsing + remove `asyncio.run()` calls
+- [x] Fix `adapters/aws/admin_api.py`: every method async, manual path-splitting replaced with named-regex dispatch, `asyncio.run()` calls removed
+      ↳ ✅ commit `6ef321b`
 - [ ] **Milestone:** `practices/registry.py` split into focused modules; `admin_api.py` modernized
 
       ↳ 📋 Full handoff: `.claude/plans/server-refactor-handoff.md`
