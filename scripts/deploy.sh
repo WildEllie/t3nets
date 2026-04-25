@@ -326,6 +326,37 @@ if [ -n "${S3_BUCKET}" ]; then
         --delete \
         --region "${REGION}"
     echo ""
+
+    # Upload built-in practice pages to s3://{bucket}/p/{name}/{file}.
+    # Pages are declared in each practice.yaml's `pages:` list. Uploaded
+    # practices are published separately by the AWS post-install hook.
+    echo "→ Uploading built-in practice pages to S3..."
+    PRACTICE_COUNT=0
+    for pdir in agent/practices/*/; do
+        [ -d "$pdir" ] || continue
+        [ -f "${pdir}practice.yaml" ] || continue
+        practice_name=$(basename "$pdir")
+        # Extract `file:` paths from the manifest's pages list. PyYAML is
+        # already a dev dependency so this is safe in the deploy environment.
+        page_files=$(python3 -c "
+import sys, yaml
+with open('${pdir}practice.yaml') as f:
+    d = yaml.safe_load(f) or {}
+for p in d.get('pages', []):
+    print(p['file'])
+" 2>/dev/null || true)
+        while IFS= read -r page_file; do
+            [ -z "$page_file" ] && continue
+            src="${pdir}${page_file}"
+            if [ -f "$src" ]; then
+                aws s3 cp "$src" "s3://${S3_BUCKET}/p/${practice_name}/${page_file}" \
+                    --region "${REGION}" --no-cli-pager > /dev/null
+                PRACTICE_COUNT=$((PRACTICE_COUNT + 1))
+            fi
+        done <<<"$page_files"
+    done
+    echo "   Uploaded ${PRACTICE_COUNT} practice page file(s)."
+    echo ""
 else
     echo "→ Skipping S3 upload (s3_bucket_name output not found)"
     echo ""

@@ -225,6 +225,24 @@ resource "aws_cloudfront_distribution" "main" {
     compress                 = false
   }
 
+  # /p/* → S3 (practice pages — built-in synced by deploy.sh; uploaded
+  # synced by the AWS post-install hook). Same path-rewrite function as
+  # default so /p/dev-jira/sprint → /p/dev-jira/sprint.html.
+  ordered_cache_behavior {
+    path_pattern           = "/p/*"
+    target_origin_id       = "s3-static"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    cache_policy_id        = aws_cloudfront_cache_policy.static_short.id
+    compress               = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.rewrite_html.arn
+    }
+  }
+
   restrictions {
     geo_restriction {
       restriction_type = "none"

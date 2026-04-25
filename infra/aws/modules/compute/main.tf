@@ -40,6 +40,11 @@ variable "s3_bucket_arn" {
   type        = string
   default     = ""
 }
+variable "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID — ECS calls CreateInvalidation after uploading practice pages to S3 under /p/{name}/*"
+  type        = string
+  default     = ""
+}
 variable "lambda_memory_size" {
   description = "Memory (MB) for the skill executor Lambda"
   type        = number
@@ -417,6 +422,14 @@ resource "aws_iam_role_policy" "ecs_task" {
         ]
         Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-skill-*"
       },
+      # Practice page publish — invalidate /p/{name}/* after uploading
+      # newly-installed practice pages to S3.
+      {
+        Sid      = "CloudFrontInvalidatePracticePages"
+        Effect   = "Allow"
+        Action   = ["cloudfront:CreateInvalidation"]
+        Resource = var.cloudfront_distribution_id != "" ? "arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/${var.cloudfront_distribution_id}" : "*"
+      },
     ]
   })
 }
@@ -483,6 +496,7 @@ resource "aws_ecs_task_definition" "router" {
             { name = "WS_API_ENDPOINT", value = var.ws_api_endpoint },
             { name = "WS_CONNECTIONS_TABLE", value = var.ws_connections_table_name },
             { name = "S3_BUCKET_NAME", value = var.s3_bucket_arn != "" ? split(":", var.s3_bucket_arn)[5] : "" },
+            { name = "CLOUDFRONT_DISTRIBUTION_ID", value = var.cloudfront_distribution_id },
             # Practice skill Lambda deployment config
             { name = "LAMBDA_ROLE_ARN", value = aws_iam_role.lambda_skill_executor.arn },
             { name = "EVENTBRIDGE_BUS_ARN", value = aws_cloudwatch_event_bus.skills.arn },

@@ -182,6 +182,10 @@ module "compute" {
   # S3 BlobStore (practice persistence)
   s3_bucket_arn = module.cdn.s3_bucket_arn
 
+  # CloudFront distribution — for ECS to invalidate /p/* after publishing
+  # practice pages to S3 on install.
+  cloudfront_distribution_id = module.cdn.cloudfront_distribution_id
+
   # Phase 5c: Ollama sidecar
   use_ollama       = var.use_ollama
   ollama_model     = var.ollama_model

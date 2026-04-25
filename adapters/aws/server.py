@@ -1890,12 +1890,27 @@ async def init() -> None:
                 wa_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
                 await tenants.set_channel_mapping(tenant_id, "whatsapp", wa_hash)
 
-    # Post-install hook for PracticeHandlers (Lambda deploy + rule rebuild)
+    # Post-install hook for PracticeHandlers (Lambda deploy + page publish + rule rebuild)
     async def _post_install_hook(practice_obj: Any, tenant_id: str) -> None:
         lc = _get_lambda_deploy_config()
         if lc["lambda_role_arn"]:
             deployed = await practices.deploy_skill_lambdas(practice_obj, lc)
             logger.info(f"Background: deployed Lambdas for {deployed}")
+        # Publish pages to S3 + invalidate CloudFront so /p/{name}/* serves the
+        # newly-uploaded version immediately. CDN+S3 paradigm — see
+        # docs/aws-infrastructure.md "Static vs dynamic content split".
+        from adapters.aws.practice_publish import publish_practice_pages
+
+        try:
+            uploaded = publish_practice_pages(
+                practice_obj,
+                s3_bucket=os.environ.get("S3_BUCKET_NAME", ""),
+                cloudfront_distribution_id=os.environ.get("CLOUDFRONT_DISTRIBUTION_ID", ""),
+                region=AWS_REGION,
+            )
+            logger.info(f"Background: published {uploaded} practice page(s) to S3")
+        except Exception as e:
+            logger.error(f"Background: practice page publish failed: {e}")
         await chat_handlers.rebuild_rules(tenant_id)
         logger.info(f"Background: rules rebuilt for tenant {tenant_id}")
 

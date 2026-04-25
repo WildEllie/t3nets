@@ -106,6 +106,26 @@ Schema supports without migration: tenant metadata, users, channel mappings, use
 - Stage: `$default` with auto-deploy
 - Access logs: JSON format, 14-day retention
 
+### Module: cdn
+**Path:** `infra/aws/modules/cdn/`
+
+- Private S3 bucket (`{prefix}-static`) — origin access via CloudFront OAC only
+- CloudFront distribution with three origins/behaviors:
+  - `/api/*`, `/callback` → API Gateway (no caching, all viewer headers)
+  - `/p/*` → S3 (practice pages — built-in synced by `deploy.sh`, uploaded synced by the AWS post-install hook in `adapters/aws/practice_publish.py`)
+  - `/*` (default) → S3 (HTML/CSS/JS/PNG dashboard assets)
+- CloudFront Function rewrites extensionless paths (`/chat` → `/chat.html`, `/p/dev-jira/sprint` → `/p/dev-jira/sprint.html`)
+- Optional custom domain via `root_domain` tfvar (provisions Route 53 zone, ACM cert in us-east-1, CloudFront aliases for apex + www)
+
+#### Static vs dynamic content split
+
+The CDN+S3 path serves **all** static content (HTML/CSS/JS/PNG plus practice pages). ECS only handles dynamic concerns: routing, AI calls + replies, REST APIs, websocket fan-out, async skill replies. We deliberately do **not** route static content through ECS — keeping the ECS task focused makes it cheap to scale and easy to reason about.
+
+Implications:
+- Adding a new built-in practice with pages? Just declare them in `practice.yaml` — `deploy.sh` walks `agent/practices/*/practice.yaml` and uploads page files to `s3://{bucket}/p/{name}/{file}` automatically.
+- Uploading a practice ZIP at runtime? `adapters/aws/practice_publish.py` uploads pages to S3 and invalidates `/p/{name}/*` in CloudFront after install. Page assets (CSS/JS referenced by the HTML) need to be in the ZIP and end up at the same `p/{name}/...` key prefix — they are NOT routed through the tenant-scoped BlobStore prefix.
+- The `/p/{practice}/{page}` route on the AWS server (`adapters/aws/server.py`) is a fallback only; in normal traffic CloudFront resolves these requests at S3 without ever reaching ECS.
+
 ---
 
 ## AWS Adapters

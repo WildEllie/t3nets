@@ -300,16 +300,17 @@ Practices are complete team experience bundles: skills + custom console pages + 
 - [x] **Milestone:** Admin can upload a practice ZIP and activate it for their tenant
 
 **Phase 6c — AWS Deployment**
-- [ ] `deploy.sh`: sync built-in practice pages to S3 under `p/` prefix
-      ↳ ⚠️ deploy.sh only syncs HTML/CSS/JS/PNG — practice assets not included
-- [ ] CloudFront: `/p/*` cache behavior pointing to S3 origin
-      ↳ ⚠️ `infra/aws/modules/cdn/main.tf` has no `/p/*` behavior — practice pages will 404 on AWS
-- [ ] ECS task role: S3 GetObject/PutObject for `practices/*` prefix
+- [x] `deploy.sh`: sync built-in practice pages to S3 under `p/` prefix
+      ↳ ✅ walks `agent/practices/*/practice.yaml`, uploads each declared page file
+- [x] CloudFront: `/p/*` cache behavior pointing to S3 origin
+      ↳ ✅ `infra/aws/modules/cdn/main.tf` ordered_cache_behavior — same path-rewrite function as default so `/p/dev-jira/sprint` resolves to `sprint.html`
+- [x] ECS task role: S3 GetObject/PutObject for `practices/*` prefix + CloudFront `CreateInvalidation` for runtime page publishing
+      ↳ ✅ `adapters/aws/practice_publish.py` uploads uploaded-practice pages and invalidates `/p/{name}/*`
 - [x] Lambda hot-reload — pull uploaded practice skills from S3 on cold start
       ↳ ✅ `adapters/aws/lambda_handler.py:83-115` loads practices via `PracticeRegistry`
 - [x] `t3nets-sdk` bundled into Docker image and Lambda ZIPs so uploaded practices resolve `t3nets_sdk` on cold start
       ↳ ✅ step 7.1 — see commit `69dd002`
-- [ ] **Milestone:** Practices work end-to-end on AWS
+- [ ] **Milestone:** Practices work end-to-end on AWS — *pending: terraform apply + smoke test on dev*
 
 **Phase 6d — Practices SDK (external practice authors)**
 
