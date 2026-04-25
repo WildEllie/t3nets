@@ -145,10 +145,11 @@ if [ "$USE_ASYNC" = "true" ]; then
         if [ -n "${PRACTICE_DIR}" ]; then
             # Practice skill: copy the practice registry + the full
             # practice directory. register_skills() will pick up the
-            # target skill via worker_path.
+            # target skill via worker_path. Phase 5d split registry.py
+            # into registry/installer/deployer/assets — copy every
+            # top-level *.py so internal imports resolve.
             mkdir -p "${LAMBDA_DIR}/agent/practices"
-            touch "${LAMBDA_DIR}/agent/practices/__init__.py"
-            cp agent/practices/registry.py "${LAMBDA_DIR}/agent/practices/"
+            cp agent/practices/*.py "${LAMBDA_DIR}/agent/practices/"
             cp -r "${PRACTICE_DIR}" "${LAMBDA_DIR}/agent/practices/"
         else
             # Legacy layout: copy just this skill under agent/skills/

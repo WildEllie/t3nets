@@ -62,9 +62,10 @@ cp "${PROJECT_ROOT}/agent/skills/registry.py" "${BUILD_DIR}/agent/skills/"
 cp -r "${PROJECT_ROOT}/agent/skills/ping/" "${BUILD_DIR}/agent/skills/ping/"
 
 # --- Copy practice registry (for loading uploaded practice skills) ---
+# Phase 5d split registry.py into registry/installer/deployer/assets — copy
+# every top-level *.py so the package's internal imports resolve at runtime.
 mkdir -p "${BUILD_DIR}/agent/practices"
-touch "${BUILD_DIR}/agent/practices/__init__.py"
-cp "${PROJECT_ROOT}/agent/practices/registry.py" "${BUILD_DIR}/agent/practices/"
+cp "${PROJECT_ROOT}"/agent/practices/*.py "${BUILD_DIR}/agent/practices/"
 # Copy built-in practices (dev-jira etc.)
 cp -r "${PROJECT_ROOT}/agent/practices/dev-jira" "${BUILD_DIR}/agent/practices/" 2>/dev/null || true
 
