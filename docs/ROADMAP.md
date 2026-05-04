@@ -342,8 +342,15 @@ A standalone `t3nets-sdk` package (under `sdk/`) so practices can live in their 
 
 Now that handler logic is extracted (Phase 5d) and Practices + the SDK have landed on PyPI (Phase 6), collapse the route-wiring layer in both server entry points. Mostly mechanical moves, but they touch live entry points on AWS and local — gate on a smoke-test pass after each.
 
-- [ ] Slim `adapters/aws/server.py` to ~400 lines (currently ~2,000 — handlers extracted, route wiring still inline)
-- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (currently ~1,460 — same reason)
+- [x] Step 1 — Extract AWS auth handlers into `adapters/aws/auth_api.py` (`AuthAPI`)
+- [x] Step 2 — Move WhatsApp webhook into shared `adapters/shared/handlers/webhooks.py`
+- [x] Step 3 — Extract async skill dispatcher into `adapters/aws/async_dispatch.py` (`AsyncSkillDispatcher`)
+- [x] Step 4 — Extract local admin/platform tenant CRUD into `adapters/local/admin_api.py` + `platform_api.py`
+- [x] Step 5 — Decompose `init()` in both servers into focused helpers
+      ↳ ✅ `adapters/aws/server.py` 2,033 → 1,418 lines (−30%); `adapters/local/dev_server.py` 1,458 → 1,132 (−22%); shipped to dev 2026-05-05 — see [handoff](../handoffs/024-phase-7-server-slim-steps-1-5.md)
+- [ ] Step 6 — Final cleanup to hit line-count targets
+- [ ] Slim `adapters/aws/server.py` to ~400 lines (currently 1,418 after step 5)
+- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (currently 1,132 after step 5)
 - [ ] **Milestone:** No handler logic duplicated across servers; each handler file independently testable; both server files are thin wiring layers
 
 ### Phase 8: Dashboard & UX

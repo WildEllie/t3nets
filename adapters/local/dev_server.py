@@ -39,11 +39,13 @@ from starlette.routing import Route
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from adapters.local.admin_api import LocalAdminAPI
 from adapters.local.anthropic_provider import AnthropicProvider
 from adapters.local.direct_bus import DirectBus
 from adapters.local.env_secrets import EnvSecretsProvider
 from adapters.local.file_blob_store import FileStore
 from adapters.local.local_pending_store import LocalPendingStore
+from adapters.local.platform_api import LocalPlatformAPI
 from adapters.local.sqlite_rule_store import SQLiteRuleStore
 from adapters.local.sqlite_store import SQLiteConversationStore
 from adapters.local.sqlite_tenant_store import SQLiteTenantStore
@@ -68,7 +70,6 @@ from agent.models.ai_models import (
     get_model,
     get_model_for_provider,
 )
-from agent.models.tenant import Invitation
 from agent.practices.registry import PracticeRegistry
 from agent.router.compiled_engine import CompiledRuleEngine
 from agent.skills.registry import SkillRegistry
@@ -104,6 +105,8 @@ training_handlers: TrainingHandlers
 health_handlers: HealthHandlers
 practice_handlers: PracticeHandlers
 webhook_handlers: WebhookHandlers
+admin_api: LocalAdminAPI
+platform_api: LocalPlatformAPI
 
 # Per-tenant compiled rule engines (keyed by tenant_id)
 _compiled_engines: dict[str, CompiledRuleEngine] = {}
@@ -600,208 +603,11 @@ async def handle_invitation_accept(request: Request) -> Response:
 
 
 async def handle_create_tenant(request: Request) -> Response:
-    """POST /api/admin/tenants -- create a tenant."""
-    try:
-        body = await request.json()
-        tenant_id = body.get("tenant_id", "").strip()
-        name = body.get("name", "").strip()
-        if not tenant_id or not name:
-            return JSONResponse({"error": "tenant_id and name are required"}, status_code=400)
-
-        from agent.models.tenant import Tenant, TenantSettings, TenantUser
-
-        now = datetime.now(timezone.utc).isoformat()
-        status = body.get("status", "active")
-        tenant = Tenant(
-            tenant_id=tenant_id,
-            name=name,
-            status=status,
-            created_at=now,
-            settings=TenantSettings(enabled_skills=skills.list_skill_names()),
-        )
-        await tenants.create_tenant(tenant)
-        logger.info(f"Created tenant: {tenant_id} ({name})")
-
-        admin_data = body.get("admin_user")
-        if admin_data:
-            user = TenantUser(
-                user_id=admin_data.get("cognito_sub", f"admin-{tenant_id}"),
-                tenant_id=tenant_id,
-                email=admin_data.get("email", "admin@local.dev"),
-                display_name=admin_data.get("display_name", "Admin"),
-                role="admin",
-            )
-            await tenants.create_user(user)
-
-        return JSONResponse({"tenant_id": tenant_id, "created": True}, status_code=201)
-    except Exception as e:
-        logger.exception("Create tenant error")
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return await admin_api.create_tenant(request)
 
 
 async def handle_admin_tenant_detail(request: Request) -> Response:
-    """Catch-all for /api/admin/tenants/{rest:path} -- dispatch by method + sub-path."""
-    rest = request.path_params["rest"]
-    method = request.method
-    path = f"/api/admin/tenants/{rest}"
-
-    try:
-        if method == "GET":
-            if "/invitations" in path:
-                return await _admin_list_invitations(path)
-            elif "/users" in path:
-                return await _admin_list_users(path)
-            return Response(status_code=404)
-
-        elif method == "POST":
-            if "/invitations" in path:
-                body = await request.json()
-                return await _admin_create_invitation(request, path, body)
-            return Response(status_code=404)
-
-        elif method == "PUT":
-            body = await request.json()
-            return await _admin_update_tenant(path, body)
-
-        elif method == "PATCH":
-            if path.endswith("/activate"):
-                return await _admin_activate_tenant(path)
-            return Response(status_code=404)
-
-        elif method == "DELETE":
-            if "/invitations/" in path:
-                return await _admin_revoke_invitation(path)
-            return Response(status_code=404)
-
-        return Response(status_code=405)
-
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-async def _admin_list_invitations(path: str) -> Response:
-    parts = path.rstrip("/").split("/")
-    tenant_id = parts[4]
-    invitations = await tenants.list_invitations(tenant_id)
-    return JSONResponse(
-        {
-            "invitations": [
-                {
-                    "invite_code": inv.invite_code,
-                    "email": inv.email,
-                    "role": inv.role,
-                    "status": inv.status,
-                    "created_at": inv.created_at,
-                    "expires_at": inv.expires_at,
-                }
-                for inv in invitations
-            ],
-            "count": len(invitations),
-        }
-    )
-
-
-async def _admin_list_users(path: str) -> Response:
-    parts = path.rstrip("/").split("/")
-    tenant_id = parts[4]
-    users = await tenants.list_users(tenant_id)
-    return JSONResponse(
-        {
-            "users": [
-                {
-                    "user_id": u.user_id,
-                    "email": u.email,
-                    "display_name": u.display_name,
-                    "role": u.role,
-                    "last_login": u.last_login,
-                }
-                for u in users
-            ],
-            "count": len(users),
-        }
-    )
-
-
-async def _admin_create_invitation(request: Request, path: str, body: dict[str, Any]) -> Response:
-    parts = path.rstrip("/").split("/")
-    tenant_id = parts[4]
-    email = body.get("email", "").strip().lower()
-    role = body.get("role", "member")
-
-    if not email:
-        return JSONResponse({"error": "email is required"}, status_code=400)
-    if role not in ("member", "admin"):
-        return JSONResponse({"error": "role must be 'member' or 'admin'"}, status_code=400)
-
-    try:
-        await tenants.get_tenant(tenant_id)
-    except Exception:
-        return JSONResponse({"error": f"Tenant '{tenant_id}' not found"}, status_code=404)
-
-    existing = await tenants.get_user_by_email(tenant_id, email)
-    if existing:
-        return JSONResponse({"error": f"{email} is already a member"}, status_code=409)
-
-    now = datetime.now(timezone.utc).isoformat()
-    invitation = Invitation(
-        invite_code=Invitation.generate_code(),
-        tenant_id=tenant_id,
-        email=email,
-        role=role,
-        status="pending",
-        invited_by="local-admin",
-        created_at=now,
-        expires_at=Invitation.default_expiry(),
-    )
-    await tenants.create_invitation(invitation)
-
-    host = request.headers.get("host", "localhost:8080")
-    scheme = "http" if "localhost" in host else "https"
-    invite_url = f"{scheme}://{host}/login?invite={invitation.invite_code}"
-
-    return JSONResponse(
-        {
-            "invite_code": invitation.invite_code,
-            "invite_url": invite_url,
-            "email": email,
-            "role": role,
-            "expires_at": invitation.expires_at,
-        },
-        status_code=201,
-    )
-
-
-async def _admin_update_tenant(path: str, body: dict[str, Any]) -> Response:
-    tenant_id = path.split("/")[-1]
-    tenant = await tenants.get_tenant(tenant_id)
-    if "name" in body:
-        tenant.name = body["name"]
-    if "status" in body:
-        tenant.status = body["status"]
-    if "ai_model" in body:
-        tenant.settings.ai_model = body["ai_model"]
-    await tenants.update_tenant(tenant)
-    return JSONResponse({"tenant_id": tenant_id, "updated": True})
-
-
-async def _admin_activate_tenant(path: str) -> Response:
-    parts = path.rstrip("/").split("/")
-    tenant_id = parts[-2]
-    tenant = await tenants.get_tenant(tenant_id)
-    tenant.status = "active"
-    await tenants.update_tenant(tenant)
-    return JSONResponse({"tenant_id": tenant_id, "status": "active", "activated": True})
-
-
-async def _admin_revoke_invitation(path: str) -> Response:
-    parts = path.rstrip("/").split("/")
-    invite_code = parts[-1]
-    invitation = await tenants.get_invitation(invite_code)
-    if not invitation:
-        return JSONResponse({"error": "Invitation not found"}, status_code=404)
-    invitation.status = "revoked"
-    await tenants.update_invitation(invitation)
-    return JSONResponse({"revoked": True, "invite_code": invite_code})
+    return await admin_api.tenant_detail(request)
 
 
 # ---------------------------------------------------------------------------
@@ -810,146 +616,15 @@ async def _admin_revoke_invitation(path: str) -> Response:
 
 
 async def handle_platform_list_tenants(request: Request) -> Response:
-    try:
-        tenant_list = await tenants.list_tenants()
-        result = []
-        for t in tenant_list:
-            try:
-                users = await tenants.list_users(t.tenant_id)
-                user_count = len(users)
-            except Exception:
-                user_count = 0
-            result.append(
-                {
-                    "tenant_id": t.tenant_id,
-                    "name": t.name,
-                    "status": t.status,
-                    "created_at": t.created_at,
-                    "user_count": user_count,
-                }
-            )
-        return JSONResponse({"tenants": result, "count": len(result)})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return await platform_api.list_tenants(request)
 
 
 async def handle_platform_create_tenant(request: Request) -> Response:
-    try:
-        import re
-
-        body = await request.json()
-        tenant_name = body.get("tenant_name", "").strip()
-        admin_email = body.get("admin_email", "").strip().lower()
-        admin_name = body.get("admin_name", "").strip()
-
-        if not tenant_name or not admin_email or not admin_name:
-            return JSONResponse(
-                {"error": "tenant_name, admin_email, and admin_name are required"},
-                status_code=400,
-            )
-
-        from agent.models.tenant import Tenant, TenantSettings
-
-        slug = re.sub(r"[^a-z0-9-]+", "-", tenant_name.lower()).strip("-")
-        if not slug or len(slug) < 2:
-            return JSONResponse(
-                {"error": "Tenant name cannot be slugified to a valid ID"}, status_code=400
-            )
-
-        candidate = slug
-        suffix = 2
-        while True:
-            try:
-                await tenants.get_tenant(candidate)
-                candidate = f"{slug}-{suffix}"
-                suffix += 1
-            except Exception:
-                break
-
-        tenant_id = candidate
-        now = datetime.now(timezone.utc).isoformat()
-        tenant = Tenant(
-            tenant_id=tenant_id,
-            name=tenant_name,
-            status="active",
-            created_at=now,
-            settings=TenantSettings(enabled_skills=skills.list_skill_names()),
-        )
-        await tenants.create_tenant(tenant)
-
-        invitation = Invitation(
-            invite_code=Invitation.generate_code(),
-            tenant_id=tenant_id,
-            email=admin_email,
-            role="admin",
-            status="pending",
-            invited_by="platform-admin",
-            created_at=now,
-            expires_at=Invitation.default_expiry(),
-        )
-        await tenants.create_invitation(invitation)
-
-        host = request.headers.get("host", "localhost:8080")
-        scheme = "http" if "localhost" in host else "https"
-        invite_url = f"{scheme}://{host}/login?invite={invitation.invite_code}"
-
-        return JSONResponse(
-            {
-                "tenant_id": tenant_id,
-                "tenant_name": tenant_name,
-                "invite_code": invitation.invite_code,
-                "invite_url": invite_url,
-                "admin_name": admin_name,
-                "admin_email": admin_email,
-            },
-            status_code=201,
-        )
-    except Exception as e:
-        logger.exception("Platform create tenant error")
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return await platform_api.create_tenant(request)
 
 
 async def handle_platform_tenant_detail(request: Request) -> Response:
-    """Catch-all for /api/platform/tenants/{rest:path} -- dispatch by method + sub-path."""
-    rest = request.path_params["rest"]
-    method = request.method
-    path = f"/api/platform/tenants/{rest}"
-
-    try:
-        if method == "DELETE":
-            parts = path.rstrip("/").split("/")
-            tenant_id = parts[-1]
-            if tenant_id == "default":
-                return JSONResponse({"error": "Cannot delete the default tenant"}, status_code=400)
-            tenant = await tenants.get_tenant(tenant_id)
-            tenant.status = "deleted"
-            await tenants.update_tenant(tenant)
-            return JSONResponse({"tenant_id": tenant_id, "status": "deleted"})
-
-        elif method == "PATCH":
-            if path.endswith("/suspend"):
-                parts = path.rstrip("/").split("/")
-                tenant_id = parts[-2]
-                if tenant_id == "default":
-                    return JSONResponse(
-                        {"error": "Cannot suspend the default tenant"}, status_code=400
-                    )
-                tenant = await tenants.get_tenant(tenant_id)
-                tenant.status = "suspended"
-                await tenants.update_tenant(tenant)
-                return JSONResponse({"tenant_id": tenant_id, "status": "suspended"})
-            elif path.endswith("/activate"):
-                parts = path.rstrip("/").split("/")
-                tenant_id = parts[-2]
-                tenant = await tenants.get_tenant(tenant_id)
-                tenant.status = "active"
-                await tenants.update_tenant(tenant)
-                return JSONResponse({"tenant_id": tenant_id, "status": "active"})
-
-        return Response(status_code=404)
-
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return await platform_api.tenant_detail(request)
 
 
 # ---------------------------------------------------------------------------
@@ -1187,37 +862,12 @@ app = Starlette(routes=routes, middleware=middleware)
 # ---------------------------------------------------------------------------
 
 
-async def init(extra_practice_dirs: list[Path] | None = None) -> None:
-    """Initialize all components."""
-    global \
-        ai, \
-        memory, \
-        tenants, \
-        secrets, \
-        skills, \
-        bus, \
-        rule_store, \
-        training_store, \
-        error_handler, \
-        practices, \
-        blobs, \
-        pending_store, \
-        started_at, \
-        settings_handlers, \
-        integration_handlers, \
-        chat_handlers, \
-        history_handlers, \
-        training_handlers, \
-        health_handlers, \
-        practice_handlers, \
-        webhook_handlers
+def _init_local_adapters() -> None:
+    """Secrets, AI providers, conversation/tenant stores, blobs, pending."""
+    global ai, memory, tenants, secrets, skills, blobs, pending_store
 
-    started_at = time.time()
-
-    # Load .env
     secrets = EnvSecretsProvider(".env")
 
-    # Initialize AI providers -- both can run simultaneously
     _providers: dict[str, AnthropicProvider | OllamaProvider] = {}
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if api_key:
@@ -1238,12 +888,15 @@ async def init(extra_practice_dirs: list[Path] | None = None) -> None:
     blobs = FileStore("data/blobs")
     pending_store = LocalPendingStore()
 
-    # Load skills -- base skills (ping) from agent/skills/
     skills = SkillRegistry()
     skills_dir = Path(__file__).parent.parent.parent / "agent" / "skills"
     skills.load_from_directory(skills_dir)
 
-    # Load practices and register their skills
+
+def _init_local_practices(extra_practice_dirs: list[Path] | None) -> None:
+    """Load built-in + uploaded practices, register their skills."""
+    global practices
+
     practices = PracticeRegistry()
     practices_dir = Path(__file__).parent.parent.parent / "agent" / "practices"
     practices.load_builtin(practices_dir)
@@ -1255,19 +908,25 @@ async def init(extra_practice_dirs: list[Path] | None = None) -> None:
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
     logger.info(f"Loaded practices: {[p.name for p in practices.list_all()]}")
 
-    # Rule and training stores
+
+def _init_local_dispatch() -> None:
+    """rule_store, training_store, error handler, DirectBus, channels."""
+    global rule_store, training_store, error_handler, bus
+
     rule_store = SQLiteRuleStore("data/t3nets.db")
     training_store = SQLiteTrainingStore("data/t3nets.db")
     error_handler = ErrorHandler()
-
-    # Direct bus -- with context for practice skills (BlobStore access)
     bus = DirectBus(skills, secrets, context={"blob_store": blobs})
 
-    # Register channels
     channels = ChannelRegistry()
     channels.register(DashboardAdapter())
 
-    # --- Instantiate shared handler classes ---
+
+def _init_local_handlers() -> None:
+    """Construct all shared handler classes."""
+    global settings_handlers, integration_handlers, admin_api, platform_api
+    global history_handlers, training_handlers, health_handlers, practice_handlers
+    global chat_handlers, webhook_handlers
 
     settings_handlers = SettingsHandlers(
         tenant_store=tenants,
@@ -1282,6 +941,9 @@ async def init(extra_practice_dirs: list[Path] | None = None) -> None:
     )
 
     integration_handlers = IntegrationHandlers(secrets=secrets)
+
+    admin_api = LocalAdminAPI(tenants=tenants, skills=skills)
+    platform_api = LocalPlatformAPI(tenants=tenants, skills=skills)
 
     history_handlers = HistoryHandlers(conversation_store=memory)
 
@@ -1362,7 +1024,9 @@ async def init(extra_practice_dirs: list[Path] | None = None) -> None:
         enrich_match_params=_enrich_match_params,
     )
 
-    # Seed default tenant
+
+async def _seed_local_tenants_and_engines() -> None:
+    """Seed default + acme tenants, log integrations, load/build rule engines."""
     tenant = tenants.seed_default_tenant(
         tenant_id="local",
         name="Dev",
@@ -1380,7 +1044,6 @@ async def init(extra_practice_dirs: list[Path] | None = None) -> None:
         await tenants.update_tenant(tenant)
     logger.info(f"Tenant: {tenant.name} (skills: {tenant.settings.enabled_skills})")
 
-    # Seed second tenant for multi-tenancy testing
     acme = tenants.seed_default_tenant(
         tenant_id="acme",
         name="Acme Corp",
@@ -1393,7 +1056,6 @@ async def init(extra_practice_dirs: list[Path] | None = None) -> None:
     connected = await secrets.list_integrations("local")
     logger.info(f"Connected integrations: {connected}")
 
-    # Build compiled rule engines for all tenants (load from DB or generate via AI)
     for t in [tenant, acme]:
         cached = await rule_store.load_rule_set(t.tenant_id)
         if cached:
@@ -1405,6 +1067,18 @@ async def init(extra_practice_dirs: list[Path] | None = None) -> None:
         else:
             logger.info(f"No rules cached for '{t.tenant_id}' -- generating via AI...")
             await chat_handlers.rebuild_rules(t.tenant_id)
+
+
+async def init(extra_practice_dirs: list[Path] | None = None) -> None:
+    """Initialize all components."""
+    global started_at
+    started_at = time.time()
+
+    _init_local_adapters()
+    _init_local_practices(extra_practice_dirs)
+    _init_local_dispatch()
+    _init_local_handlers()
+    await _seed_local_tenants_and_engines()
 
 
 def _api_key_preview() -> str:

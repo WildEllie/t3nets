@@ -1,11 +1,12 @@
-"""Shared Teams and Telegram webhook handlers.
+"""Shared Teams, Telegram, and WhatsApp webhook handlers.
 
 Extracted from ``adapters/aws/server.py`` and ``adapters/local/dev_server.py``.
 The dispatch/routing logic is identical across servers; only the adapter
 *resolution* differs (DynamoDB lookup vs. env-var/SQLite lookup).  Each server
 provides its own resolver callable at construction time.
 
-WhatsApp is intentionally **not** included here — it has no local equivalent.
+WhatsApp resolution is AWS-only — local does not currently provide a resolver,
+so the WhatsApp routes simply 401 if invoked there.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Type aliases for the resolver callables each server must supply.
 TeamsResolverT = Callable[[str], Awaitable[TeamsAdapter | None]]
 TelegramResolverT = Callable[[str], Awaitable[TelegramAdapter | None]]
+WhatsAppResolverT = Callable[[str], Awaitable[Any]]
 
 # Type alias for the tenant resolver used inside message handlers.
 # Given (channel, channel_key) -> Tenant (or raises).
@@ -121,6 +123,7 @@ class WebhookHandlers:
         resolve_tenant_by_channel: TenantByChannelT,
         log_training: Callable[..., Awaitable[None]],
         enrich_match_params: Callable[[Any, str], None],
+        resolve_whatsapp_adapter: WhatsAppResolverT | None = None,
         async_skill_handler: AsyncSkillHandlerT | None = None,
         use_async_skills: bool = False,
         event_bus: EventBus | None = None,
@@ -136,6 +139,7 @@ class WebhookHandlers:
         self._resolve_model = resolve_model
         self._resolve_teams = resolve_teams_adapter
         self._resolve_telegram = resolve_telegram_adapter
+        self._resolve_whatsapp = resolve_whatsapp_adapter
         self._resolve_tenant = resolve_tenant_by_channel
         self._log_training = log_training
         self._enrich = enrich_match_params
@@ -411,6 +415,121 @@ class WebhookHandlers:
         await adapter.send_response(outbound)
 
     # ------------------------------------------------------------------
+    # WhatsApp webhook
+    # ------------------------------------------------------------------
+
+    async def handle_whatsapp_webhook(self, request: Request) -> Response:
+        """POST /api/channels/whatsapp/webhook/{token_hash}
+
+        Always returns 200 to Whapi.cloud (except auth failures) to prevent
+        indefinite retry loops.
+        """
+        from agent.channels.whatsapp import WhatsAppAdapter
+
+        try:
+            body_bytes = await request.body()
+            event = json.loads(body_bytes) if body_bytes else {}
+
+            token_hash = request.path_params.get("token_hash", "")
+            if self._resolve_whatsapp is None:
+                logger.warning("WhatsApp webhook hit but no resolver configured")
+                return JSONResponse({"error": "Not configured"}, status_code=401)
+            whatsapp_adapter = await self._resolve_whatsapp(token_hash)
+            if not whatsapp_adapter:
+                logger.warning(f"No WhatsApp adapter for token hash {token_hash[:8]}...")
+                return JSONResponse({"error": "Not configured"}, status_code=401)
+
+            if not whatsapp_adapter.validate_webhook(dict(request.headers), body_bytes):
+                logger.warning("WhatsApp webhook secret validation failed")
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+            if WhatsAppAdapter.is_message_event(event):
+                _fire_and_forget(self._handle_whatsapp_message(whatsapp_adapter, event))
+
+        except Exception:
+            logger.exception("WhatsApp webhook error")
+
+        return JSONResponse({"ok": True})
+
+    async def _handle_whatsapp_message(self, adapter: Any, event: dict[str, Any]) -> None:
+        message = adapter.parse_inbound(event)
+        text = message.text
+        if not text:
+            return
+
+        token_hash = hashlib.sha256(adapter.api_token.encode()).hexdigest()[:16]
+        try:
+            tenant = await self._resolve_tenant("whatsapp", token_hash)
+        except Exception:
+            logger.warning(f"No tenant mapped for WhatsApp {token_hash[:8]}")
+            return
+
+        tenant_id = tenant.tenant_id
+        conversation_id = f"wa-{message.conversation_id}"
+        logger.info(f"WhatsApp [{tenant_id}]: {text[:100]}")
+
+        clean_text, is_raw = strip_raw_flag(text)
+        active_provider, active_model, model_short_name = self._resolve_model(tenant)
+        provider_ai = self._ai.for_provider(active_provider)
+        system = (
+            f"You are an AI assistant for {tenant.name} on the T3nets platform.\n"
+            "Be direct, helpful, and action-oriented. Flag risks early. "
+            "Suggest actions.\n"
+            "You are communicating via WhatsApp. Keep responses concise and "
+            "conversational."
+        )
+        history = _strip_metadata(await self._memory.get_conversation(tenant_id, conversation_id))
+
+        engine = self._get_engine(tenant_id)
+
+        if not is_raw and is_conversational(clean_text):
+            self._stats["conversational"] += 1
+            messages = history + [{"role": "user", "content": clean_text}]
+            response = await provider_ai.chat(active_model, system, messages, [])
+            assistant_text = response.text or "Hey! How can I help?"
+            total_tokens = response.input_tokens + response.output_tokens
+        else:
+            assistant_text, total_tokens = await self._route_channel_message(
+                channel="whatsapp",
+                channel_type=ChannelType.WHATSAPP,
+                engine=engine,
+                clean_text=clean_text,
+                is_raw=is_raw,
+                tenant=tenant,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                raw_conversation_id=message.conversation_id,
+                channel_user_id=message.channel_user_id,
+                active_provider=active_provider,
+                active_model=active_model,
+                model_short_name=model_short_name,
+                provider_ai=provider_ai,
+                system=system,
+                history=history,
+                adapter=adapter,
+            )
+
+        self._stats["total_tokens"] += total_tokens
+        await self._memory.save_turn(
+            tenant_id,
+            conversation_id,
+            clean_text,
+            assistant_text,
+            metadata={
+                "route": "whatsapp",
+                "model": model_short_name,
+                "tokens": total_tokens,
+            },
+        )
+        outbound = OutboundMessage(
+            channel=ChannelType.WHATSAPP,
+            conversation_id=message.conversation_id,
+            recipient_id=message.channel_user_id,
+            text=assistant_text,
+        )
+        await adapter.send_response(outbound)
+
+    # ------------------------------------------------------------------
     # Shared Tier 1/2/3 routing for channel messages
     # ------------------------------------------------------------------
 
@@ -439,7 +558,7 @@ class WebhookHandlers:
 
         Returns ``(assistant_text, total_tokens)``.
         """
-        prefix = "tg" if channel == "telegram" else channel
+        prefix = {"telegram": "tg", "whatsapp": "wa"}.get(channel, channel)
         router = engine or self._fallback
         match = router.match(clean_text, tenant.settings.enabled_skills) if router else None
 

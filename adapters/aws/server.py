@@ -39,6 +39,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from adapters.aws.admin_api import AdminAPI
+from adapters.aws.async_dispatch import AsyncSkillDispatcher
+from adapters.aws.auth_api import AuthAPI
 from adapters.aws.auth_middleware import AuthError, extract_auth
 from adapters.aws.bedrock_provider import BedrockProvider
 from adapters.aws.dynamo_rule_store import DynamoDBRuleStore
@@ -46,7 +48,7 @@ from adapters.aws.dynamo_training_store import DynamoDBTrainingStore
 from adapters.aws.dynamodb_conversation_store import DynamoDBConversationStore
 from adapters.aws.dynamodb_tenant_store import DynamoDBTenantStore
 from adapters.aws.event_bridge_bus import EventBridgeBus
-from adapters.aws.pending_requests import PendingRequest, PendingRequestsStore
+from adapters.aws.pending_requests import PendingRequestsStore
 from adapters.aws.platform_api import PlatformAPI
 from adapters.aws.result_router import AsyncResultRouter
 from adapters.aws.secrets_manager import SecretsManagerProvider
@@ -63,7 +65,6 @@ from adapters.shared.handlers.settings import SettingsHandlers
 from adapters.shared.handlers.training import TrainingHandlers
 from adapters.shared.handlers.webhooks import WebhookHandlers
 from adapters.shared.multi_provider import MultiAIProvider
-from adapters.shared.server_utils import _format_raw_json, _strip_metadata
 from agent.channels.base import ChannelRegistry
 from agent.channels.dashboard import DashboardAdapter
 from agent.channels.teams import TeamsAdapter
@@ -74,9 +75,8 @@ from agent.models.ai_models import (
     get_model,
     get_model_for_provider,
 )
-from agent.models.message import ChannelType
 from agent.practices.registry import PracticeRegistry
-from agent.router.compiled_engine import CompiledRuleEngine, strip_raw_flag
+from agent.router.compiled_engine import CompiledRuleEngine
 from agent.router.rule_router import RuleBasedRouter
 from agent.skills.registry import SkillRegistry
 from agent.sse import SSEConnectionManager
@@ -103,6 +103,8 @@ blobs: Any  # S3BlobStore or None
 rule_store: DynamoDBRuleStore
 training_store: DynamoDBTrainingStore
 admin_api: AdminAPI
+auth_api: AuthAPI
+async_dispatch: AsyncSkillDispatcher | None = None
 
 # Shared handler instances (initialised in init())
 settings_handlers: SettingsHandlers
@@ -594,293 +596,35 @@ async def handle_rules_admin(request: Request) -> Response:
 
 
 async def handle_auth_config(request: Request) -> Response:
-    response: dict[str, Any] = {
-        "enabled": bool(COGNITO_USER_POOL_ID),
-        "client_id": COGNITO_APP_CLIENT_ID,
-        "auth_domain": COGNITO_AUTH_DOMAIN,
-        "user_pool_id": COGNITO_USER_POOL_ID,
-    }
-    if WS_API_ENDPOINT:
-        response["ws_endpoint"] = WS_API_ENDPOINT
-    return JSONResponse(response)
+    return await auth_api.config(request)
 
 
 async def handle_auth_me(request: Request) -> Response:
-    if not COGNITO_USER_POOL_ID:
-        return JSONResponse(
-            {
-                "authenticated": False,
-                "tenant_id": DEFAULT_TENANT,
-                "tenant_status": "active",
-            }
-        )
-    try:
-        auth = extract_auth(request.headers)
-        email = auth.email
-        tenant_id = ""
-        display_name = ""
-        avatar_url = ""
-        role = "member"
-        tenant_status = "onboarding"
-
-        try:
-            user = await tenants.get_user_by_cognito_sub(auth.user_id)
-            if user:
-                tenant_id = user.tenant_id
-                email = email or user.email
-                display_name = user.display_name
-                avatar_url = user.avatar_url
-                role = user.role
-                logger.info(
-                    f"auth/me: resolved tenant '{tenant_id}' from DynamoDB "
-                    f"for sub {auth.user_id[:8]}..."
-                )
-        except Exception as e:
-            logger.warning(f"auth/me DynamoDB lookup failed: {e}")
-
-        tenant_name = ""
-        if tenant_id:
-            try:
-                tenant = await tenants.get_tenant(tenant_id)
-                tenant_status = tenant.status
-                tenant_name = tenant.name
-            except Exception:
-                tenant_status = "active"
-
-        return JSONResponse(
-            {
-                "authenticated": True,
-                "user_id": auth.user_id,
-                "tenant_id": tenant_id,
-                "email": email,
-                "role": role,
-                "display_name": display_name,
-                "avatar_url": avatar_url,
-                "tenant_status": tenant_status,
-                "tenant_name": tenant_name,
-            }
-        )
-    except AuthError as e:
-        return JSONResponse({"error": e.message}, status_code=e.status)
+    return await auth_api.me(request)
 
 
 async def handle_auth_login(request: Request) -> Response:
-    try:
-        body = await request.json()
-        email = body.get("email", "").strip()
-        password = body.get("password", "")
-        if not email or not password:
-            return JSONResponse({"error": "Email and password are required"}, status_code=400)
-        if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
-            return JSONResponse({"error": "Auth not configured"}, status_code=500)
-
-        import boto3  # type: ignore[import-untyped]
-
-        client = boto3.client("cognito-idp", region_name=AWS_REGION)
-        result = client.initiate_auth(
-            ClientId=COGNITO_APP_CLIENT_ID,
-            AuthFlow="USER_PASSWORD_AUTH",
-            AuthParameters={"USERNAME": email, "PASSWORD": password},
-        )
-        challenge = result.get("ChallengeName", "")
-        if challenge:
-            logger.warning(f"Auth login challenge: {challenge} for {email}")
-            return JSONResponse(
-                {"error": f"Account requires action: {challenge}", "code": challenge},
-                status_code=403,
-            )
-        auth_result = result.get("AuthenticationResult", {})
-        return JSONResponse(
-            {
-                "id_token": auth_result.get("IdToken", ""),
-                "access_token": auth_result.get("AccessToken", ""),
-                "refresh_token": auth_result.get("RefreshToken", ""),
-            }
-        )
-    except Exception as e:
-        err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
-        if err_code == "NotAuthorizedException":
-            return JSONResponse({"error": "Invalid email or password"}, status_code=401)
-        elif err_code == "UserNotConfirmedException":
-            return JSONResponse(
-                {"error": "Email not verified", "code": "USER_NOT_CONFIRMED"}, status_code=403
-            )
-        elif err_code == "UserNotFoundException":
-            return JSONResponse({"error": "Invalid email or password"}, status_code=401)
-        elif err_code == "PasswordResetRequiredException":
-            return JSONResponse(
-                {"error": "Password reset required", "code": "PASSWORD_RESET_REQUIRED"},
-                status_code=403,
-            )
-        else:
-            logger.exception("Auth login error")
-            return JSONResponse({"error": str(e)}, status_code=500)
+    return await auth_api.login(request)
 
 
 async def handle_auth_signup(request: Request) -> Response:
-    try:
-        body = await request.json()
-        email = body.get("email", "").strip()
-        password = body.get("password", "")
-        name = body.get("name", "").strip()
-        if not email or not password:
-            return JSONResponse({"error": "Email and password are required"}, status_code=400)
-        if not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
-            return JSONResponse({"error": "Auth not configured"}, status_code=500)
-
-        import boto3
-
-        client = boto3.client("cognito-idp", region_name=AWS_REGION)
-        user_attrs = [
-            {"Name": "email", "Value": email},
-            {"Name": "name", "Value": name or email.split("@")[0]},
-        ]
-        result = client.sign_up(
-            ClientId=COGNITO_APP_CLIENT_ID,
-            Username=email,
-            Password=password,
-            UserAttributes=user_attrs,
-        )
-        return JSONResponse(
-            {
-                "user_sub": result.get("UserSub", ""),
-                "confirmed": result.get("UserConfirmed", False),
-            },
-            status_code=201,
-        )
-    except Exception as e:
-        err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
-        if err_code == "UsernameExistsException":
-            return JSONResponse(
-                {"error": "An account with this email already exists"}, status_code=409
-            )
-        elif err_code == "InvalidPasswordException":
-            msg = getattr(e, "response", {}).get("Error", {}).get("Message", str(e))
-            return JSONResponse({"error": msg}, status_code=400)
-        else:
-            logger.exception("Auth signup error")
-            return JSONResponse({"error": str(e)}, status_code=500)
+    return await auth_api.signup(request)
 
 
 async def handle_auth_confirm(request: Request) -> Response:
-    try:
-        body = await request.json()
-        email = body.get("email", "").strip()
-        code = body.get("code", "").strip()
-        if not email or not code:
-            return JSONResponse({"error": "Email and code are required"}, status_code=400)
-        if not COGNITO_APP_CLIENT_ID:
-            return JSONResponse({"error": "Auth not configured"}, status_code=500)
-
-        import boto3
-
-        client = boto3.client("cognito-idp", region_name=AWS_REGION)
-        client.confirm_sign_up(
-            ClientId=COGNITO_APP_CLIENT_ID, Username=email, ConfirmationCode=code
-        )
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
-        if err_code == "CodeMismatchException":
-            return JSONResponse({"error": "Invalid verification code"}, status_code=400)
-        elif err_code == "ExpiredCodeException":
-            return JSONResponse({"error": "Verification code has expired"}, status_code=400)
-        else:
-            logger.exception("Auth confirm error")
-            return JSONResponse({"error": str(e)}, status_code=500)
+    return await auth_api.confirm(request)
 
 
 async def handle_auth_refresh(request: Request) -> Response:
-    try:
-        body = await request.json()
-        refresh_token = body.get("refresh_token", "")
-        if not refresh_token:
-            return JSONResponse({"error": "refresh_token is required"}, status_code=400)
-        if not COGNITO_APP_CLIENT_ID:
-            return JSONResponse({"error": "Auth not configured"}, status_code=500)
-
-        import boto3
-
-        client = boto3.client("cognito-idp", region_name=AWS_REGION)
-        result = client.initiate_auth(
-            ClientId=COGNITO_APP_CLIENT_ID,
-            AuthFlow="REFRESH_TOKEN_AUTH",
-            AuthParameters={"REFRESH_TOKEN": refresh_token},
-        )
-        auth_result = result.get("AuthenticationResult", {})
-        return JSONResponse(
-            {
-                "id_token": auth_result.get("IdToken", ""),
-                "access_token": auth_result.get("AccessToken", ""),
-            }
-        )
-    except Exception as e:
-        logger.exception("Auth refresh error")
-        return JSONResponse({"error": str(e)}, status_code=500)
+    return await auth_api.refresh(request)
 
 
 async def handle_auth_forgot_password(request: Request) -> Response:
-    try:
-        body = await request.json()
-        email = body.get("email", "").strip()
-        if not email:
-            return JSONResponse({"error": "Email is required"}, status_code=400)
-        if not COGNITO_APP_CLIENT_ID:
-            return JSONResponse({"error": "Auth not configured"}, status_code=500)
-
-        import boto3
-
-        client = boto3.client("cognito-idp", region_name=AWS_REGION)
-        client.forgot_password(ClientId=COGNITO_APP_CLIENT_ID, Username=email)
-        return JSONResponse({"message": "Reset code sent"})
-    except Exception as e:
-        err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
-        if err_code in ("UserNotFoundException", "InvalidParameterException"):
-            return JSONResponse({"message": "Reset code sent"})
-        elif err_code == "LimitExceededException":
-            return JSONResponse(
-                {"error": "Too many attempts. Please try again later."}, status_code=429
-            )
-        else:
-            logger.exception("Auth forgot-password error")
-            return JSONResponse({"error": str(e)}, status_code=500)
+    return await auth_api.forgot_password(request)
 
 
 async def handle_auth_confirm_reset(request: Request) -> Response:
-    try:
-        body = await request.json()
-        email = body.get("email", "").strip()
-        code = body.get("code", "").strip()
-        new_password = body.get("new_password", "")
-        if not email or not code or not new_password:
-            return JSONResponse(
-                {"error": "Email, code, and new password are required"}, status_code=400
-            )
-        if not COGNITO_APP_CLIENT_ID:
-            return JSONResponse({"error": "Auth not configured"}, status_code=500)
-
-        import boto3
-
-        client = boto3.client("cognito-idp", region_name=AWS_REGION)
-        client.confirm_forgot_password(
-            ClientId=COGNITO_APP_CLIENT_ID,
-            Username=email,
-            ConfirmationCode=code,
-            Password=new_password,
-        )
-        return JSONResponse({"message": "Password reset successful"})
-    except Exception as e:
-        err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
-        if err_code == "CodeMismatchException":
-            return JSONResponse({"error": "Invalid verification code"}, status_code=400)
-        elif err_code == "ExpiredCodeException":
-            return JSONResponse({"error": "Verification code has expired"}, status_code=400)
-        elif err_code == "InvalidPasswordException":
-            msg = getattr(e, "response", {}).get("Error", {}).get("Message", str(e))
-            return JSONResponse({"error": msg}, status_code=400)
-        else:
-            logger.exception("Auth confirm-reset error")
-            return JSONResponse({"error": str(e)}, status_code=500)
+    return await auth_api.confirm_reset(request)
 
 
 # ---------------------------------------------------------------------------
@@ -1003,118 +747,6 @@ async def handle_platform(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# AWS-specific: async skill dispatch
-# ---------------------------------------------------------------------------
-
-
-async def _handle_async_skill(
-    tenant_id: str,
-    user_email: str,
-    skill_name: str,
-    params: dict[str, Any],
-    conversation_id: str,
-    user_message: str,
-    is_raw: bool,
-    route_type: str,
-    model_id: str = "",
-    model_short_name: str = "",
-) -> Response:
-    import uuid
-
-    request_id = f"async-{uuid.uuid4().hex[:12]}"
-    user_key = user_email or "anonymous"
-    pending_req = PendingRequest(
-        request_id=request_id,
-        tenant_id=tenant_id,
-        skill_name=skill_name,
-        channel="dashboard",
-        conversation_id=conversation_id,
-        reply_target=user_key,
-        user_key=user_key,
-        is_raw=is_raw,
-        user_message=user_message,
-        model_id=model_id,
-        model_short_name=model_short_name,
-        route_type=route_type,
-    )
-    pending_store.create(pending_req)  # type: ignore[union-attr]
-    await event_bus.publish_skill_invocation(  # type: ignore[union-attr]
-        tenant_id,
-        skill_name,
-        params,
-        conversation_id,
-        request_id,
-        "dashboard",
-        user_key,
-        is_raw=is_raw,
-    )
-    stats[f"{route_type}_routed"] += 1
-    logger.info(
-        f"Chat: async skill '{skill_name}' dispatched, request={request_id[:8]}, user={user_key}"
-    )
-    if route_type == "ai":
-        _fire_and_forget(
-            chat_handlers.log_training(tenant_id, user_message, skill_name, params.get("action"))
-        )
-    return JSONResponse(
-        {
-            "status": "processing",
-            "request_id": request_id,
-            "conversation_id": conversation_id,
-            "skill": skill_name,
-            "route": route_type,
-            "model": "",
-            "user_email": user_email,
-        }
-    )
-
-
-def _handle_async_channel_skill(
-    tenant_id: str,
-    channel: str,
-    skill_name: str,
-    params: dict[str, Any],
-    conversation_id: str,
-    reply_target: str,
-    user_key: str,
-    user_message: str,
-    is_raw: bool,
-    route_type: str,
-    model_id: str = "",
-    model_short_name: str = "",
-    service_url: str = "",
-) -> None:
-    import uuid
-
-    request_id = f"async-{channel}-{uuid.uuid4().hex[:12]}"
-    pending_req = PendingRequest(
-        request_id=request_id,
-        tenant_id=tenant_id,
-        skill_name=skill_name,
-        channel=channel,
-        conversation_id=conversation_id,
-        reply_target=reply_target,
-        user_key=user_key,
-        is_raw=is_raw,
-        user_message=user_message,
-        model_id=model_id,
-        model_short_name=model_short_name,
-        route_type=route_type,
-        service_url=service_url,
-    )
-    pending_store.create(pending_req)  # type: ignore[union-attr]
-    asyncio.ensure_future(
-        event_bus.publish_skill_invocation(  # type: ignore[union-attr]
-            tenant_id, skill_name, params, conversation_id, request_id, channel, user_key
-        )
-    )
-    stats[f"{route_type}_routed"] += 1
-    logger.info(
-        f"{channel.capitalize()}: async skill '{skill_name}' dispatched, request={request_id[:8]}"
-    )
-
-
-# ---------------------------------------------------------------------------
 # AWS-specific: channel adapter resolvers
 # ---------------------------------------------------------------------------
 
@@ -1189,294 +821,12 @@ async def _get_whatsapp_adapter(token_hash: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# WhatsApp webhook (NOT extracted — AWS-specific)
+# WhatsApp webhook (delegates to shared WebhookHandlers)
 # ---------------------------------------------------------------------------
 
 
 async def handle_whatsapp_webhook(request: Request) -> Response:
-    from agent.channels.whatsapp import WhatsAppAdapter
-
-    # ALWAYS return 200 to Whapi.cloud — otherwise it retries indefinitely.
-    try:
-        body_bytes = await request.body()
-        event = json.loads(body_bytes) if body_bytes else {}
-
-        token_hash = request.path_params.get("token_hash", "")
-        whatsapp_adapter = await _get_whatsapp_adapter(token_hash)
-        if not whatsapp_adapter:
-            logger.warning(f"No WhatsApp adapter for token hash {token_hash[:8]}...")
-            return JSONResponse({"error": "Not configured"}, status_code=401)
-
-        if not whatsapp_adapter.validate_webhook(dict(request.headers), body_bytes):
-            logger.warning("WhatsApp webhook secret validation failed")
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-        if WhatsAppAdapter.is_message_event(event):
-            _fire_and_forget(_handle_whatsapp_message(whatsapp_adapter, event))
-
-    except Exception:
-        logger.exception("WhatsApp webhook error")
-
-    return JSONResponse({"ok": True})
-
-
-async def _handle_whatsapp_message(adapter: Any, event: dict[str, Any]) -> None:
-    from agent.models.message import OutboundMessage
-
-    message = adapter.parse_inbound(event)
-    text = message.text
-    if not text:
-        return
-
-    token_hash = hashlib.sha256(adapter.api_token.encode()).hexdigest()[:16]
-    try:
-        tenant = await tenants.get_by_channel_id("whatsapp", token_hash)
-    except Exception:
-        logger.warning(f"No tenant mapped for WhatsApp {token_hash[:8]}")
-        return
-
-    tenant_id = tenant.tenant_id
-    conversation_id = f"wa-{message.conversation_id}"
-    logger.info(f"WhatsApp [{tenant_id}]: {text[:100]}")
-
-    clean_text, is_raw = strip_raw_flag(text)
-    active_provider, active_model, model_short_name = _resolve_model(tenant)
-    provider_ai = ai.for_provider(active_provider)
-    system = (
-        f"You are an AI assistant for {tenant.name} on the T3nets platform.\n"
-        "Be direct, helpful, and action-oriented. Flag risks early. Suggest actions.\n"
-        "You are communicating via WhatsApp. Keep responses concise and conversational."
-    )
-    history = _strip_metadata(await memory.get_conversation(tenant_id, conversation_id))
-
-    from agent.router.compiled_engine import is_conversational
-
-    wa_engine = _get_engine(tenant_id)
-    if not is_raw and is_conversational(clean_text):
-        stats["conversational"] += 1
-        messages = history + [{"role": "user", "content": clean_text}]
-        response = await provider_ai.chat(active_model, system, messages, [])
-        assistant_text = response.text or "Hey! How can I help?"
-        total_tokens = response.input_tokens + response.output_tokens
-    else:
-        wa_router = wa_engine or _fallback_router
-        match = wa_router.match(clean_text, tenant.settings.enabled_skills) if wa_router else None
-        if match:
-            _enrich_match_params(match, clean_text)
-
-            if USE_ASYNC_SKILLS and event_bus and pending_store:
-                _handle_async_channel_skill(
-                    tenant_id=tenant_id,
-                    channel="whatsapp",
-                    skill_name=match.skill_name,
-                    params=match.params,
-                    conversation_id=conversation_id,
-                    reply_target=message.conversation_id,
-                    user_key=message.channel_user_id,
-                    user_message=clean_text,
-                    is_raw=is_raw,
-                    route_type="rule",
-                    model_id=active_model,
-                    model_short_name=model_short_name,
-                )
-                return
-
-            request_id = f"wa-rule-{conversation_id}"
-            await bus.publish_skill_invocation(
-                tenant_id,
-                match.skill_name,
-                match.params,
-                conversation_id,
-                request_id,
-                "whatsapp",
-                message.channel_user_id,
-            )
-            skill_result = bus.get_result(request_id) or {"error": "No result"}
-            stats["rule_routed"] += 1
-
-            # Audio results: send directly with attachment, skip AI formatting
-            if skill_result.get("type") == "audio":
-                assistant_text = skill_result.get("text", "")
-                total_tokens = 0
-                audio_att_wa: dict[str, Any] = {
-                    "type": "audio",
-                    "format": skill_result.get("format", "wav"),
-                }
-                if skill_result.get("audio_url"):
-                    audio_att_wa["audio_url"] = skill_result["audio_url"]
-                if skill_result.get("audio_b64"):
-                    audio_att_wa["audio_b64"] = skill_result["audio_b64"]
-                outbound = OutboundMessage(
-                    channel=ChannelType.WHATSAPP,
-                    conversation_id=message.conversation_id,
-                    recipient_id=message.channel_user_id,
-                    text=assistant_text,
-                    attachments=[audio_att_wa],
-                )
-                await adapter.send_response(outbound)
-                await memory.save_turn(
-                    tenant_id,
-                    conversation_id,
-                    clean_text,
-                    assistant_text,
-                    metadata={
-                        "route": "rule",
-                        "skill": match.skill_name,
-                        "channel": "whatsapp",
-                    },
-                )
-                return
-
-            if is_raw and wa_engine and wa_engine.supports_raw(match.skill_name):
-                stats["raw"] += 1
-                assistant_text = _format_raw_json(skill_result)
-                total_tokens = 0
-            else:
-                prompt = (
-                    f'{system}\n\nThe user asked: "{clean_text}"\n\n'
-                    f"Tool data:\n{json.dumps(skill_result, indent=2)}\n\n"
-                    f"Format this clearly and concisely for WhatsApp."
-                )
-                messages = history + [{"role": "user", "content": prompt}]
-                response = await provider_ai.chat(active_model, system, messages, [])
-                assistant_text = response.text or "Got data but couldn't format."
-                total_tokens = response.input_tokens + response.output_tokens
-        elif wa_engine and (disabled_skill := wa_engine.check_disabled_skill(clean_text)):
-            skill_display = disabled_skill.replace("_", " ")
-            assistant_text = (
-                f"The {skill_display} feature isn't enabled for your workspace. "
-                f"Contact your admin to enable it."
-            )
-            total_tokens = 0
-            _fire_and_forget(
-                chat_handlers.log_training(
-                    tenant_id, clean_text, None, None, was_disabled_skill=True
-                )
-            )
-        else:
-            stats["ai_routed"] += 1
-            tools = skills.get_tools_for_tenant(type("C", (), {"tenant": tenant})())
-            messages = history + [{"role": "user", "content": clean_text}]
-            response = await provider_ai.chat(active_model, system, messages, tools)
-            if response.has_tool_use:
-                tc = response.tool_calls[0]
-                if USE_ASYNC_SKILLS and event_bus and pending_store:
-                    _handle_async_channel_skill(
-                        tenant_id=tenant_id,
-                        channel="whatsapp",
-                        skill_name=tc.tool_name,
-                        params=tc.tool_params,
-                        conversation_id=conversation_id,
-                        reply_target=message.conversation_id,
-                        user_key=message.channel_user_id,
-                        user_message=clean_text,
-                        is_raw=is_raw,
-                        route_type="ai",
-                        model_id=active_model,
-                        model_short_name=model_short_name,
-                    )
-                    return
-
-                request_id = f"wa-ai-{conversation_id}"
-                await bus.publish_skill_invocation(
-                    tenant_id,
-                    tc.tool_name,
-                    tc.tool_params,
-                    conversation_id,
-                    request_id,
-                    "whatsapp",
-                    message.channel_user_id,
-                )
-                skill_result = bus.get_result(request_id) or {"error": "No result"}
-                _fire_and_forget(
-                    chat_handlers.log_training(
-                        tenant_id,
-                        clean_text,
-                        tc.tool_name,
-                        tc.tool_params.get("action"),
-                    )
-                )
-
-                # Audio results: send directly with attachment, skip AI formatting
-                if skill_result.get("type") == "audio":
-                    ai_text_wa = skill_result.get("text", "")
-                    ai_audio_wa: dict[str, Any] = {
-                        "type": "audio",
-                        "format": skill_result.get("format", "wav"),
-                    }
-                    if skill_result.get("audio_url"):
-                        ai_audio_wa["audio_url"] = skill_result["audio_url"]
-                    if skill_result.get("audio_b64"):
-                        ai_audio_wa["audio_b64"] = skill_result["audio_b64"]
-                    outbound = OutboundMessage(
-                        channel=ChannelType.WHATSAPP,
-                        conversation_id=message.conversation_id,
-                        recipient_id=message.channel_user_id,
-                        text=ai_text_wa,
-                        attachments=[ai_audio_wa],
-                    )
-                    await adapter.send_response(outbound)
-                    await memory.save_turn(
-                        tenant_id,
-                        conversation_id,
-                        clean_text,
-                        ai_text_wa,
-                        metadata={
-                            "route": "ai",
-                            "skill": tc.tool_name,
-                            "channel": "whatsapp",
-                        },
-                    )
-                    return
-
-                messages_with_tool = messages + [
-                    {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "id": tc.tool_use_id,
-                                "name": tc.tool_name,
-                                "input": tc.tool_params,
-                            }
-                        ],
-                    }
-                ]
-                final = await provider_ai.chat_with_tool_result(
-                    active_model,
-                    system,
-                    messages_with_tool,
-                    tools,
-                    tc.tool_use_id,
-                    skill_result,
-                )
-                assistant_text = final.text or "Got data but couldn't format."
-                total_tokens = (
-                    response.input_tokens
-                    + response.output_tokens
-                    + final.input_tokens
-                    + final.output_tokens
-                )
-            else:
-                _fire_and_forget(chat_handlers.log_training(tenant_id, clean_text, None, None))
-                assistant_text = response.text or "Not sure how to help."
-                total_tokens = response.input_tokens + response.output_tokens
-
-    stats["total_tokens"] += total_tokens
-    await memory.save_turn(
-        tenant_id,
-        conversation_id,
-        clean_text,
-        assistant_text,
-        metadata={"route": "whatsapp", "model": model_short_name, "tokens": total_tokens},
-    )
-    outbound = OutboundMessage(
-        channel=ChannelType.WHATSAPP,
-        conversation_id=message.conversation_id,
-        recipient_id=message.channel_user_id,
-        text=assistant_text,
-    )
-    await adapter.send_response(outbound)
+    return await webhook_handlers.handle_whatsapp_webhook(request)
 
 
 # ---------------------------------------------------------------------------
@@ -1640,30 +990,21 @@ app = Starlette(routes=routes, middleware=middleware)
 # ---------------------------------------------------------------------------
 
 
-async def init() -> None:
-    global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
-    global sqs_poller, result_router, rule_store, training_store, admin_api, platform_api
-    global error_handler, started_at, _fallback_router, practices, blobs
-    global settings_handlers, integration_handlers, chat_handlers, history_handlers
-    global training_handlers, health_handlers, practice_handlers, webhook_handlers
+async def _init_aws_adapters(region: str) -> None:
+    """AI providers, conversation/tenant/secrets stores, skills, blobs."""
+    global ai, memory, tenants, secrets, skills, blobs
 
-    started_at = time.time()
-
-    region = AWS_REGION
     conversations_table = os.getenv("DYNAMODB_CONVERSATIONS_TABLE")
     tenants_table = os.getenv("DYNAMODB_TENANTS_TABLE")
     secrets_prefix = os.getenv("SECRETS_PREFIX")
-
     if not all([conversations_table, tenants_table, secrets_prefix]):
         logger.error(
             "Missing required env vars: DYNAMODB_CONVERSATIONS_TABLE, "
             "DYNAMODB_TENANTS_TABLE, SECRETS_PREFIX"
         )
         sys.exit(1)
-
     assert conversations_table and tenants_table and secrets_prefix  # narrowed above
 
-    # Initialize AI providers — both can run simultaneously
     _providers: dict[str, BedrockProvider | OllamaProvider] = {}
     if BEDROCK_MODEL_ID:
         logger.info(f"Using Bedrock provider (model={BEDROCK_MODEL_ID})")
@@ -1684,7 +1025,6 @@ async def init() -> None:
     skills_obj.load_from_directory(skills_dir)
     skills = skills_obj
 
-    # Practices + BlobStore
     try:
         from adapters.aws.s3_blob_store import S3BlobStore
 
@@ -1695,16 +1035,19 @@ async def init() -> None:
         logger.warning(f"S3BlobStore init failed ({e}), blobs disabled")
         blobs = None
 
+
+async def _init_aws_practices() -> None:
+    """Practice registry, S3 restore, Lambda ensure."""
+    global practices, _fallback_router
+
     practices_obj = PracticeRegistry()
     practices_dir = Path(__file__).parent.parent.parent / "agent" / "practices"
     practices_obj.load_builtin(practices_dir)
 
-    # Restore uploaded practices from S3 (survive container restarts/deploys)
     data_dir = Path("data")
     data_dir.mkdir(exist_ok=True)
     if blobs:
         try:
-            # Get installed practice versions from DynamoDB
             default_tenant = await tenants.get_tenant(DEFAULT_TENANT)
             installed_versions = default_tenant.settings.installed_practices
             restored = await practices_obj.restore_from_blob_store(
@@ -1718,14 +1061,12 @@ async def init() -> None:
         except Exception as e:
             logger.warning(f"Practice restore from S3 failed: {e}")
 
-    # Load uploaded practices (from restore or previous extractions)
     practices_obj.load_uploaded(data_dir)
     practices_obj.register_skills(skills)
     practices = practices_obj
     logger.info(f"Loaded practices: {[p.name for p in practices.list_all()]}")
     logger.info(f"Loaded skills: {skills.list_skill_names()}")
 
-    # Ensure Lambdas exist for restored practice skills
     lambda_config = _get_lambda_deploy_config()
     if lambda_config["lambda_role_arn"]:
         try:
@@ -1737,48 +1078,71 @@ async def init() -> None:
 
     _fallback_router = RuleBasedRouter(skills)
 
+
+def _init_aws_dispatch(region: str) -> None:
+    """rule_store, training_store, DirectBus, AdminAPI, PlatformAPI, AuthAPI, errors."""
+    global rule_store, training_store, bus, admin_api, platform_api, auth_api, error_handler
+
+    tenants_table = os.environ["DYNAMODB_TENANTS_TABLE"]
     rule_store = DynamoDBRuleStore(tenants_table, region=region)
     training_store = DynamoDBTrainingStore(tenants_table, region=region)
     bus = DirectBus(skills, secrets)
     admin_api = AdminAPI(tenants, secrets, skills, training_store)
     platform_api = PlatformAPI(tenants, secrets, skills)
+    auth_api = AuthAPI(tenants)
     error_handler = ErrorHandler()
 
-    if USE_ASYNC_SKILLS:
-        eb_bus_name = os.environ.get("EVENTBRIDGE_BUS_NAME", "")
-        sqs_queue_url = os.environ.get("SQS_RESULTS_QUEUE_URL", "")
-        pending_table = os.environ.get("PENDING_REQUESTS_TABLE", "")
 
-        if not all([eb_bus_name, sqs_queue_url, pending_table]):
-            logger.error(
-                "USE_ASYNC_SKILLS=true but missing required env vars: "
-                "EVENTBRIDGE_BUS_NAME, SQS_RESULTS_QUEUE_URL, PENDING_REQUESTS_TABLE"
-            )
-            logger.warning("Falling back to synchronous DirectBus")
-        else:
-            event_bus = EventBridgeBus(eb_bus_name, region=region)
-            pending_store = PendingRequestsStore(pending_table, region=region)
-            result_router = AsyncResultRouter(
-                push_client=push_client,
-                pending_store=pending_store,
-                ai_provider=ai,
-                conversation_store=memory,
-                bedrock_model_id=BEDROCK_MODEL_ID,
-                secrets_provider=secrets,
-            )
-            sqs_poller = SQSResultPoller(
-                queue_url=sqs_queue_url,
-                callback=result_router.handle_result,
-                region=region,
-            )
-            sqs_poller.start()
-            logger.info(
-                f"Async skills ENABLED: EventBridge={eb_bus_name}, "
-                f"SQS={sqs_queue_url[-30:]}, Pending={pending_table}"
-            )
-    else:
+def _init_aws_async_dispatch(region: str) -> None:
+    """EventBridge bus, pending requests store, async dispatcher, result router, SQS poller."""
+    global event_bus, pending_store, async_dispatch, result_router, sqs_poller
+
+    if not USE_ASYNC_SKILLS:
         logger.info("Async skills DISABLED (USE_ASYNC_SKILLS=false), using DirectBus")
+        return
 
+    eb_bus_name = os.environ.get("EVENTBRIDGE_BUS_NAME", "")
+    sqs_queue_url = os.environ.get("SQS_RESULTS_QUEUE_URL", "")
+    pending_table = os.environ.get("PENDING_REQUESTS_TABLE", "")
+    if not all([eb_bus_name, sqs_queue_url, pending_table]):
+        logger.error(
+            "USE_ASYNC_SKILLS=true but missing required env vars: "
+            "EVENTBRIDGE_BUS_NAME, SQS_RESULTS_QUEUE_URL, PENDING_REQUESTS_TABLE"
+        )
+        logger.warning("Falling back to synchronous DirectBus")
+        return
+
+    event_bus = EventBridgeBus(eb_bus_name, region=region)
+    pending_store = PendingRequestsStore(pending_table, region=region)
+    async_dispatch = AsyncSkillDispatcher(
+        event_bus=event_bus,
+        pending_store=pending_store,
+        stats=stats,
+        fire_and_forget=_fire_and_forget,
+        log_training=lambda *a, **kw: chat_handlers.log_training(*a, **kw),
+    )
+    result_router = AsyncResultRouter(
+        push_client=push_client,
+        pending_store=pending_store,
+        ai_provider=ai,
+        conversation_store=memory,
+        bedrock_model_id=BEDROCK_MODEL_ID,
+        secrets_provider=secrets,
+    )
+    sqs_poller = SQSResultPoller(
+        queue_url=sqs_queue_url,
+        callback=result_router.handle_result,
+        region=region,
+    )
+    sqs_poller.start()
+    logger.info(
+        f"Async skills ENABLED: EventBridge={eb_bus_name}, "
+        f"SQS={sqs_queue_url[-30:]}, Pending={pending_table}"
+    )
+
+
+async def _init_aws_state() -> None:
+    """Default tenant seeding, integrations log, compiled rule engines."""
     channels = ChannelRegistry()
     channels.register(DashboardAdapter())
 
@@ -1802,7 +1166,6 @@ async def init() -> None:
     connected = await secrets.list_integrations(DEFAULT_TENANT)
     logger.info(f"Connected integrations: {connected}")
 
-    # Load compiled rule engines for all tenants from DynamoDB
     try:
         all_tenants = await tenants.list_tenants()
         for t in all_tenants:
@@ -1821,98 +1184,99 @@ async def init() -> None:
     except Exception:
         logger.exception("Failed to load rule engines at startup — AI routing will be used")
 
-    # ------------------------------------------------------------------
-    # Instantiate shared handler classes
-    # ------------------------------------------------------------------
 
-    # skill_invoker for ChatHandlers: handles both async and sync dispatch
-    async def _chat_skill_invoker(
-        tenant_id: str,
-        skill_name: str,
-        params: dict[str, Any],
-        conversation_id: str,
-        request_id: str,
-        reply_channel: str,
-        reply_target: str,
-        is_raw: bool = False,
-        user_message: str = "",
-        model_id: str = "",
-        model_short_name: str = "",
-    ) -> dict[str, Any] | Response | None:
-        # Async dispatch for dashboard chat
-        if USE_ASYNC_SKILLS and event_bus and pending_store:
-            user_email = reply_target  # reply_target is the user_email for dashboard
-            route_type = "rule" if request_id.startswith("rule-") else "ai"
-            return await _handle_async_skill(
-                tenant_id,
-                user_email,
-                skill_name,
-                params,
-                conversation_id,
-                user_message,
-                is_raw,
-                route_type,
-                model_id,
-                model_short_name,
-            )
-        # Sync dispatch via DirectBus
-        await bus.publish_skill_invocation(
+async def _chat_skill_invoker(
+    tenant_id: str,
+    skill_name: str,
+    params: dict[str, Any],
+    conversation_id: str,
+    request_id: str,
+    reply_channel: str,
+    reply_target: str,
+    is_raw: bool = False,
+    user_message: str = "",
+    model_id: str = "",
+    model_short_name: str = "",
+) -> dict[str, Any] | Response | None:
+    """skill_invoker for ChatHandlers — async dispatch when enabled, else DirectBus."""
+    if USE_ASYNC_SKILLS and async_dispatch is not None:
+        user_email = reply_target  # reply_target is the user_email for dashboard
+        route_type = "rule" if request_id.startswith("rule-") else "ai"
+        return await async_dispatch.dispatch_chat(
             tenant_id,
+            user_email,
             skill_name,
             params,
             conversation_id,
-            request_id,
-            reply_channel,
-            reply_target,
-            is_raw=is_raw,
+            user_message,
+            is_raw,
+            route_type,
+            model_id,
+            model_short_name,
         )
-        return bus.get_result(request_id)
+    await bus.publish_skill_invocation(
+        tenant_id,
+        skill_name,
+        params,
+        conversation_id,
+        request_id,
+        reply_channel,
+        reply_target,
+        is_raw=is_raw,
+    )
+    return bus.get_result(request_id)
 
-    # on_credentials_saved callback for IntegrationHandlers
-    async def _on_credentials_saved(
-        tenant_id: str,
-        integration_name: str,
-        merged: dict[str, Any],
-    ) -> None:
-        """Webhook registration and channel mapping after credentials save."""
-        if integration_name == "telegram":
-            bot_token = merged.get("bot_token", "")
-            if bot_token:
-                # Use API_BASE_URL env var for webhook registration
-                _register_telegram_webhook({}, merged)
-                t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
-                await tenants.set_channel_mapping(tenant_id, "telegram", t_hash)
 
-        elif integration_name == "whatsapp":
-            api_token = merged.get("api_token", "")
-            if api_token:
-                _register_whatsapp_webhook({}, merged)
-                wa_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
-                await tenants.set_channel_mapping(tenant_id, "whatsapp", wa_hash)
+async def _on_credentials_saved(
+    tenant_id: str,
+    integration_name: str,
+    merged: dict[str, Any],
+) -> None:
+    """Webhook registration + channel mapping after credentials save."""
+    if integration_name == "telegram":
+        bot_token = merged.get("bot_token", "")
+        if bot_token:
+            _register_telegram_webhook({}, merged)
+            t_hash = hashlib.sha256(bot_token.encode()).hexdigest()[:16]
+            await tenants.set_channel_mapping(tenant_id, "telegram", t_hash)
 
-    # Post-install hook for PracticeHandlers (Lambda deploy + page publish + rule rebuild)
-    async def _post_install_hook(practice_obj: Any, tenant_id: str) -> None:
-        lc = _get_lambda_deploy_config()
-        if lc["lambda_role_arn"]:
-            deployed = await practices.deploy_skill_lambdas(practice_obj, lc)
-            logger.info(f"Background: deployed Lambdas for {deployed}")
-        # Publish pages to S3 + invalidate CloudFront so /p/{name}/* serves the
-        # newly-uploaded version immediately. CDN+S3 paradigm — see
-        # docs/aws-infrastructure.md "Static vs dynamic content split".
-        from adapters.aws.practice_publish import publish_practice_pages
+    elif integration_name == "whatsapp":
+        api_token = merged.get("api_token", "")
+        if api_token:
+            _register_whatsapp_webhook({}, merged)
+            wa_hash = hashlib.sha256(api_token.encode()).hexdigest()[:16]
+            await tenants.set_channel_mapping(tenant_id, "whatsapp", wa_hash)
 
-        try:
-            uploaded = publish_practice_pages(
-                practice_obj,
-                s3_bucket=os.environ.get("S3_BUCKET_NAME", ""),
-                cloudfront_distribution_id=os.environ.get("CLOUDFRONT_DISTRIBUTION_ID", ""),
-                region=AWS_REGION,
-            )
-            logger.info(f"Background: published {uploaded} practice page(s) to S3")
-        except Exception as e:
-            logger.error(f"Background: practice page publish failed: {e}")
-        await chat_handlers.rebuild_rules(tenant_id)
-        logger.info(f"Background: rules rebuilt for tenant {tenant_id}")
+
+async def _post_install_hook(practice_obj: Any, tenant_id: str) -> None:
+    """After a practice is installed: deploy Lambdas, publish pages, rebuild rules."""
+    lc = _get_lambda_deploy_config()
+    if lc["lambda_role_arn"]:
+        deployed = await practices.deploy_skill_lambdas(practice_obj, lc)
+        logger.info(f"Background: deployed Lambdas for {deployed}")
+    # Publish pages to S3 + invalidate CloudFront so /p/{name}/* serves the
+    # newly-uploaded version immediately. CDN+S3 paradigm — see
+    # docs/aws-infrastructure.md "Static vs dynamic content split".
+    from adapters.aws.practice_publish import publish_practice_pages
+
+    try:
+        uploaded = publish_practice_pages(
+            practice_obj,
+            s3_bucket=os.environ.get("S3_BUCKET_NAME", ""),
+            cloudfront_distribution_id=os.environ.get("CLOUDFRONT_DISTRIBUTION_ID", ""),
+            region=AWS_REGION,
+        )
+        logger.info(f"Background: published {uploaded} practice page(s) to S3")
+    except Exception as e:
+        logger.error(f"Background: practice page publish failed: {e}")
+    await chat_handlers.rebuild_rules(tenant_id)
+    logger.info(f"Background: rules rebuilt for tenant {tenant_id}")
+
+
+def _init_aws_handlers() -> None:
+    """Construct all shared handler classes."""
+    global settings_handlers, integration_handlers, chat_handlers, history_handlers
+    global training_handlers, health_handlers, practice_handlers, webhook_handlers
 
     settings_handlers = SettingsHandlers(
         tenant_store=tenants,
@@ -2000,14 +1364,35 @@ async def init() -> None:
         resolve_model=_resolve_model,
         resolve_teams_adapter=_get_teams_adapter,
         resolve_telegram_adapter=_get_telegram_adapter,
+        resolve_whatsapp_adapter=_get_whatsapp_adapter,
         resolve_tenant_by_channel=lambda ch, key: tenants.get_by_channel_id(ch, key),
         log_training=chat_handlers.log_training,
         enrich_match_params=_enrich_match_params,
-        async_skill_handler=_handle_async_channel_skill,
+        async_skill_handler=async_dispatch.dispatch_channel if async_dispatch else None,
         use_async_skills=USE_ASYNC_SKILLS,
         event_bus=event_bus,
         pending_store=pending_store,
     )
+
+
+async def init() -> None:
+    global ai, memory, tenants, secrets, skills, bus, event_bus, pending_store
+    global sqs_poller, result_router, rule_store, training_store, admin_api, platform_api
+    global auth_api, async_dispatch, error_handler, started_at, _fallback_router, practices, blobs
+    global settings_handlers, integration_handlers, chat_handlers, history_handlers
+    global training_handlers, health_handlers, practice_handlers, webhook_handlers
+
+    started_at = time.time()
+    region = AWS_REGION
+
+    await _init_aws_adapters(region)
+    await _init_aws_practices()
+    _init_aws_dispatch(region)
+    # _init_aws_async_dispatch references chat_handlers; that closure is evaluated
+    # at call time, not now, so the order with _init_aws_handlers below is fine.
+    _init_aws_async_dispatch(region)
+    await _init_aws_state()
+    _init_aws_handlers()
 
 
 def main() -> None:
