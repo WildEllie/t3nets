@@ -13,6 +13,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+
 from adapters.aws.auth_middleware import AuthError, extract_auth
 from agent.models.tenant import Invitation, Tenant, TenantSettings, TenantUser
 
@@ -404,3 +407,82 @@ class AdminAPI:
             ],
             "count": len(users),
         }, 200
+
+    # --- Public invitation routes (not under /api/admin) ---
+
+    async def validate_invitation(self, request: Request) -> Response:
+        """GET /api/invitations/validate?code=... — public invite lookup."""
+        try:
+            code = request.query_params.get("code", "")
+            if not code:
+                return JSONResponse({"error": "Missing code parameter"}, status_code=400)
+            invitation = await self.tenants.get_invitation(code)
+            if not invitation or not invitation.is_valid():
+                return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+            try:
+                tenant = await self.tenants.get_tenant(invitation.tenant_id)
+                tenant_name = tenant.name
+            except Exception:
+                tenant_name = invitation.tenant_id
+            return JSONResponse(
+                {
+                    "valid": True,
+                    "tenant_name": tenant_name,
+                    "tenant_id": invitation.tenant_id,
+                    "email": invitation.email,
+                    "role": invitation.role,
+                }
+            )
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def accept_invitation(self, request: Request) -> Response:
+        """POST /api/invitations/accept — link authenticated user to tenant."""
+        try:
+            auth = extract_auth(request.headers)
+            body = await request.json()
+            invite_code = body.get("invite_code", "")
+            if not invite_code:
+                return JSONResponse({"error": "invite_code is required"}, status_code=400)
+            invitation = await self.tenants.get_invitation(invite_code)
+            if not invitation or not invitation.is_valid():
+                return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+            if auth.email.lower() != invitation.email.lower():
+                return JSONResponse({"error": "Email does not match invitation"}, status_code=403)
+            existing = await self.tenants.get_user_by_email(invitation.tenant_id, invitation.email)
+            if existing:
+                invitation.status = "accepted"
+                invitation.accepted_at = datetime.now(timezone.utc).isoformat()
+                await self.tenants.update_invitation(invitation)
+                return JSONResponse(
+                    {
+                        "accepted": True,
+                        "tenant_id": invitation.tenant_id,
+                        "already_member": True,
+                    }
+                )
+            user = TenantUser(
+                user_id=auth.user_id,
+                tenant_id=invitation.tenant_id,
+                email=invitation.email,
+                display_name=invitation.email.split("@")[0],
+                role=invitation.role,
+                cognito_sub=auth.user_id,
+            )
+            await self.tenants.create_user(user)
+            invitation.status = "accepted"
+            invitation.accepted_at = datetime.now(timezone.utc).isoformat()
+            await self.tenants.update_invitation(invitation)
+            return JSONResponse(
+                {
+                    "accepted": True,
+                    "tenant_id": invitation.tenant_id,
+                    "user_id": auth.user_id,
+                    "role": invitation.role,
+                }
+            )
+        except AuthError as e:
+            return JSONResponse({"error": e.message}, status_code=e.status)
+        except Exception as e:
+            logger.exception("Invitation accept error")
+            return JSONResponse({"error": str(e)}, status_code=500)

@@ -348,10 +348,9 @@ Now that handler logic is extracted (Phase 5d) and Practices + the SDK have land
 - [x] Step 4 — Extract local admin/platform tenant CRUD into `adapters/local/admin_api.py` + `platform_api.py`
 - [x] Step 5 — Decompose `init()` in both servers into focused helpers
       ↳ ✅ `adapters/aws/server.py` 2,033 → 1,418 lines (−30%); `adapters/local/dev_server.py` 1,458 → 1,132 (−22%); shipped to dev 2026-05-05 — see [handoff](../handoffs/024-phase-7-server-slim-steps-1-5.md)
-- [ ] Step 6 — Final cleanup to hit line-count targets
-- [ ] Slim `adapters/aws/server.py` to ~400 lines (currently 1,418 after step 5)
-- [ ] Slim `adapters/local/dev_server.py` to ~300 lines (currently 1,132 after step 5)
-- [ ] **Milestone:** No handler logic duplicated across servers; each handler file independently testable; both server files are thin wiring layers
+- [x] Step 6 — Final cleanup to hit line-count targets
+      ↳ ✅ `adapters/aws/server.py` 1,418 → 276 lines; `adapters/local/dev_server.py` 1,132 → 294. Channel resolvers / webhook registration / module helpers / bootstrap split out; invitations folded into AdminAPI; route table now uses dotted-string `_d`/`_da` factories. Shipped to dev 2026-05-05 — see [handoff](../handoffs/025-phase-7-server-slim-step-6.md)
+- [x] **Milestone:** No handler logic duplicated across servers; each handler file independently testable; both server files are thin wiring layers
 
 ### Phase 8: Dashboard & UX
 - [x] Markdown rendering in chat responses

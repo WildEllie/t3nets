@@ -221,3 +221,90 @@ class LocalAdminAPI:
         invitation.status = "revoked"
         await self.tenants.update_invitation(invitation)
         return JSONResponse({"revoked": True, "invite_code": invite_code})
+
+    # --- Public invitation routes ---
+
+    async def validate_invitation(self, request: Request) -> Response:
+        """GET /api/invitations/validate?code=... — public invite lookup."""
+        try:
+            code = request.query_params.get("code", "")
+            if not code:
+                return JSONResponse({"error": "Missing code parameter"}, status_code=400)
+            invitation = await self.tenants.get_invitation(code)
+            if not invitation or not invitation.is_valid():
+                return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+            try:
+                tenant = await self.tenants.get_tenant(invitation.tenant_id)
+                tenant_name = tenant.name
+            except Exception:
+                tenant_name = invitation.tenant_id
+            return JSONResponse(
+                {
+                    "valid": True,
+                    "tenant_name": tenant_name,
+                    "tenant_id": invitation.tenant_id,
+                    "email": invitation.email,
+                    "role": invitation.role,
+                }
+            )
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def accept_invitation(self, request: Request) -> Response:
+        """POST /api/invitations/accept — link user to tenant (no JWT in local dev)."""
+        try:
+            body = await request.json()
+            invite_code = body.get("invite_code", "")
+            email = body.get("email", "")
+            display_name = body.get("display_name", email.split("@")[0] if email else "")
+            cognito_sub = body.get("cognito_sub", "")
+
+            if not invite_code:
+                return JSONResponse({"error": "invite_code is required"}, status_code=400)
+
+            invitation = await self.tenants.get_invitation(invite_code)
+            if not invitation or not invitation.is_valid():
+                return JSONResponse({"error": "Invalid or expired invitation"}, status_code=404)
+
+            if email and invitation.email.lower() != email.lower():
+                return JSONResponse({"error": "Email does not match invitation"}, status_code=403)
+
+            existing = await self.tenants.get_user_by_email(invitation.tenant_id, invitation.email)
+            if existing:
+                invitation.status = "accepted"
+                invitation.accepted_at = datetime.now(timezone.utc).isoformat()
+                await self.tenants.update_invitation(invitation)
+                return JSONResponse(
+                    {
+                        "accepted": True,
+                        "tenant_id": invitation.tenant_id,
+                        "already_member": True,
+                    }
+                )
+
+            user_id = cognito_sub or f"user-{invitation.email.split('@')[0]}"
+            user = TenantUser(
+                user_id=user_id,
+                tenant_id=invitation.tenant_id,
+                email=invitation.email,
+                display_name=display_name or invitation.email.split("@")[0],
+                role=invitation.role,
+                cognito_sub=cognito_sub,
+            )
+            await self.tenants.create_user(user)
+
+            invitation.status = "accepted"
+            invitation.accepted_at = datetime.now(timezone.utc).isoformat()
+            await self.tenants.update_invitation(invitation)
+
+            return JSONResponse(
+                {
+                    "accepted": True,
+                    "tenant_id": invitation.tenant_id,
+                    "user_id": user_id,
+                    "role": invitation.role,
+                }
+            )
+        except Exception as e:
+            logger.exception("Invitation accept error")
+            return JSONResponse({"error": str(e)}, status_code=500)
