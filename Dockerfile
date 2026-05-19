@@ -2,10 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install platform dependencies (t3nets-sdk pulled from PyPI)
+# Install platform dependencies.
+# t3nets-sdk: TEMPORARILY installed from in-tree copy (0.1.2 not yet on PyPI —
+# adds `channel_routing_overrides` to TenantSettings). Revert this block to
+# `pip install ... "t3nets-sdk>=0.1,<0.2" ...` once 0.1.2 is published.
 COPY pyproject.toml .
+COPY sdk/ ./sdk/
 RUN pip install --no-cache-dir \
-    "t3nets-sdk>=0.1,<0.2" \
+    ./sdk \
     pyyaml boto3 "starlette>=0.41" "uvicorn[standard]>=0.32"
 
 # Copy application code

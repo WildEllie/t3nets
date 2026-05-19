@@ -119,6 +119,7 @@ class SettingsHandlers:
                     "messages_per_day": s.messages_per_day,
                     "max_conversation_history": s.max_conversation_history,
                     "primary_practice": s.primary_practice,
+                    "channel_routing_overrides": getattr(s, "channel_routing_overrides", {}),
                 }
             )
         except Exception as e:
@@ -214,6 +215,36 @@ class SettingsHandlers:
                 changed = True
                 rebuild_skills = True
                 logger.info("Primary practice set to: %s", practice_name)
+
+            if "channel_routing_overrides" in body:
+                overrides = body["channel_routing_overrides"]
+                if not isinstance(overrides, dict):
+                    return JSONResponse(
+                        {"error": "channel_routing_overrides must be an object"},
+                        status_code=400,
+                    )
+                known_skills = set(self._skills.list_skill_names())
+                cleaned: dict[str, str] = {}
+                for key, skill in overrides.items():
+                    if not isinstance(key, str) or not isinstance(skill, str):
+                        return JSONResponse(
+                            {"error": "channel_routing_overrides keys and values must be strings"},
+                            status_code=400,
+                        )
+                    if ":" not in key:
+                        return JSONResponse(
+                            {"error": f"override key {key!r} must be 'channel:sender_id'"},
+                            status_code=400,
+                        )
+                    if skill not in known_skills:
+                        return JSONResponse(
+                            {"error": f"Unknown skill in override: {skill}"},
+                            status_code=400,
+                        )
+                    cleaned[key] = skill
+                tenant.settings.channel_routing_overrides = cleaned
+                changed = True
+                logger.info("Channel routing overrides updated: %s", cleaned)
 
             if changed:
                 await self._tenants.update_tenant(tenant)

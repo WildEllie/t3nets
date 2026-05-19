@@ -1048,6 +1048,48 @@
           members can message the bot directly from these channels.
         </p>
         <div id="channels-list"></div>
+
+        <div class="section-title" style="margin-top: 24px">
+          Per-Sender Routing Overrides
+        </div>
+        <p
+          style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px"
+        >
+          Force messages from specific senders to always run a chosen skill,
+          bypassing normal routing. Useful for dedicated lines — e.g. every
+          message from a phone number goes straight to <code>voice_say</code>.
+        </p>
+        <table class="team-table" id="routing-overrides-table" style="margin-bottom: 12px">
+          <thead>
+            <tr>
+              <th style="width: 110px">Channel</th>
+              <th>Sender ID</th>
+              <th>Skill</th>
+              <th style="width: 80px"></th>
+            </tr>
+          </thead>
+          <tbody id="routing-overrides-body"></tbody>
+        </table>
+        <div id="routing-overrides-empty" style="color: var(--text-faint); font-size: 13px; margin-bottom: 12px; display: none;">
+          No overrides configured.
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+          <select id="routing-override-channel" style="padding: 6px 8px">
+            <option value="whatsapp">whatsapp</option>
+            <option value="telegram">telegram</option>
+            <option value="teams">teams</option>
+          </select>
+          <input
+            id="routing-override-sender"
+            type="text"
+            placeholder="Sender ID (digits only for WhatsApp/Telegram)"
+            style="padding: 6px 8px; min-width: 280px"
+          />
+          <select id="routing-override-skill" style="padding: 6px 8px"></select>
+          <button id="routing-override-add" style="padding: 6px 12px">
+            Add
+          </button>
+        </div>
       </div>
 
       <!-- ===== Team Tab ===== -->
@@ -1987,6 +2029,9 @@
         list.innerHTML =
           '<div style="color:var(--text-faint);font-size:13px;">Loading...</div>';
 
+        // Routing overrides live in the same tab — load alongside.
+        loadRoutingOverrides();
+
         try {
           const resp = await fetch("/api/integrations", {
             headers: getAuthHeaders(),
@@ -2214,6 +2259,121 @@
         } catch (err) {
           statusEl.textContent = "Failed to save";
           statusEl.className = "integration-status error";
+        }
+      }
+
+      // ==================== Routing overrides ====================
+      let _routingOverrides = {}; // {"channel:sender": "skill_name"}
+      let _availableSkills = []; // populated from /api/settings
+
+      async function loadRoutingOverrides() {
+        const tbody = document.getElementById("routing-overrides-body");
+        const empty = document.getElementById("routing-overrides-empty");
+        const skillSelect = document.getElementById("routing-override-skill");
+        if (!tbody) return;
+
+        try {
+          const resp = await fetch("/api/settings", { headers: getAuthHeaders() });
+          if (!resp.ok) return;
+          const data = await resp.json();
+          _routingOverrides = data.channel_routing_overrides || {};
+          _availableSkills = (data.available_skills || []).map((s) => s.name);
+
+          // Populate skill dropdown
+          skillSelect.innerHTML = "";
+          for (const name of _availableSkills) {
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = name;
+            skillSelect.appendChild(opt);
+          }
+
+          renderRoutingOverrides();
+        } catch (e) {
+          console.error("loadRoutingOverrides failed", e);
+        }
+      }
+
+      function renderRoutingOverrides() {
+        const tbody = document.getElementById("routing-overrides-body");
+        const empty = document.getElementById("routing-overrides-empty");
+        tbody.innerHTML = "";
+        const keys = Object.keys(_routingOverrides);
+        empty.style.display = keys.length === 0 ? "block" : "none";
+        for (const key of keys) {
+          const [channel, sender] = key.split(":", 2);
+          const skill = _routingOverrides[key];
+          const tr = document.createElement("tr");
+          tr.innerHTML =
+            `<td>${escapeHtml(channel)}</td>` +
+            `<td><code>${escapeHtml(sender)}</code></td>` +
+            `<td>${escapeHtml(skill)}</td>` +
+            `<td><button data-key="${escapeHtml(key)}" class="routing-remove" style="padding:4px 10px;">Remove</button></td>`;
+          tbody.appendChild(tr);
+        }
+        tbody.querySelectorAll(".routing-remove").forEach((btn) => {
+          btn.addEventListener("click", () => removeRoutingOverride(btn.dataset.key));
+        });
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function normalizeSenderForChannel(channel, raw) {
+        if (channel === "whatsapp" || channel === "telegram") {
+          // strip @suffix, keep digits only
+          const head = raw.split("@")[0];
+          return head.replace(/\D/g, "");
+        }
+        return raw.trim();
+      }
+
+      async function addRoutingOverride() {
+        const channel = document.getElementById("routing-override-channel").value;
+        const senderRaw = document.getElementById("routing-override-sender").value;
+        const skill = document.getElementById("routing-override-skill").value;
+        const sender = normalizeSenderForChannel(channel, senderRaw);
+        if (!sender) {
+          showToast("Enter a sender ID");
+          return;
+        }
+        if (!skill) {
+          showToast("Pick a skill");
+          return;
+        }
+        const updated = { ..._routingOverrides, [`${channel}:${sender}`]: skill };
+        await saveRoutingOverrides(updated);
+        document.getElementById("routing-override-sender").value = "";
+      }
+
+      async function removeRoutingOverride(key) {
+        const updated = { ..._routingOverrides };
+        delete updated[key];
+        await saveRoutingOverrides(updated);
+      }
+
+      async function saveRoutingOverrides(updated) {
+        try {
+          const resp = await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+            body: JSON.stringify({ channel_routing_overrides: updated }),
+          });
+          if (!resp.ok) {
+            const err = await resp.json();
+            showToast(err.error || "Failed to save overrides");
+            return;
+          }
+          _routingOverrides = updated;
+          renderRoutingOverrides();
+          showToast("Routing overrides updated");
+        } catch (e) {
+          showToast("Failed to save overrides");
         }
       }
 
@@ -2687,6 +2847,12 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
 
       // ==================== Init ====================
       loadSettings();
+
+      // Wire routing-override "Add" button once on init (the table itself
+      // re-renders on every change via renderRoutingOverrides()).
+      document
+        .getElementById("routing-override-add")
+        ?.addEventListener("click", addRoutingOverride);
     </script>
 
     <div id="session-expired-modal" class="session-expired-modal">

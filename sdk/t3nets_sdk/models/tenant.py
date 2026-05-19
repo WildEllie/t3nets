@@ -35,6 +35,12 @@ class TenantSettings:
     messages_per_day: int = 1000
     max_conversation_history: int = 20
 
+    # Per-sender channel routing overrides. Key format: "{channel}:{sender_id}"
+    # (sender_id is digits-only for whatsapp/telegram). Value is the skill name
+    # to dispatch directly, bypassing tier 1/2/3 routing. The skill receives
+    # the raw message text via param-enrichment if it declares a "text" field.
+    channel_routing_overrides: dict[str, str] = field(default_factory=dict)
+
 
 @dataclass
 class Tenant:

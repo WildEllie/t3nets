@@ -29,7 +29,12 @@ from agent.interfaces.ai_provider import AIProvider
 from agent.interfaces.conversation_store import ConversationStore
 from agent.interfaces.event_bus import EventBus
 from agent.models.message import ChannelType, OutboundMessage
-from agent.router.compiled_engine import CompiledRuleEngine, is_conversational, strip_raw_flag
+from agent.router.compiled_engine import (
+    CompiledRuleEngine,
+    RouteMatch,
+    is_conversational,
+    strip_raw_flag,
+)
 from agent.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -64,6 +69,27 @@ def _fire_and_forget(coro: Any) -> None:  # type: ignore[type-arg]
     task: asyncio.Task[None] = asyncio.create_task(coro)
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
+
+
+def normalize_sender_id(channel: str, channel_user_id: str) -> str:
+    """Normalize a channel-specific sender id for routing-override lookup.
+
+    WhatsApp/Telegram: digits only (strips `@s.whatsapp.net` suffix, any `+`,
+    spaces, dashes). Teams and other channels: returned unchanged.
+    """
+    if channel in ("whatsapp", "telegram"):
+        head = channel_user_id.split("@", 1)[0]
+        return "".join(ch for ch in head if ch.isdigit())
+    return channel_user_id
+
+
+def lookup_routing_override(tenant: Any, channel: str, channel_user_id: str) -> str | None:
+    """Return the override skill_name for this sender, or None."""
+    overrides = getattr(tenant.settings, "channel_routing_overrides", None) or {}
+    if not overrides:
+        return None
+    key = f"{channel}:{normalize_sender_id(channel, channel_user_id)}"
+    return overrides.get(key)
 
 
 class WebhookHandlers:
@@ -559,8 +585,22 @@ class WebhookHandlers:
         Returns ``(assistant_text, total_tokens)``.
         """
         prefix = {"telegram": "tg", "whatsapp": "wa"}.get(channel, channel)
-        router = engine or self._fallback
-        match = router.match(clean_text, tenant.settings.enabled_skills) if router else None
+        # Per-sender routing override: short-circuits tier 1/2/3 routing for
+        # specific phone numbers / channel users. The skill is dispatched
+        # with empty params; `_enrich` injects the raw message text below if
+        # the skill declares a "text" schema field (e.g. voice_say).
+        override_skill = lookup_routing_override(tenant, channel, channel_user_id)
+        if override_skill:
+            logger.info(
+                f"Routing override: tenant={tenant_id} channel={channel} "
+                f"sender={channel_user_id} -> skill={override_skill}"
+            )
+            match: RouteMatch | None = RouteMatch(
+                skill_name=override_skill, action="", params={}, confidence=1.0
+            )
+        else:
+            router = engine or self._fallback
+            match = router.match(clean_text, tenant.settings.enabled_skills) if router else None
 
         if match:
             self._enrich(match, clean_text)
