@@ -186,6 +186,10 @@ module "compute" {
   # practice pages to S3 on install.
   cloudfront_distribution_id = module.cdn.cloudfront_distribution_id
 
+  # Public origin for outbound webhook registration (Whapi, Telegram, etc.).
+  # Prefers the custom dashboard URL; CloudFront routes /api/* to API Gateway.
+  api_base_url = local.custom_dashboard_url
+
   # Phase 5c: Ollama sidecar
   use_ollama       = var.use_ollama
   ollama_model     = var.ollama_model

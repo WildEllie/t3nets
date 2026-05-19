@@ -45,6 +45,11 @@ variable "cloudfront_distribution_id" {
   type        = string
   default     = ""
 }
+variable "api_base_url" {
+  description = "Public HTTPS origin used when auto-registering external webhooks (e.g. Whapi.cloud) so registrations work without a Host header. Empty falls back to the request Host."
+  type        = string
+  default     = ""
+}
 variable "lambda_memory_size" {
   description = "Memory (MB) for the skill executor Lambda"
   type        = number
@@ -497,6 +502,7 @@ resource "aws_ecs_task_definition" "router" {
             { name = "WS_CONNECTIONS_TABLE", value = var.ws_connections_table_name },
             { name = "S3_BUCKET_NAME", value = var.s3_bucket_arn != "" ? split(":", var.s3_bucket_arn)[5] : "" },
             { name = "CLOUDFRONT_DISTRIBUTION_ID", value = var.cloudfront_distribution_id },
+            { name = "API_BASE_URL", value = var.api_base_url },
             # Practice skill Lambda deployment config
             { name = "LAMBDA_ROLE_ARN", value = aws_iam_role.lambda_skill_executor.arn },
             { name = "EVENTBRIDGE_BUS_ARN", value = aws_cloudwatch_event_bus.skills.arn },
