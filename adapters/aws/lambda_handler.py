@@ -245,11 +245,15 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return {"statusCode": 200, "body": "OK"}
 
 
-SQS_MAX_BYTES = 250_000  # SQS limit is 262144, leave margin for envelope
-
-
 def _offload_audio_to_s3(result: dict[str, Any], tenant_id: str) -> dict[str, Any]:
-    """If result has large audio_b64, upload to S3 and replace with presigned URL."""
+    """Upload audio_b64 to S3 and replace with a presigned URL.
+
+    Always offloads (regardless of size). WhatsApp/Telegram channel adapters
+    require a URL — they can't deliver inline base64 — so leaving small audio
+    inline would cause text-only fallback on those channels. Dashboard chat
+    also plays from URL when present (with base64 fallback), so always
+    offloading does not regress the dashboard path.
+    """
     audio_b64 = result.get("audio_b64", "")
     if not audio_b64 or not S3_BUCKET:
         return result
@@ -258,8 +262,6 @@ def _offload_audio_to_s3(result: dict[str, Any], tenant_id: str) -> dict[str, An
     import uuid
 
     audio_bytes = base64.b64decode(audio_b64)
-    if len(audio_b64) < SQS_MAX_BYTES:
-        return result  # Small enough for inline
 
     s3 = boto3.client("s3", region_name=REGION)
     key = f"{tenant_id}/audio/{uuid.uuid4().hex}.wav"
