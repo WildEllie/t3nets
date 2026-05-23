@@ -263,8 +263,12 @@ def _offload_audio_to_s3(result: dict[str, Any], tenant_id: str) -> dict[str, An
 
     audio_bytes = base64.b64decode(audio_b64)
 
+    # Key order is `audio/{tenant}/{uuid}` so a single bucket lifecycle rule
+    # with `Prefix = "audio/"` covers every tenant's audio. S3 lifecycle
+    # prefixes are start-of-key only — no glob — so per-tenant prefixes
+    # like `kuchnir/audio/...` can't be matched by one rule.
     s3 = boto3.client("s3", region_name=REGION)
-    key = f"{tenant_id}/audio/{uuid.uuid4().hex}.wav"
+    key = f"audio/{tenant_id}/{uuid.uuid4().hex}.wav"
     s3.put_object(Bucket=S3_BUCKET, Key=key, Body=audio_bytes, ContentType="audio/wav")
     url = s3.generate_presigned_url(
         "get_object",

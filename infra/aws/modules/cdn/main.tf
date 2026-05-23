@@ -41,6 +41,36 @@ resource "aws_s3_bucket_versioning" "static" {
   }
 }
 
+# --- Lifecycle: expire generated audio after 1 day ---
+# The voice_say Lambda writes synthesised WAVs to `audio/{tenant}/{uuid}.wav`
+# with a 1-hour presigned URL TTL (see adapters/aws/lambda_handler.py).
+# Keep them for 1 day to cover any in-flight delivery; nothing reads them
+# after that.
+resource "aws_s3_bucket_lifecycle_configuration" "static" {
+  bucket = aws_s3_bucket.static.id
+
+  rule {
+    id     = "expire-generated-audio"
+    status = "Enabled"
+
+    filter {
+      prefix = "audio/"
+    }
+
+    expiration {
+      days = 1
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
+}
+
 # --- CloudFront Origin Access Control (OAC) ---
 
 resource "aws_cloudfront_origin_access_control" "static" {
