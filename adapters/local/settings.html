@@ -2106,6 +2106,20 @@
                         </div>
                     `;
 
+            // WhatsApp-only: append "Restrict to team members" security toggle
+            if (integ.name === "whatsapp") {
+              const secDiv = document.createElement("div");
+              secDiv.className = "security-section";
+              secDiv.style.cssText = "margin-top:12px;padding-top:12px;border-top:1px solid var(--border);";
+              secDiv.innerHTML = `
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+                  <input type="checkbox" id="whatsapp-restrict-checkbox" ${_whatsappRestrictToUsers ? "checked" : ""}>
+                  <span><strong>Restrict to team members</strong> — drop messages from numbers not registered to a user in this tenant (recommended)</span>
+                </label>
+              `;
+              card.appendChild(secDiv);
+            }
+
             list.appendChild(card);
 
             // If connected, pre-fill the form
@@ -2265,6 +2279,7 @@
       // ==================== Routing overrides ====================
       let _routingOverrides = {}; // {"channel:sender": "skill_name"}
       let _availableSkills = []; // populated from /api/settings
+      let _whatsappRestrictToUsers = true; // loaded from GET /api/settings
 
       async function loadRoutingOverrides() {
         const tbody = document.getElementById("routing-overrides-body");
@@ -2278,6 +2293,7 @@
           const data = await resp.json();
           _routingOverrides = data.channel_routing_overrides || {};
           _availableSkills = (data.available_skills || []).map((s) => s.name);
+          _whatsappRestrictToUsers = data.whatsapp_restrict_to_users !== false; // default true
 
           // Populate skill dropdown
           skillSelect.innerHTML = "";
@@ -2853,6 +2869,25 @@ This invitation was sent to ${email}. If you weren't expecting it, you can safel
       document
         .getElementById("routing-override-add")
         ?.addEventListener("click", addRoutingOverride);
+
+      // Wire WhatsApp "Restrict to team members" checkbox via event delegation
+      // from the stable channels-list container (card re-renders on each loadChannels call).
+      document.getElementById("channels-list")?.addEventListener("change", async (e) => {
+        if (e.target.id !== "whatsapp-restrict-checkbox") return;
+        const val = e.target.checked;
+        const resp = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({ whatsapp_restrict_to_users: val }),
+        });
+        if (resp.ok) {
+          _whatsappRestrictToUsers = val;
+          showToast(val ? "WhatsApp restricted to team members" : "WhatsApp open to all senders");
+        } else {
+          e.target.checked = !val; // revert on failure
+          showToast("Failed to update setting");
+        }
+      });
     </script>
 
     <div id="session-expired-modal" class="session-expired-modal">
