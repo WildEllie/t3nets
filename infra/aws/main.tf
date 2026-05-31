@@ -255,8 +255,14 @@ module "cdn" {
   api_gateway_url = module.api.api_endpoint
 
   # Custom-domain wiring (no-op when root_domain is empty).
-  # Both the subdomain (www.t3nets.dev) and the apex (t3nets.dev) are served.
-  aliases             = var.root_domain != "" ? [module.dns[0].dashboard_fqdn, module.dns[0].apex_fqdn] : []
+  # When we own the zone (manage_route53_zone=true) serve both subdomain and apex.
+  # When using an existing zone (manage_route53_zone=false) serve the subdomain only —
+  # the apex is already owned by another distribution on that domain.
+  aliases = var.root_domain != "" ? (
+    var.manage_route53_zone
+    ? [module.dns[0].dashboard_fqdn, module.dns[0].apex_fqdn]
+    : [module.dns[0].dashboard_fqdn]
+  ) : []
   acm_certificate_arn = var.root_domain != "" ? module.dns[0].certificate_arn : ""
 }
 
