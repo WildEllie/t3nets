@@ -120,6 +120,7 @@ class SettingsHandlers:
                     "max_conversation_history": s.max_conversation_history,
                     "primary_practice": s.primary_practice,
                     "channel_routing_overrides": getattr(s, "channel_routing_overrides", {}),
+                    "whatsapp_restrict_to_users": getattr(s, "whatsapp_restrict_to_users", True),
                 }
             )
         except Exception as e:
@@ -245,6 +246,16 @@ class SettingsHandlers:
                 tenant.settings.channel_routing_overrides = cleaned
                 changed = True
                 logger.info("Channel routing overrides updated: %s", cleaned)
+
+            if "whatsapp_restrict_to_users" in body:
+                val = body["whatsapp_restrict_to_users"]
+                if not isinstance(val, bool):
+                    return JSONResponse(
+                        {"error": "whatsapp_restrict_to_users must be a boolean"},
+                        status_code=400,
+                    )
+                tenant.settings.whatsapp_restrict_to_users = val
+                changed = True
 
             if changed:
                 await self._tenants.update_tenant(tenant)
