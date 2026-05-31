@@ -412,6 +412,7 @@ def _init_handlers(state: LocalServerState) -> None:
         resolve_tenant_by_channel=state.resolve_tenant_by_channel,
         log_training=state.chat_handlers.log_training,
         enrich_match_params=state.enrich_match,
+        tenant_store=state.tenants,
     )
 
 

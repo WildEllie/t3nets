@@ -92,6 +92,24 @@ def lookup_routing_override(tenant: Any, channel: str, channel_user_id: str) -> 
     return overrides.get(key)
 
 
+def is_authorized_whatsapp_sender(tenant: Any, users: list[Any], sender_id: str) -> bool:
+    """Return True if the sender is authorised to use this tenant's WhatsApp integration.
+
+    Authorization check is skipped when whatsapp_restrict_to_users is False.
+    sender_id must already be normalised (digits-only, no @suffix).
+    """
+    if not getattr(tenant.settings, "whatsapp_restrict_to_users", True):
+        return True  # restriction disabled for this tenant
+    for user in users:
+        identities = getattr(user, "channel_identities", {}) or {}
+        registered = identities.get("whatsapp", "")
+        # normalise stored value the same way as the inbound sender
+        registered_normalised = "".join(ch for ch in registered.split("@")[0] if ch.isdigit())
+        if registered_normalised and registered_normalised == sender_id:
+            return True
+    return False
+
+
 class WebhookHandlers:
     """Teams and Telegram webhook dispatch logic.
 
@@ -154,6 +172,7 @@ class WebhookHandlers:
         use_async_skills: bool = False,
         event_bus: EventBus | None = None,
         pending_store: Any | None = None,
+        tenant_store: Any | None = None,
     ) -> None:
         self._ai = ai
         self._memory = memory
@@ -173,6 +192,7 @@ class WebhookHandlers:
         self._use_async = use_async_skills
         self._event_bus = event_bus
         self._pending_store = pending_store
+        self._tenant_store = tenant_store
 
     # ------------------------------------------------------------------
     # Helpers
@@ -180,6 +200,12 @@ class WebhookHandlers:
 
     def _get_engine(self, tenant_id: str) -> CompiledRuleEngine | None:
         return self._engines.get(tenant_id)
+
+    async def _resolve_tenant_users(self, tenant_id: str) -> list[Any]:
+        try:
+            return await self._tenant_store.list_users(tenant_id)  # type: ignore[union-attr]
+        except Exception:
+            return []
 
     # ------------------------------------------------------------------
     # Teams webhook
@@ -489,6 +515,20 @@ class WebhookHandlers:
         except Exception:
             logger.warning(f"No tenant mapped for WhatsApp {token_hash[:8]}")
             return
+
+        # Security: drop messages from senders not registered as tenant users.
+        if getattr(tenant.settings, "whatsapp_restrict_to_users", True):
+            sender_raw = ""
+            if event.get("messages"):
+                sender_raw = event["messages"][0].get("from", "")
+            sender_norm = normalize_sender_id("whatsapp", sender_raw)
+            users = await self._resolve_tenant_users(tenant.tenant_id)
+            if not is_authorized_whatsapp_sender(tenant, users, sender_norm):
+                logger.warning(
+                    f"WhatsApp: dropping message from unauthorized sender "
+                    f"{sender_norm!r} on tenant {tenant.tenant_id!r}"
+                )
+                return
 
         tenant_id = tenant.tenant_id
         conversation_id = f"wa-{message.conversation_id}"
