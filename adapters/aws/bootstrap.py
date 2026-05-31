@@ -633,6 +633,7 @@ def _init_handlers(state: ServerState) -> None:
         use_async_skills=state.use_async_skills,
         event_bus=state.event_bus,
         pending_store=state.pending_store,
+        tenant_store=state.tenants,
     )
 
 
