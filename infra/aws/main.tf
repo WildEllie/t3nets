@@ -264,7 +264,9 @@ module "cdn" {
 # Lives in the root module because they need outputs from both dns and cdn.
 
 resource "aws_route53_record" "dashboard_alias" {
-  count   = var.root_domain != "" && var.manage_route53_zone ? 1 : 0
+  # Fires whenever a root_domain is configured — the DNS module always resolves
+  # zone_id (either creating the zone or looking up an existing one).
+  count   = var.root_domain != "" ? 1 : 0
   zone_id = module.dns[0].zone_id
   name    = module.dns[0].dashboard_fqdn
   type    = "A"
@@ -277,6 +279,8 @@ resource "aws_route53_record" "dashboard_alias" {
 }
 
 resource "aws_route53_record" "apex_alias" {
+  # Only add an apex alias when we manage the zone (creating a new zone);
+  # for existing zones (manage_zone = false) the apex record is pre-existing.
   count   = var.root_domain != "" && var.manage_route53_zone ? 1 : 0
   zone_id = module.dns[0].zone_id
   name    = module.dns[0].apex_fqdn

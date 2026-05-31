@@ -1,0 +1,187 @@
+// t3nets_practice.proto
+//
+// Language-neutral gRPC contract between the t3nets platform (invoker) and
+// practice skill workers (implementors).
+//
+// Package:  t3nets.practice.v1
+// Syntax:   proto3
+// Transport: gRPC (unary RPCs only)
+//
+// ENCODING — params / secrets / context maps
+// ------------------------------------------
+// All map values are JSON-serialised strings. Scalar params arrive as their
+// JSON form ("42", "true", "\"hello\""). Non-scalar params (lists, objects)
+// are compact JSON strings e.g. "[\"a\",\"b\"]". Workers JSON-parse
+// individual values when they need the structured form.
+//
+// AUTH — platform → worker
+// ------------------------
+// The platform attaches a shared secret as gRPC call metadata:
+//   key:   "x-t3nets-token"
+//   value: <shared secret from Secrets Manager, per-practice>
+// Workers MUST validate this on every Execute call and return
+// UNAUTHENTICATED if it is absent or incorrect.
+
+syntax = "proto3";
+
+package t3nets.practice.v1;
+
+option go_package = "github.com/WildEllie/t3nets/proto/practicev1;practicev1";
+
+// ---------------------------------------------------------------------------
+// Invocation
+// ---------------------------------------------------------------------------
+
+// SkillInvocation is sent by the platform to the worker for every routed
+// request. Workers treat all fields except skill_name as potentially empty.
+message SkillInvocation {
+    // Canonical skill name as declared in the practice manifest.
+    string skill_name = 1;
+
+    // Skill input parameters keyed by parameter name.
+    // Values are JSON-serialised strings — see encoding note above.
+    map<string, string> params = 2;
+
+    // Resolved integration secrets for this skill's requires_integration.
+    // Empty when the skill has no integration requirement.
+    map<string, string> secrets = 3;
+
+    // Tenant that originated the request.
+    string tenant_id = 4;
+
+    // Opaque unique ID for this invocation. Include in log lines and any
+    // artifacts persisted so traces can be correlated across services.
+    string request_id = 5;
+
+    // Runtime context from the platform. Well-known keys:
+    //   "conversation_id"   — opaque ID of the active conversation turn
+    //   "blob_store_prefix" — base key prefix for writing artifacts to the
+    //                         blob store (e.g. S3 prefix for audio files)
+    //   "raw"               — "true" when the user appended --raw; skip AI
+    //                         formatting and return raw data in metadata
+    map<string, string> context = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Result
+// ---------------------------------------------------------------------------
+
+enum ResultType {
+    // Plain text. `text` or `render_prompt` controls how the router
+    // delivers it to the user.
+    RESULT_TYPE_TEXT  = 0;
+
+    // Audio synthesis result. Set `audio_url` (preferred for any file
+    // larger than a few KB) or `audio_b64` (inline for tiny clips).
+    RESULT_TYPE_AUDIO = 1;
+
+    // Skill execution failed. Set `error_message` to a user-facing string.
+    RESULT_TYPE_ERROR = 2;
+}
+
+// SkillResult is returned by the worker after executing a SkillInvocation.
+// Populate fields appropriate to result_type; leave others empty.
+message SkillResult {
+    // Verbatim text to deliver to the user — no AI formatting pass.
+    // Set this when the skill owns its output wording.
+    string text = 1;
+
+    // AI formatter prompt. When `text` is empty and this is set, the router
+    // calls its formatter with this prompt and the data in `metadata`.
+    // Leave empty to fall back to the platform's generic formatting.
+    string render_prompt = 2;
+
+    // Classifies the payload for correct channel-level handling.
+    ResultType result_type = 3;
+
+    // URL of the audio artifact. Preferred over audio_b64 for files > a few KB
+    // (avoids inflating the gRPC response frame). The platform follows this URL
+    // to deliver the audio via the appropriate channel adapter.
+    // Only meaningful when result_type == RESULT_TYPE_AUDIO.
+    string audio_url = 4;
+
+    // Inline audio as raw bytes. Use only for very small clips where the extra
+    // blob-store round-trip latency outweighs frame size.
+    // Only meaningful when result_type == RESULT_TYPE_AUDIO.
+    bytes audio_b64 = 5;
+
+    // MIME sub-type of the audio: "wav", "mp3", or "ogg".
+    string audio_format = 6;
+
+    // User-facing error description.
+    // Only meaningful when result_type == RESULT_TYPE_ERROR.
+    string error_message = 7;
+
+    // Skill-specific structured data (sprint metrics, release notes, etc.).
+    // Values are JSON-serialised strings following the same encoding as params.
+    // The router may forward this to the AI formatter alongside render_prompt.
+    map<string, string> metadata = 8;
+}
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+// SkillWorker is the service every practice gRPC server must implement.
+// The platform locates each skill's endpoint via SkillManifest.worker_endpoint
+// in the PracticeManifest — enabling direct, router-bypassing skill invocation
+// per the per-skill endpoint design.
+service SkillWorker {
+    // Execute invokes a skill and returns its result. Unary — the worker
+    // completes full execution before responding. For long-running synthesis,
+    // workers upload the artifact to blob storage (using blob_store_prefix from
+    // context) and return RESULT_TYPE_AUDIO with an audio_url.
+    rpc Execute(SkillInvocation) returns (SkillResult);
+}
+
+// ---------------------------------------------------------------------------
+// Manifest  (discovery, not invocation)
+// ---------------------------------------------------------------------------
+
+// PracticeManifest is the language-neutral equivalent of practice.yaml.
+// Read by the platform at practice registration time. Workers do not receive
+// or implement this message — it is a deployment / discovery artefact.
+message PracticeManifest {
+    // Short machine-readable name (e.g. "dev-jira"). Unique per tenant.
+    string practice_name = 1;
+
+    // Semantic version of the practice package (e.g. "1.2.0").
+    string version = 2;
+
+    // Metadata for each skill this practice exposes.
+    repeated SkillManifest skills = 3;
+
+    // Audit event type strings this practice may emit.
+    // The platform owns transport and storage; event type names are
+    // practice-declared and treated as opaque labels by the platform.
+    // Example: ["session.created", "transcript.saved", "analysis.generated"]
+    repeated string audit_event_types = 4;
+}
+
+// SkillManifest describes one skill within a practice.
+// worker_endpoint enables direct, router-bypassing invocation — each skill
+// declares its own gRPC endpoint. Multiple skills in one practice may share
+// the same host:port; the server routes internally by SkillInvocation.skill_name.
+message SkillManifest {
+    // Canonical skill name. Unique within the practice.
+    string name = 1;
+
+    // Tool description surfaced to the LLM. Write as a tool-use description:
+    // what the skill does and when to invoke it.
+    string description = 2;
+
+    // JSON Schema string describing input parameters. Must be a valid JSON
+    // Schema object. Reuses the same shape as the `parameters` block in
+    // skill.yaml — existing schemas can be copied without transformation.
+    string parameters = 3;
+
+    // Integration key required for this skill (e.g. "jira", "github").
+    // Empty string means no integration required.
+    string requires_integration = 4;
+
+    // host:port of the gRPC server for this skill's Execute RPCs.
+    // e.g. "my-practice.internal:50051" or a Lambda function URL.
+    // Enables direct router-bypassing invocation without going through
+    // the platform's normal tier 1/2/3 routing.
+    string worker_endpoint = 5;
+}

@@ -39,6 +39,9 @@ variable "manage_zone" {
 
 locals {
   dashboard_fqdn = "${var.dashboard_subdomain}.${var.root_domain}"
+  # When we don't own the zone, look it up by name so we can still write
+  # validation CNAMEs and A-alias records into the existing zone.
+  zone_id = var.manage_zone ? aws_route53_zone.main[0].zone_id : data.aws_route53_zone.existing[0].zone_id
 }
 
 # --- Hosted zone (optional) ---
@@ -46,6 +49,13 @@ locals {
 resource "aws_route53_zone" "main" {
   count = var.manage_zone ? 1 : 0
   name  = var.root_domain
+}
+
+# Look up an existing Route 53 zone when manage_zone = false (zone pre-exists).
+data "aws_route53_zone" "existing" {
+  count        = var.manage_zone ? 0 : 1
+  name         = var.root_domain
+  private_zone = false
 }
 
 # --- ACM certificate (must be in us-east-1 for CloudFront) ---
@@ -61,18 +71,19 @@ resource "aws_acm_certificate" "main" {
   }
 }
 
-# --- DNS validation records (only when we own the zone) ---
+# --- DNS validation records ---
+# Written to the zone regardless of whether we created it or found it.
 
 resource "aws_route53_record" "cert_validation" {
-  for_each = var.manage_zone ? {
+  for_each = {
     for dvo in aws_acm_certificate.main.domain_validation_options : dvo.domain_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
     }
-  } : {}
+  }
 
-  zone_id = aws_route53_zone.main[0].zone_id
+  zone_id = local.zone_id
   name    = each.value.name
   type    = each.value.type
   records = [each.value.record]
@@ -84,7 +95,7 @@ resource "aws_route53_record" "cert_validation" {
 resource "aws_acm_certificate_validation" "main" {
   provider                = aws.cloudfront
   certificate_arn         = aws_acm_certificate.main.arn
-  validation_record_fqdns = var.manage_zone ? [for r in aws_route53_record.cert_validation : r.fqdn] : null
+  validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn]
 
   timeouts {
     create = "30m"
@@ -109,8 +120,8 @@ output "certificate_arn" {
 }
 
 output "zone_id" {
-  description = "Route 53 zone ID (empty when manage_zone = false)"
-  value       = var.manage_zone ? aws_route53_zone.main[0].zone_id : ""
+  description = "Route 53 zone ID (always populated — either created or looked up)"
+  value       = local.zone_id
 }
 
 output "zone_nameservers" {
