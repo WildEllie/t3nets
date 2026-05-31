@@ -30,6 +30,7 @@ _RE_TENANT_INVITE = re.compile(
     r"^/api/admin/tenants/(?P<tenant_id>[^/]+)/invitations/(?P<invite_code>[^/]+)$"
 )
 _RE_TENANT_ACTIVATE = re.compile(r"^/api/admin/tenants/(?P<tenant_id>[^/]+)/activate$")
+_RE_TENANT_USER = re.compile(r"^/api/admin/tenants/(?P<tenant_id>[^/]+)/users/(?P<user_id>[^/]+)$")
 _RE_TRAINING_ITEM = re.compile(r"^/api/admin/training/(?P<example_id>[^/]+)$")
 
 # tenant_id format: 3+ chars, lowercase alphanumeric + hyphens, can't start/end with hyphen.
@@ -90,6 +91,8 @@ class AdminAPI:
             elif method == "PATCH":
                 if m := _RE_TENANT_ACTIVATE.match(path):
                     return await self._activate_tenant(m["tenant_id"])
+                if m := _RE_TENANT_USER.match(path):
+                    return await self._update_user(m["tenant_id"], m["user_id"], body, headers)
                 if m := _RE_TRAINING_ITEM.match(path):
                     if not h_tenant_id:
                         return {"error": "Tenant not found for user"}, 404
@@ -407,6 +410,48 @@ class AdminAPI:
             ],
             "count": len(users),
         }, 200
+
+    async def _update_user(
+        self,
+        tenant_id: str,
+        user_id: str,
+        body: dict[str, Any],
+        headers: dict[str, Any],
+    ) -> tuple[dict[str, Any], int]:
+        """PATCH /api/admin/tenants/{tid}/users/{uid} — update user fields."""
+        from agent.interfaces.tenant_store import UserNotFoundError
+
+        try:
+            user = await self.tenants.get_user(tenant_id, user_id)
+        except UserNotFoundError:
+            return {"error": "User not found"}, 404
+
+        if "display_name" in body:
+            user.display_name = str(body["display_name"])
+
+        if "role" in body:
+            role = body["role"]
+            if role not in ("admin", "member"):
+                return {"error": "role must be 'admin' or 'member'"}, 400
+            user.role = role
+
+        if "channel_identities" in body:
+            incoming = body["channel_identities"]
+            if not isinstance(incoming, dict):
+                return {"error": "channel_identities must be an object"}, 400
+            normalised: dict[str, str] = {}
+            for channel, value in incoming.items():
+                val = str(value)
+                if channel == "whatsapp":
+                    # Strip @s.whatsapp.net suffix (or any @…) and keep digits only.
+                    val = val.split("@")[0]
+                    val = re.sub(r"\D", "", val)
+                normalised[channel] = val
+            user.channel_identities = {**user.channel_identities, **normalised}
+
+        await self.tenants.update_user(user)
+        logger.info(f"Updated user {user_id} in tenant {tenant_id}")
+        return {"user_id": user_id, "updated": True}, 200
 
     # --- Public invitation routes (not under /api/admin) ---
 
