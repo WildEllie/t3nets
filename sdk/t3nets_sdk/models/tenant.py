@@ -41,6 +41,11 @@ class TenantSettings:
     # the raw message text via param-enrichment if it declares a "text" field.
     channel_routing_overrides: dict[str, str] = field(default_factory=dict)
 
+    # Security: when True, inbound WhatsApp messages are silently dropped
+    # unless the sender's phone number matches a TenantUser.channel_identities
+    # entry for this tenant. Default True (secure by default).
+    whatsapp_restrict_to_users: bool = True
+
 
 @dataclass
 class Tenant:

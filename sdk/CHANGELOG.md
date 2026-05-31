@@ -5,6 +5,17 @@ All notable changes to `t3nets-sdk` are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-05-31
+
+### Added
+
+- `TenantSettings.whatsapp_restrict_to_users: bool = True` — when enabled,
+  inbound WhatsApp messages are silently dropped unless the sender's phone
+  number (digits-only) matches a `TenantUser.channel_identities["whatsapp"]`
+  entry in the tenant. Default `True` (secure by default). Additive field;
+  existing serialized settings deserialize unchanged (bool False is not
+  persisted, True is applied as the default).
+
 ## [0.1.2] — 2026-05-19
 
 ### Added
