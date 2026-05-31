@@ -7,6 +7,7 @@ to untrusted callers.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -89,6 +90,9 @@ class LocalAdminAPI:
             elif method == "PATCH":
                 if path.endswith("/activate"):
                     return await self._activate_tenant(path)
+                if re.search(r"/users/[^/]+$", path):
+                    body = await request.json()
+                    return await self._update_user(path, body)
                 return Response(status_code=404)
 
             elif method == "DELETE":
@@ -221,6 +225,48 @@ class LocalAdminAPI:
         invitation.status = "revoked"
         await self.tenants.update_invitation(invitation)
         return JSONResponse({"revoked": True, "invite_code": invite_code})
+
+    async def _update_user(self, path: str, body: dict[str, Any]) -> Response:
+        """PATCH /api/admin/tenants/{tid}/users/{uid} — update user fields."""
+        from agent.interfaces.tenant_store import UserNotFoundError
+
+        parts = path.rstrip("/").split("/")
+        # path: /api/admin/tenants/{tid}/users/{uid}  →  parts[4]=tid, parts[6]=uid
+        tenant_id = parts[4]
+        user_id = parts[6]
+
+        try:
+            user = await self.tenants.get_user(tenant_id, user_id)
+        except UserNotFoundError:
+            return JSONResponse({"error": "User not found"}, status_code=404)
+
+        if "display_name" in body:
+            user.display_name = str(body["display_name"])
+
+        if "role" in body:
+            role = body["role"]
+            if role not in ("admin", "member"):
+                return JSONResponse({"error": "role must be 'admin' or 'member'"}, status_code=400)
+            user.role = role
+
+        if "channel_identities" in body:
+            incoming = body["channel_identities"]
+            if not isinstance(incoming, dict):
+                return JSONResponse(
+                    {"error": "channel_identities must be an object"}, status_code=400
+                )
+            normalised: dict[str, str] = {}
+            for channel, value in incoming.items():
+                val = str(value)
+                if channel == "whatsapp":
+                    val = val.split("@")[0]
+                    val = re.sub(r"\D", "", val)
+                normalised[channel] = val
+            user.channel_identities = {**user.channel_identities, **normalised}
+
+        await self.tenants.update_user(user)
+        logger.info(f"Updated user {user_id} in tenant {tenant_id}")
+        return JSONResponse({"user_id": user_id, "updated": True})
 
     # --- Public invitation routes ---
 
